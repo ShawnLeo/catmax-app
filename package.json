@@ -28,6 +28,7 @@
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "electron-updater": "^6.3.9",
+    "lucide-vue-next": "^1.0.0",
     "radix-vue": "^1.9.17",
     "tailwind-merge": "^3.6.0"
   },
@@ -40,6 +41,7 @@
     "@shikijs/markdown-it": "^1.27.0",
     "@tailwindcss/vite": "^4.0.0",
     "@types/better-sqlite3": "^7.6.11",
+    "@types/markdown-it": "^14.1.2",
     "@types/node": "^22.5.0",
     "@vitejs/plugin-vue": "^5.1.0",
     "@vue/eslint-config-prettier": "^9.0.0",

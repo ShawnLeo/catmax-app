@@ -4,6 +4,7 @@
  */
 import type { BrowserWindow } from 'electron'
 
+import { BackendManager } from './backend/manager'
 import { DatabaseService } from './service/database'
 import { logger } from './service/logger'
 import { SettingsStore } from './service/settings-store'
@@ -14,10 +15,12 @@ class Context {
   readonly windows = new Map<string, BrowserWindow>()
   readonly db: DatabaseService
   readonly settingsStore: SettingsStore
+  readonly backendManager: BackendManager
 
   constructor() {
     this.db = new DatabaseService()
     this.settingsStore = new SettingsStore()
+    this.backendManager = new BackendManager()
   }
 
   registerWindow(id: string, win: BrowserWindow): void {

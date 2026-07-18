@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
 import { DatabaseService } from '@main/service/database'
-import type { WorkspaceRecord } from '@shared/domain'
+import type { MessagePreview, SessionRecord, WorkspaceRecord } from '@shared/domain'
 import { describe, expect, test, beforeEach, afterEach } from 'vitest'
 
 let db: DatabaseService
@@ -93,5 +93,136 @@ describe('DatabaseService', () => {
     db.setState('foo', 'bar')
     db.deleteState('foo')
     expect(db.getState('foo')).toBeNull()
+  })
+})
+
+function makeSession(overrides: Partial<SessionRecord> = {}): SessionRecord {
+  return {
+    id: 'sess-1',
+    backend: 'codex',
+    backendThreadId: 'thr_1',
+    workspaceId: 'ws-1',
+    title: 'test session',
+    model: 'gpt-5',
+    effort: 'medium',
+    permissionMode: 'default',
+    turnCount: 0,
+    createdAt: Date.now(),
+    lastActiveAt: Date.now(),
+    ...overrides,
+  }
+}
+
+describe('DatabaseService Session', () => {
+  test('insertSession + findSessionById', () => {
+    // 先插 workspace（外键约束）
+    db.insertWorkspace(makeWorkspace({ id: 'ws-1', path: '/tmp/test-ws-1' }))
+    const session = makeSession({ workspaceId: 'ws-1' })
+    db.insertSession(session)
+    const found = db.findSessionById(session.id)
+    expect(found).toEqual(session)
+  })
+
+  test('listSessions 按 lastActiveAt 倒序', () => {
+    db.insertWorkspace(makeWorkspace({ id: 'ws-1', path: '/tmp/test-ws-1' }))
+    db.insertSession(
+      makeSession({ id: 's1', backendThreadId: 't1', workspaceId: 'ws-1', lastActiveAt: 1000 }),
+    )
+    db.insertSession(
+      makeSession({ id: 's2', backendThreadId: 't2', workspaceId: 'ws-1', lastActiveAt: 3000 }),
+    )
+    db.insertSession(
+      makeSession({ id: 's3', backendThreadId: 't3', workspaceId: 'ws-1', lastActiveAt: 2000 }),
+    )
+    const list = db.listSessions('ws-1')
+    expect(list.map((s) => s.id)).toEqual(['s2', 's3', 's1'])
+  })
+
+  test('UNIQUE(backend, backend_thread_id)', () => {
+    db.insertWorkspace(makeWorkspace({ id: 'ws-1', path: '/tmp/test-ws-1' }))
+    db.insertSession(makeSession({ id: 's1', backendThreadId: 'dup', workspaceId: 'ws-1' }))
+    expect(() =>
+      db.insertSession(makeSession({ id: 's2', backendThreadId: 'dup', workspaceId: 'ws-1' })),
+    ).toThrow()
+  })
+
+  test('bumpSessionTurn 累加 turnCount + 更新时间', () => {
+    db.insertWorkspace(makeWorkspace({ id: 'ws-1', path: '/tmp/test-ws-1' }))
+    db.insertSession(makeSession({ id: 's1', workspaceId: 'ws-1', turnCount: 0 }))
+    db.bumpSessionTurn('s1', 9999)
+    db.bumpSessionTurn('s1', 10000)
+    const found = db.findSessionById('s1')
+    expect(found?.turnCount).toBe(2)
+    expect(found?.lastActiveAt).toBe(10000)
+  })
+
+  test('bumpSessionTurn COALESCE 保留旧值', () => {
+    db.insertWorkspace(makeWorkspace({ id: 'ws-1', path: '/tmp/test-ws-1' }))
+    db.insertSession(
+      makeSession({ id: 's1', workspaceId: 'ws-1', model: 'gpt-5', effort: 'medium' }),
+    )
+    db.bumpSessionTurn('s1', Date.now(), undefined, undefined, undefined)
+    const found = db.findSessionById('s1')
+    expect(found?.model).toBe('gpt-5')
+    expect(found?.effort).toBe('medium')
+  })
+
+  test('deleteSession', () => {
+    db.insertWorkspace(makeWorkspace({ id: 'ws-1', path: '/tmp/test-ws-1' }))
+    db.insertSession(makeSession({ id: 's1', workspaceId: 'ws-1' }))
+    db.deleteSession('s1')
+    expect(db.findSessionById('s1')).toBeNull()
+  })
+
+  test('删除 workspace 级联删 session（FK CASCADE）', () => {
+    db.insertWorkspace(makeWorkspace({ id: 'ws-1', path: '/tmp/test-ws-1' }))
+    db.insertSession(makeSession({ id: 's1', workspaceId: 'ws-1' }))
+    db.deleteWorkspace('ws-1')
+    expect(db.findSessionById('s1')).toBeNull()
+  })
+})
+
+describe('DatabaseService Message', () => {
+  test('insertMessage + listMessages', () => {
+    db.insertWorkspace(makeWorkspace({ id: 'ws-1', path: '/tmp/test-ws-1' }))
+    db.insertSession(makeSession({ id: 's1', workspaceId: 'ws-1' }))
+    db.insertMessage({
+      id: 'm1',
+      sessionId: 's1',
+      turnId: 'turn-1',
+      role: 'user',
+      textPreview: 'hello',
+      toolCallCount: 0,
+      createdAt: 1000,
+    })
+    db.insertMessage({
+      id: 'm2',
+      sessionId: 's1',
+      turnId: 'turn-1',
+      role: 'assistant',
+      textPreview: 'hi there',
+      toolCallCount: 2,
+      createdAt: 2000,
+    })
+    const list = db.listMessages('s1')
+    expect(list).toHaveLength(2)
+    expect(list[0]!.role).toBe('user')
+    expect(list[1]!.toolCallCount).toBe(2)
+  })
+
+  test('删除 session 级联删 messages', () => {
+    db.insertWorkspace(makeWorkspace({ id: 'ws-1', path: '/tmp/test-ws-1' }))
+    db.insertSession(makeSession({ id: 's1', workspaceId: 'ws-1' }))
+    db.insertMessage({
+      id: 'm1',
+      sessionId: 's1',
+      turnId: 'turn-1',
+      role: 'user',
+      textPreview: 'x',
+      toolCallCount: 0,
+      createdAt: 1,
+    } satisfies MessagePreview)
+    db.deleteSession('s1')
+    expect(db.listMessages('s1')).toHaveLength(0)
   })
 })
