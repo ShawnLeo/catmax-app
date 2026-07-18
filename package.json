@@ -1,0 +1,83 @@
+{
+  "name": "catmax-app",
+  "version": "0.1.0",
+  "description": "Self-hosted code agent client (Electron + Vue3)",
+  "private": true,
+  "author": "shawn",
+  "type": "module",
+  "main": "./out/main/index.js",
+  "scripts": {
+    "dev": "pnpm rebuild:native || true && electron-vite dev",
+    "build": "pnpm rebuild:native || true && electron-vite build",
+    "preview": "electron-vite preview",
+    "start": "electron-vite preview",
+    "typecheck:node": "tsc --noEmit -p tsconfig.node.json --composite false",
+    "typecheck:web": "vue-tsc --noEmit -p tsconfig.web.json --composite false",
+    "typecheck": "pnpm typecheck:node && pnpm typecheck:web",
+    "lint": "eslint . --ext .js,.cjs,.mjs,.ts,.tsx,.vue --cache",
+    "lint:fix": "pnpm lint --fix",
+    "format": "prettier --write \"src/**/*.{ts,vue,js,cjs,mjs,css,md}\"",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "rebuild:native": "electron-rebuild -f -w better-sqlite3",
+    "rebuild:node": "pnpm rebuild better-sqlite3"
+  },
+  "dependencies": {
+    "@vueuse/core": "^14.3.0",
+    "better-sqlite3": "^11.3.0",
+    "class-variance-authority": "^0.7.1",
+    "clsx": "^2.1.1",
+    "electron-updater": "^6.3.9",
+    "radix-vue": "^1.9.17",
+    "tailwind-merge": "^3.6.0"
+  },
+  "devDependencies": {
+    "@electron-toolkit/preload": "^3.0.0",
+    "@electron-toolkit/tsconfig": "^2.0.0",
+    "@electron-toolkit/utils": "^3.0.0",
+    "@electron/rebuild": "^4.2.0",
+    "@rushstack/eslint-patch": "^1.10.4",
+    "@shikijs/markdown-it": "^1.27.0",
+    "@tailwindcss/vite": "^4.0.0",
+    "@types/better-sqlite3": "^7.6.11",
+    "@types/node": "^22.5.0",
+    "@vitejs/plugin-vue": "^5.1.0",
+    "@vue/eslint-config-prettier": "^9.0.0",
+    "@vue/eslint-config-typescript": "^13.0.0",
+    "@vue/test-utils": "^2.4.0",
+    "@vue/tsconfig": "^0.9.1",
+    "autoprefixer": "^10.4.20",
+    "electron": "^31.0.0",
+    "electron-builder": "^24.13.3",
+    "electron-vite": "^2.3.0",
+    "eslint": "^8.57.0",
+    "eslint-plugin-import": "^2.32.0",
+    "eslint-plugin-vue": "^9.28.0",
+    "happy-dom": "^15.0.0",
+    "markdown-it": "^14.1.0",
+    "pinia": "^2.2.0",
+    "postcss": "^8.4.41",
+    "prettier": "^3.3.0",
+    "shadcn-vue": "^0.11.0",
+    "tailwindcss": "^4.0.0",
+    "typescript": "^5.5.0",
+    "unplugin-auto-import": "^0.18.0",
+    "unplugin-vue-components": "^0.27.0",
+    "vite": "^5.4.0",
+    "vitest": "^2.0.0",
+    "vue": "^3.5.0",
+    "vue-router": "^4.4.0",
+    "vue-tsc": "^2.1.0",
+    "zod": "^3.23.0"
+  },
+  "engines": {
+    "node": ">=20.19"
+  },
+  "packageManager": "pnpm@10.11.1",
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "better-sqlite3",
+      "electron"
+    ]
+  }
+}

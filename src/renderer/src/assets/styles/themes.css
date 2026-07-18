@@ -1,0 +1,136 @@
+/**
+ * 主题系统：三层 token 架构
+ *
+ * Layer 1: 原始 token（Reference）—— 色板原料，OKLCH
+ * Layer 2: 语义 token（System）—— 组件唯一能引用的层
+ * Layer 3: 组件 token（Component）—— 按需
+ *
+ * 切换主题 = 改 <html data-theme="...">，CSS 变量自动重算
+ */
+
+/* ============ DARK 主题（Codex 风格：冷调深灰） ============ */
+[data-theme='dark'] {
+  /* Layer 1: 原始色板 */
+  --color-gray-0: oklch(99% 0 0);
+  --color-gray-50: oklch(20% 0.005 250);
+  --color-gray-100: oklch(18% 0.006 250);
+  --color-gray-200: oklch(16% 0.006 250);
+  --color-gray-300: oklch(24% 0.006 250);
+  --color-gray-400: oklch(32% 0.006 250);
+  --color-gray-500: oklch(45% 0.005 250);
+  --color-gray-600: oklch(60% 0.005 250);
+  --color-gray-700: oklch(70% 0.005 250);
+  --color-gray-800: oklch(85% 0.003 250);
+  --color-gray-900: oklch(95% 0.003 250);
+  --color-gray-950: oklch(98% 0 0);
+
+  --color-brand-50: oklch(96% 0.02 250);
+  --color-brand-100: oklch(93% 0.04 250);
+  --color-brand-500: oklch(70% 0.15 250);
+  --color-brand-600: oklch(65% 0.16 250);
+  --color-brand-700: oklch(60% 0.17 250);
+
+  --color-success: oklch(70% 0.15 145);
+  --color-warning: oklch(75% 0.15 85);
+  --color-danger: oklch(65% 0.2 25);
+
+  /* Layer 2: 语义 token */
+  --background: var(--color-gray-100);
+  --foreground: var(--color-gray-900);
+  --card: var(--color-gray-50);
+  --card-foreground: var(--color-gray-900);
+  --popover: var(--color-gray-50);
+  --popover-foreground: var(--color-gray-900);
+  --primary: var(--color-brand-500);
+  --primary-foreground: var(--color-gray-0);
+  --secondary: var(--color-gray-200);
+  --secondary-foreground: var(--color-gray-900);
+  --muted: var(--color-gray-200);
+  --muted-foreground: var(--color-gray-600);
+  --accent: var(--color-brand-500);
+  --accent-foreground: var(--color-gray-0);
+  --destructive: var(--color-danger);
+  --destructive-foreground: var(--color-gray-0);
+  --border: oklch(28% 0.005 250 / 0.7);
+  --input: oklch(28% 0.005 250);
+  --ring: var(--color-brand-500);
+  --radius: 8px;
+
+  /* Layer 3: 组件 token */
+  --sidebar-background: var(--color-gray-50);
+  --sidebar-border: var(--border);
+  --sidebar-foreground: var(--color-gray-800);
+  --composer-background: var(--color-gray-50);
+  --composer-border: var(--border);
+  --code-block-background: oklch(12% 0.005 250);
+  --terminal-background: oklch(10% 0.005 250);
+  --tool-call-background: var(--color-gray-200);
+  --tool-call-border: var(--border);
+}
+
+/* ============ LIGHT 主题（Codex 风格：米白带暖调） ============ */
+[data-theme='light'] {
+  /* Layer 1 */
+  --color-gray-0: oklch(99.5% 0.001 80);
+  --color-gray-50: oklch(99% 0.001 80);
+  --color-gray-100: oklch(97% 0.002 80);
+  --color-gray-200: oklch(94% 0.002 80);
+  --color-gray-300: oklch(90% 0.002 80);
+  --color-gray-400: oklch(80% 0.003 80);
+  --color-gray-500: oklch(60% 0.005 250);
+  --color-gray-600: oklch(50% 0.005 250);
+  --color-gray-700: oklch(40% 0.005 250);
+  --color-gray-800: oklch(26% 0.005 250);
+  --color-gray-900: oklch(20% 0.005 250);
+  --color-gray-950: oklch(12% 0.005 250);
+
+  --color-brand-50: oklch(97% 0.02 250);
+  --color-brand-100: oklch(94% 0.04 250);
+  --color-brand-500: oklch(55% 0.18 250);
+  --color-brand-600: oklch(48% 0.18 250);
+  --color-brand-700: oklch(42% 0.18 250);
+
+  --color-success: oklch(55% 0.16 145);
+  --color-warning: oklch(70% 0.16 85);
+  --color-danger: oklch(55% 0.22 25);
+
+  /* Layer 2 */
+  --background: var(--color-gray-50);
+  --foreground: var(--color-gray-900);
+  --card: var(--color-gray-0);
+  --card-foreground: var(--color-gray-900);
+  --popover: var(--color-gray-0);
+  --popover-foreground: var(--color-gray-900);
+  --primary: var(--color-brand-500);
+  --primary-foreground: var(--color-gray-0);
+  --secondary: var(--color-gray-200);
+  --secondary-foreground: var(--color-gray-900);
+  --muted: var(--color-gray-200);
+  --muted-foreground: var(--color-gray-600);
+  --accent: var(--color-brand-500);
+  --accent-foreground: var(--color-gray-0);
+  --destructive: var(--color-danger);
+  --destructive-foreground: var(--color-gray-0);
+  --border: oklch(90% 0.003 80);
+  --input: oklch(90% 0.003 80);
+  --ring: var(--color-brand-500);
+  --radius: 8px;
+
+  /* Layer 3 */
+  --sidebar-background: var(--color-gray-100);
+  --sidebar-border: var(--border);
+  --sidebar-foreground: var(--color-gray-700);
+  --composer-background: var(--color-gray-0);
+  --composer-border: var(--border);
+  --code-block-background: oklch(96% 0.003 80);
+  --terminal-background: oklch(95% 0.003 80);
+  --tool-call-background: var(--color-gray-100);
+  --tool-call-border: var(--border);
+}
+
+/* ============ 字体（三个独立 token） ============ */
+:root {
+  --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Helvetica Neue', system-ui, sans-serif;
+  --font-chat: 'Inter', -apple-system, BlinkMacSystemFont, 'Helvetica Neue', system-ui, sans-serif;
+  --font-mono: 'JetBrains Mono', 'SF Mono', Menlo, Consolas, monospace;
+}
