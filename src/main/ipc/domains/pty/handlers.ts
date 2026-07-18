@@ -6,8 +6,10 @@ export const createTerminal = async (args: {
   cols?: number
   rows?: number
 }): Promise<TerminalHandle> => {
+  // 空字符串 cwd → 由 PtyManager 用 process.cwd() 兜底
+  const cwd = args.cwd === '' ? undefined : args.cwd
   const inst = ctx.ptyManager.create({
-    cwd: args.cwd,
+    ...(cwd !== undefined && { cwd }),
     ...(args.cols !== undefined && { cols: args.cols }),
     ...(args.rows !== undefined && { rows: args.rows }),
   })

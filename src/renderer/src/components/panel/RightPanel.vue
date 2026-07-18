@@ -23,21 +23,23 @@
     <div class="flex-1 overflow-hidden">
       <GitPanel v-if="activeTab === 'git'" />
       <FileTree v-else-if="activeTab === 'files'" />
+      <TerminalPanel v-else-if="activeTab === 'terminal'" />
     </div>
   </aside>
 </template>
 
 <script setup lang="ts">
 import { useGitStore } from '@renderer/stores/git'
-import { GitBranchIcon, FolderTreeIcon } from 'lucide-vue-next'
+import { FolderTreeIcon, GitBranchIcon, TerminalIcon } from 'lucide-vue-next'
 import { computed, ref } from 'vue'
 
 import FileTree from './FileTree.vue'
 import GitPanel from './GitPanel.vue'
+import TerminalPanel from './TerminalPanel.vue'
 
 defineProps<{ visible: boolean }>()
 
-type TabId = 'git' | 'files'
+type TabId = 'git' | 'files' | 'terminal'
 const activeTab = ref<TabId>('git')
 const gitStore = useGitStore()
 
@@ -52,6 +54,12 @@ const tabs = computed(() => [
     id: 'files' as const,
     label: 'Files',
     icon: FolderTreeIcon,
+    badge: undefined,
+  },
+  {
+    id: 'terminal' as const,
+    label: 'Terminal',
+    icon: TerminalIcon,
     badge: undefined,
   },
 ])
