@@ -1,5 +1,6 @@
 import { app, BrowserWindow } from 'electron'
 
+import { ctx } from './context'
 import { logger } from './service/logger'
 import { createMainWindow } from './window'
 
@@ -8,7 +9,11 @@ const log = logger.domain('main')
 void app.whenReady().then(async () => {
   log.info('app ready', app.getVersion())
 
-  // TODO(Task 8): await ctx.db.migrate()
+  // 初始化持久化
+  ctx.db.migrate()
+  ctx.settingsStore.load()
+  log.info('database + settings ready')
+
   // TODO(Task 13): await registerAllHandlers()
 
   createMainWindow()

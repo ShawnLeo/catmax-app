@@ -1,22 +1,24 @@
 /**
  * 主进程全局上下文。
  * 所有 service、db、manager 单例挂在这里，避免到处 new。
- *
- * 注意：DB 和 manager 在各自 Task 里实现，这里只是占位容器。
- * Task 8/10 会真的实例化 Database。
  */
 import type { BrowserWindow } from 'electron'
 
+import { DatabaseService } from './service/database'
 import { logger } from './service/logger'
+import { SettingsStore } from './service/settings-store'
 
 const log = logger.domain('context')
 
 class Context {
   readonly windows = new Map<string, BrowserWindow>()
+  readonly db: DatabaseService
+  readonly settingsStore: SettingsStore
 
-  // 在 Task 8/10 中填充：
-  // db!: Database
-  // settingsStore!: SettingsStore
+  constructor() {
+    this.db = new DatabaseService()
+    this.settingsStore = new SettingsStore()
+  }
 
   registerWindow(id: string, win: BrowserWindow): void {
     this.windows.set(id, win)
