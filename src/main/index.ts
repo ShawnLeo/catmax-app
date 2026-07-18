@@ -26,6 +26,12 @@ void app.whenReady().then(async () => {
   })
 })
 
+app.on('before-quit', async (event) => {
+  event.preventDefault()
+  await ctx.backendManager.dispose()
+  app.exit(0)
+})
+
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') {
     app.quit()
