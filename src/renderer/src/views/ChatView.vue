@@ -1,5 +1,5 @@
 <template>
-  <div class="h-full flex">
+  <div class="h-full flex relative">
     <!-- 侧边栏 -->
     <Sidebar />
 
@@ -22,6 +22,18 @@
 
       <Composer :disabled="!backendStore.isAvailable" @send="onSend" />
     </div>
+
+    <!-- 右栏切换按钮（floating） -->
+    <button
+      class="absolute top-2 right-2 z-10 p-1.5 rounded-md bg-background/80 hover:bg-muted text-muted-foreground hover:text-foreground"
+      title="切换右栏"
+      @click="rightPanelVisible = !rightPanelVisible"
+    >
+      <PanelRightIcon class="w-4 h-4" />
+    </button>
+
+    <!-- 右栏面板 -->
+    <RightPanel :visible="rightPanelVisible" />
   </div>
 </template>
 
@@ -30,15 +42,18 @@ import ApprovalDialog from '@renderer/components/chat/ApprovalDialog.vue'
 import Composer from '@renderer/components/chat/Composer.vue'
 import MessageList from '@renderer/components/chat/MessageList.vue'
 import RuntimeConfigBar from '@renderer/components/chat/RuntimeConfigBar.vue'
+import RightPanel from '@renderer/components/panel/RightPanel.vue'
 import Sidebar from '@renderer/components/sidebar/Sidebar.vue'
 import { useStreamMessage } from '@renderer/composables/useStreamMessage'
 import { randomUUID } from '@renderer/lib/utils'
 import { useBackendStore } from '@renderer/stores/backend'
+import { useGitStore } from '@renderer/stores/git'
 import { useMessageStore } from '@renderer/stores/message'
 import { useSessionStore } from '@renderer/stores/session'
 import { useWorkspaceStore } from '@renderer/stores/workspace'
 import type { EffortLevel, PermissionMode } from '@shared/backend/types'
-import { ref, onMounted, watch } from 'vue'
+import { PanelRightIcon } from 'lucide-vue-next'
+import { onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 
 const router = useRouter()
@@ -46,7 +61,30 @@ const workspaceStore = useWorkspaceStore()
 const backendStore = useBackendStore()
 const sessionStore = useSessionStore()
 const messageStore = useMessageStore()
+const gitStore = useGitStore()
 useStreamMessage()
+
+const rightPanelVisible = ref(false)
+
+// 工作区切换时刷新 git status
+watch(
+  () => workspaceStore.currentWorkspace?.id,
+  async (id) => {
+    if (id && workspaceStore.currentWorkspace) {
+      await gitStore.refresh(workspaceStore.currentWorkspace.path)
+    } else {
+      gitStore.reset()
+    }
+  },
+  { immediate: true },
+)
+
+// 右栏首次打开时加载 git
+watch(rightPanelVisible, async (visible) => {
+  if (visible && workspaceStore.currentWorkspace && !gitStore.status.isRepo) {
+    await gitStore.refresh(workspaceStore.currentWorkspace.path)
+  }
+})
 
 interface RuntimeConfig {
   model: string | null
