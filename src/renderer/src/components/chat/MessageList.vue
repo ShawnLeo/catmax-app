@@ -1,14 +1,28 @@
 <template>
-  <div class="h-full overflow-y-auto">
+  <div ref="container" class="h-full overflow-y-auto">
     <div class="max-w-3xl mx-auto px-6 py-4 flex flex-col gap-6">
-      <!-- Task 15 will populate message rendering -->
+      <MessageItem v-for="message in messageStore.messages" :key="message.id" :message="message" />
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
-/**
- * Stub: replaced by full implementation in Task 15.
- * Renders the message list once MessageItem is added.
- */
+import { useMessageStore } from '@renderer/stores/message'
+import { ref, watch, nextTick } from 'vue'
+
+import MessageItem from './MessageItem.vue'
+
+const messageStore = useMessageStore()
+const container = ref<HTMLElement | null>(null)
+
+// 流式输出时自动滚到底部
+watch(
+  () => messageStore.messages.length,
+  async () => {
+    await nextTick()
+    if (container.value) {
+      container.value.scrollTop = container.value.scrollHeight
+    }
+  },
+)
 </script>
