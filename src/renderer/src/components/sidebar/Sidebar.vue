@@ -1,5 +1,5 @@
 <template>
-  <aside class="w-60 flex flex-col bg-sidebar-background border-r border-sidebar-border">
+  <aside class="w-60 flex flex-col bg-sidebar border-r border-sidebar-border">
     <!-- 顶部：工作区切换 -->
     <WorkspaceSwitcher />
 

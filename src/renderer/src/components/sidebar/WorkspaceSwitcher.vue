@@ -1,5 +1,5 @@
 <template>
-  <div class="p-2 border-b border-sidebar-border">
+  <div class="p-2 border-b border-sidebar-border relative">
     <button
       class="w-full flex items-center gap-2 px-2 py-1.5 rounded-md hover:bg-muted text-left"
       @click="showPicker = !showPicker"
