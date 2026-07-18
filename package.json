@@ -7,8 +7,8 @@
   "type": "module",
   "main": "./out/main/index.js",
   "scripts": {
-    "dev": "pnpm rebuild:native && electron-vite dev",
-    "build": "pnpm rebuild:native && electron-vite build",
+    "dev": "pnpm rebuild:native || true && electron-vite dev",
+    "build": "pnpm rebuild:native || true && electron-vite build",
     "preview": "electron-vite preview",
     "start": "electron-vite preview",
     "typecheck:node": "tsc --noEmit -p tsconfig.node.json --composite false",
@@ -24,7 +24,10 @@
   },
   "dependencies": {
     "better-sqlite3": "^11.3.0",
-    "electron-updater": "^6.3.9"
+    "class-variance-authority": "^0.7.1",
+    "clsx": "^2.1.1",
+    "electron-updater": "^6.3.9",
+    "tailwind-merge": "^3.6.0"
   },
   "devDependencies": {
     "@electron-toolkit/preload": "^3.0.0",
