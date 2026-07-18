@@ -74,3 +74,6 @@ export const DEFAULT_THEME_MODE = 'system' as const
 export const DEFAULT_FONT_SIZE = 14
 export const DEFAULT_CHAT_FONT_SIZE = 15
 export const DEFAULT_CODE_FONT_SIZE = 13
+
+/** 默认编辑器 */
+export const DEFAULT_EDITOR = 'vscode' as const satisfies EditorId
