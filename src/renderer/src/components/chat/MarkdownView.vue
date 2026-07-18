@@ -24,6 +24,8 @@ watch(
 </script>
 
 <style scoped>
+@reference "../../assets/styles/main.css";
+
 .markdown-body :deep(p) {
   margin: 0 0 0.5em;
 }
