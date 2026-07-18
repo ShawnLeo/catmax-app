@@ -18,6 +18,9 @@ importers:
       '@electron-toolkit/preload':
         specifier: ^3.0.0
         version: 3.0.2(electron@31.7.7)
+      '@electron-toolkit/tsconfig':
+        specifier: ^2.0.0
+        version: 2.0.0(@types/node@22.20.1)
       '@electron-toolkit/utils':
         specifier: ^3.0.0
         version: 3.0.0(electron@31.7.7)
@@ -48,6 +51,9 @@ importers:
       '@vue/test-utils':
         specifier: ^2.4.0
         version: 2.4.11(@vue/compiler-dom@3.5.40)(@vue/server-renderer@3.5.40)(vue@3.5.40(typescript@5.9.3))
+      '@vue/tsconfig':
+        specifier: ^0.9.1
+        version: 0.9.1(typescript@5.9.3)(vue@3.5.40(typescript@5.9.3))
       autoprefixer:
         specifier: ^10.4.20
         version: 10.5.4(postcss@8.5.19)
@@ -271,6 +277,11 @@ packages:
     resolution: {integrity: sha512-TWWPToXd8qPRfSXwzf5KVhpXMfONaUuRAZJHsKthKgZR/+LqX1dZVSSClQ8OTAEduvLGdecljCsoT2jSshfoUg==}
     peerDependencies:
       electron: '>=13.0.0'
+
+  '@electron-toolkit/tsconfig@2.0.0':
+    resolution: {integrity: sha512-AdPsP770WhW7b260h13SHMdmjEEHJL6xFtgi3jwgdsSQbJOkJLeNnnpZW9qxTPCvmRI6vmdzWz5K3gibFS6SNg==}
+    peerDependencies:
+      '@types/node': '*'
 
   '@electron-toolkit/utils@3.0.0':
     resolution: {integrity: sha512-GaXHDhiT7KCvMJjXdp/QqpYinq69T/Pdl49Z1XLf8mKGf63dnsODMWyrmIjEQ0z/vG7dO8qF3fvmI6Eb2lUNZA==}
@@ -1054,6 +1065,17 @@ packages:
       vue: 3.x
     peerDependenciesMeta:
       '@vue/server-renderer':
+        optional: true
+
+  '@vue/tsconfig@0.9.1':
+    resolution: {integrity: sha512-buvjm+9NzLCJL29KY1j1991YYJ5e6275OiK+G4jtmfIb+z4POywbdm0wXusT9adVWqe0xqg70TbI7+mRx4uU9w==}
+    peerDependencies:
+      typescript: '>= 5.8'
+      vue: ^3.4.0
+    peerDependenciesMeta:
+      typescript:
+        optional: true
+      vue:
         optional: true
 
   '@vuedx/template-ast-types@0.7.1':
@@ -3715,6 +3737,10 @@ snapshots:
     dependencies:
       electron: 31.7.7
 
+  '@electron-toolkit/tsconfig@2.0.0(@types/node@22.20.1)':
+    dependencies:
+      '@types/node': 22.20.1
+
   '@electron-toolkit/utils@3.0.0(electron@31.7.7)':
     dependencies:
       electron: 31.7.7
@@ -4512,6 +4538,11 @@ snapshots:
       vue-component-type-helpers: 3.3.7
     optionalDependencies:
       '@vue/server-renderer': 3.5.40
+
+  '@vue/tsconfig@0.9.1(typescript@5.9.3)(vue@3.5.40(typescript@5.9.3))':
+    optionalDependencies:
+      typescript: 5.9.3
+      vue: 3.5.40(typescript@5.9.3)
 
   '@vuedx/template-ast-types@0.7.1':
     dependencies:
