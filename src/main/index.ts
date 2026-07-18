@@ -1,6 +1,7 @@
 import { app, BrowserWindow } from 'electron'
 
 import { ctx } from './context'
+import { registerAllHandlers } from './ipc/register'
 import { logger } from './service/logger'
 import { createMainWindow } from './window'
 
@@ -14,7 +15,7 @@ void app.whenReady().then(async () => {
   ctx.settingsStore.load()
   log.info('database + settings ready')
 
-  // TODO(Task 13): await registerAllHandlers()
+  registerAllHandlers()
 
   createMainWindow()
 
