@@ -2,6 +2,7 @@ import { IPC, PUSH } from '@shared/constants'
 import type { BackendHandlers, BackendPushEvents } from '@shared/ipc/backend'
 import type { FsHandlers } from '@shared/ipc/fs'
 import type { GitHandlers } from '@shared/ipc/git'
+import type { PtyHandlers, PtyPushEvents } from '@shared/ipc/pty'
 import type { SessionHandlers } from '@shared/ipc/session'
 import type { SettingsHandlers } from '@shared/ipc/settings'
 import type { SystemHandlers } from '@shared/ipc/system'
@@ -70,6 +71,16 @@ export const api = {
     readFilePreview: requestMain<FsHandlers, 'fs.readFilePreview'>(IPC.FS_READ_FILE_PREVIEW),
     openInEditor: requestMain<FsHandlers, 'fs.openInEditor'>(IPC.FS_OPEN_IN_EDITOR),
     pathExists: requestMain<FsHandlers, 'fs.pathExists'>(IPC.FS_PATH_EXISTS),
+  },
+  pty: {
+    create: requestMain<PtyHandlers, 'pty.create'>(IPC.PTY_CREATE),
+    write: requestMain<PtyHandlers, 'pty.write'>(IPC.PTY_WRITE),
+    resize: requestMain<PtyHandlers, 'pty.resize'>(IPC.PTY_RESIZE),
+    kill: requestMain<PtyHandlers, 'pty.kill'>(IPC.PTY_KILL),
+    onData: (cb: (payload: PtyPushEvents['pty:data']) => void) =>
+      subscribeToMainEvent<PtyPushEvents, 'pty:data'>(PUSH.PTY_DATA, cb),
+    onExit: (cb: (payload: PtyPushEvents['pty:exit']) => void) =>
+      subscribeToMainEvent<PtyPushEvents, 'pty:exit'>(PUSH.PTY_EXIT, cb),
   },
 }
 

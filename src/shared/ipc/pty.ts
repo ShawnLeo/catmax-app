@@ -21,7 +21,7 @@ export type PtyHandlers = {
 }
 
 /** 推送事件 payload */
-export interface PtyPushEvents {
+export type PtyPushEvents = {
   'pty:data': { id: string; data: string }
   'pty:exit': { id: string; exitCode: number }
 }
