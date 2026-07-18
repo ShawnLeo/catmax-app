@@ -7,8 +7,8 @@
   "type": "module",
   "main": "./out/main/index.js",
   "scripts": {
-    "dev": "electron-vite dev",
-    "build": "electron-vite build",
+    "dev": "pnpm rebuild:native && electron-vite dev",
+    "build": "pnpm rebuild:native && electron-vite build",
     "preview": "electron-vite preview",
     "start": "electron-vite preview",
     "typecheck:node": "tsc --noEmit -p tsconfig.node.json --composite false",
@@ -20,7 +20,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "rebuild:native": "electron-rebuild -f -w better-sqlite3",
-    "postinstall": "electron-rebuild -f -w better-sqlite3"
+    "rebuild:node": "pnpm rebuild better-sqlite3"
   },
   "dependencies": {
     "better-sqlite3": "^11.3.0",
