@@ -48,6 +48,11 @@ export const IPC = {
   FS_READ_FILE_PREVIEW: 'fs.readFilePreview',
   FS_OPEN_IN_EDITOR: 'fs.openInEditor',
   FS_PATH_EXISTS: 'fs.pathExists',
+  // pty
+  PTY_CREATE: 'pty.create',
+  PTY_WRITE: 'pty.write',
+  PTY_RESIZE: 'pty.resize',
+  PTY_KILL: 'pty.kill',
 } as const
 
 /** 推送事件名 */
