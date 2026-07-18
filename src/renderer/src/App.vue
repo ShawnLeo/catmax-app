@@ -1,22 +1,21 @@
 <template>
-  <div class="h-full flex flex-col items-center justify-center gap-4">
-    <h1 class="text-3xl font-bold text-foreground">catmax app</h1>
-    <p class="text-muted-foreground">shadcn-vue works</p>
-
-    <div class="flex gap-2">
-      <Button @click="setTheme('dark')">Dark</Button>
-      <Button variant="secondary" @click="setTheme('light')">Light</Button>
-    </div>
-
-    <Input placeholder="test input" class="max-w-xs" />
+  <div class="h-full">
+    <RouterView />
   </div>
 </template>
 
 <script setup lang="ts">
-import { Button } from '@renderer/components/ui/button'
-import { Input } from '@renderer/components/ui/input'
+import { useTheme } from '@renderer/composables/useTheme'
+import { useSettingsStore } from '@renderer/stores/settings'
+import { onMounted } from 'vue'
 
-function setTheme(theme: 'dark' | 'light'): void {
-  document.documentElement.setAttribute('data-theme', theme)
-}
+const settings = useSettingsStore()
+const { apply } = useTheme()
+
+onMounted(async () => {
+  await settings.load()
+  if (settings.settings) {
+    apply(settings.settings.theme.mode)
+  }
+})
 </script>
