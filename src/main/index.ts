@@ -1,40 +1,22 @@
-import { join } from 'node:path'
+import { app, BrowserWindow } from 'electron'
 
-import { app, shell, BrowserWindow } from 'electron'
+import { logger } from './service/logger'
+import { createMainWindow } from './window'
 
-function createWindow(): void {
-  const mainWindow = new BrowserWindow({
-    width: 1200,
-    height: 800,
-    show: false,
-    autoHideMenuBar: true,
-    webPreferences: {
-      preload: join(__dirname, '../preload/index.js'),
-      sandbox: false,
-    },
-  })
+const log = logger.domain('main')
 
-  mainWindow.on('ready-to-show', () => {
-    mainWindow.show()
-  })
+void app.whenReady().then(async () => {
+  log.info('app ready', app.getVersion())
 
-  mainWindow.webContents.setWindowOpenHandler((details) => {
-    void shell.openExternal(details.url)
-    return { action: 'deny' }
-  })
+  // TODO(Task 8): await ctx.db.migrate()
+  // TODO(Task 13): await registerAllHandlers()
 
-  if (process.env['ELECTRON_RENDERER_URL'] !== undefined) {
-    void mainWindow.loadURL(process.env['ELECTRON_RENDERER_URL'])
-  } else {
-    void mainWindow.loadFile(join(__dirname, '../renderer/index.html'))
-  }
-}
-
-void app.whenReady().then(() => {
-  createWindow()
+  createMainWindow()
 
   app.on('activate', () => {
-    if (BrowserWindow.getAllWindows().length === 0) createWindow()
+    if (BrowserWindow.getAllWindows().length === 0) {
+      createMainWindow()
+    }
   })
 })
 
@@ -42,4 +24,14 @@ app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') {
     app.quit()
   }
+})
+
+// 安全：阻止未知协议导航
+app.on('web-contents-created', (_event, contents) => {
+  contents.on('will-navigate', (event, url) => {
+    const parsed = new URL(url)
+    if (!parsed.protocol.startsWith('http') && parsed.protocol !== 'file:') {
+      event.preventDefault()
+    }
+  })
 })
