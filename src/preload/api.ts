@@ -1,9 +1,11 @@
-import { IPC } from '@shared/constants'
+import { IPC, PUSH } from '@shared/constants'
+import type { BackendHandlers, BackendPushEvents } from '@shared/ipc/backend'
+import type { SessionHandlers } from '@shared/ipc/session'
 import type { SettingsHandlers } from '@shared/ipc/settings'
 import type { SystemHandlers } from '@shared/ipc/system'
 import type { WorkspaceHandlers } from '@shared/ipc/workspace'
 
-import { requestMain } from '../main/ipc/typed'
+import { requestMain, subscribeToMainEvent } from '../main/ipc/typed'
 
 /**
  * 暴露给渲染层的 api 对象。
@@ -27,6 +29,36 @@ export const api = {
     platformInfo: requestMain<SystemHandlers, 'system.platformInfo'>(IPC.SYSTEM_PLATFORM_INFO),
     openDialog: requestMain<SystemHandlers, 'system.openDialog'>(IPC.SYSTEM_OPEN_DIALOG),
     openExternal: requestMain<SystemHandlers, 'system.openExternal'>(IPC.SYSTEM_OPEN_EXTERNAL),
+  },
+  backend: {
+    list: requestMain<BackendHandlers, 'backend.list'>(IPC.BACKEND_LIST),
+    current: requestMain<BackendHandlers, 'backend.current'>(IPC.BACKEND_CURRENT),
+    switch: requestMain<BackendHandlers, 'backend.switch'>(IPC.BACKEND_SWITCH),
+    listModels: requestMain<BackendHandlers, 'backend.listModels'>(IPC.BACKEND_LIST_MODELS),
+    startTurn: requestMain<BackendHandlers, 'backend.startTurn'>(IPC.BACKEND_START_TURN),
+    interruptTurn: requestMain<BackendHandlers, 'backend.interruptTurn'>(
+      IPC.BACKEND_INTERRUPT_TURN,
+    ),
+    respondApproval: requestMain<BackendHandlers, 'backend.respondApproval'>(
+      IPC.BACKEND_RESPOND_APPROVAL,
+    ),
+    /** 订阅 turnEvent 推送 */
+    onTurnEvent: (cb: (payload: BackendPushEvents['backend:turnEvent']) => void) =>
+      subscribeToMainEvent<BackendPushEvents, 'backend:turnEvent'>(PUSH.BACKEND_TURN_EVENT, cb),
+    onSwitched: (cb: (payload: BackendPushEvents['backend:switched']) => void) =>
+      subscribeToMainEvent<BackendPushEvents, 'backend:switched'>(PUSH.BACKEND_SWITCHED, cb),
+    onStatusChanged: (cb: (payload: BackendPushEvents['backend:statusChanged']) => void) =>
+      subscribeToMainEvent<BackendPushEvents, 'backend:statusChanged'>(
+        PUSH.BACKEND_STATUS_CHANGED,
+        cb,
+      ),
+  },
+  session: {
+    list: requestMain<SessionHandlers, 'session.list'>(IPC.SESSION_LIST),
+    create: requestMain<SessionHandlers, 'session.create'>(IPC.SESSION_CREATE),
+    remove: requestMain<SessionHandlers, 'session.remove'>(IPC.SESSION_REMOVE),
+    reconcile: requestMain<SessionHandlers, 'session.reconcile'>(IPC.SESSION_RECONCILE),
+    detail: requestMain<SessionHandlers, 'session.detail'>(IPC.SESSION_DETAIL),
   },
 }
 

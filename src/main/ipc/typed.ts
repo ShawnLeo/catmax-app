@@ -72,3 +72,14 @@ export function onMainEvent<P extends PushEventMap, K extends keyof P & string>(
   ipcRenderer.on(channel, listener)
   return () => ipcRenderer.removeListener(channel, listener as never)
 }
+
+/**
+ * preload 友好的事件订阅：返回一个函数，调用后取消订阅。
+ * 用于 preload api 把主进程推送事件转给渲染层。
+ */
+export function subscribeToMainEvent<P extends PushEventMap, K extends keyof P & string>(
+  channel: K,
+  callback: (payload: P[K]) => void,
+): () => void {
+  return onMainEvent<P, K>(channel, callback)
+}
