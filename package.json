@@ -21,7 +21,6 @@
     "test:watch": "vitest",
     "rebuild:native": "electron-rebuild -f -w better-sqlite3",
     "postinstall": "electron-rebuild -f -w better-sqlite3"
-    "test:watch": "vitest"
   },
   "dependencies": {
     "better-sqlite3": "^11.3.0",
