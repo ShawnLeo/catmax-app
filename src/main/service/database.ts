@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-import type { WorkspaceRecord } from '@shared/domain'
+import type { MessagePreview, SessionRecord, WorkspaceRecord } from '@shared/domain'
 import Database from 'better-sqlite3'
 import { app } from 'electron'
 
@@ -140,6 +140,110 @@ export class DatabaseService {
     this.db.prepare('DELETE FROM app_state WHERE key = ?').run(key)
   }
 
+  // ===== Session =====
+
+  listSessions(workspaceId: string): SessionRecord[] {
+    const rows = this.db
+      .prepare('SELECT * FROM sessions WHERE workspace_id = ? ORDER BY last_active_at DESC')
+      .all(workspaceId) as SessionRow[]
+    return rows.map(rowToSessionRecord)
+  }
+
+  findSessionById(id: string): SessionRecord | null {
+    const row = this.db.prepare('SELECT * FROM sessions WHERE id = ?').get(id) as
+      SessionRow | undefined
+    return row ? rowToSessionRecord(row) : null
+  }
+
+  findSessionByBackendThreadId(backend: string, backendThreadId: string): SessionRecord | null {
+    const row = this.db
+      .prepare('SELECT * FROM sessions WHERE backend = ? AND backend_thread_id = ?')
+      .get(backend, backendThreadId) as SessionRow | undefined
+    return row ? rowToSessionRecord(row) : null
+  }
+
+  insertSession(record: SessionRecord): SessionRecord {
+    this.db
+      .prepare(
+        `INSERT INTO sessions (id, backend, backend_thread_id, workspace_id, title, model, effort, permission_mode, turn_count, created_at, last_active_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        record.id,
+        record.backend,
+        record.backendThreadId,
+        record.workspaceId,
+        record.title,
+        record.model,
+        record.effort,
+        record.permissionMode,
+        record.turnCount,
+        record.createdAt,
+        record.lastActiveAt,
+      )
+    return record
+  }
+
+  updateSessionTitle(id: string, title: string): void {
+    this.db.prepare('UPDATE sessions SET title = ? WHERE id = ?').run(title, id)
+  }
+
+  bumpSessionTurn(
+    id: string,
+    lastActiveAt: number,
+    model?: string,
+    effort?: string,
+    permissionMode?: string,
+  ): void {
+    this.db
+      .prepare(
+        `UPDATE sessions
+         SET turn_count = turn_count + 1,
+             last_active_at = ?,
+             model = COALESCE(?, model),
+             effort = COALESCE(?, effort),
+             permission_mode = COALESCE(?, permission_mode)
+         WHERE id = ?`,
+      )
+      .run(lastActiveAt, model ?? null, effort ?? null, permissionMode ?? null, id)
+  }
+
+  deleteSession(id: string): void {
+    this.db.prepare('DELETE FROM sessions WHERE id = ?').run(id)
+  }
+
+  /** 标记 stale（后端已删除但 App 还有索引）—— MVP 不真删，留着让用户决定 */
+  markSessionStale(_id: string): void {
+    // 暂时不实现，留给 Plan 3+
+  }
+
+  // ===== Message =====
+
+  listMessages(sessionId: string): MessagePreview[] {
+    const rows = this.db
+      .prepare('SELECT * FROM messages WHERE session_id = ? ORDER BY created_at')
+      .all(sessionId) as MessageRow[]
+    return rows.map(rowToMessagePreview)
+  }
+
+  insertMessage(record: MessagePreview): MessagePreview {
+    this.db
+      .prepare(
+        `INSERT INTO messages (id, session_id, turn_id, role, text_preview, tool_call_count, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        record.id,
+        record.sessionId,
+        record.turnId,
+        record.role,
+        record.textPreview,
+        record.toolCallCount,
+        record.createdAt,
+      )
+    return record
+  }
+
   close(): void {
     this.db.close()
     log.info('closed')
@@ -147,3 +251,55 @@ export class DatabaseService {
 }
 
 export type Database = DatabaseService
+
+interface SessionRow {
+  id: string
+  backend: string
+  backend_thread_id: string
+  workspace_id: string
+  title: string | null
+  model: string | null
+  effort: string | null
+  permission_mode: string | null
+  turn_count: number
+  created_at: number
+  last_active_at: number
+}
+
+interface MessageRow {
+  id: string
+  session_id: string
+  turn_id: string
+  role: string
+  text_preview: string
+  tool_call_count: number
+  created_at: number
+}
+
+function rowToSessionRecord(row: SessionRow): SessionRecord {
+  return {
+    id: row.id,
+    backend: row.backend as SessionRecord['backend'],
+    backendThreadId: row.backend_thread_id,
+    workspaceId: row.workspace_id,
+    title: row.title,
+    model: row.model,
+    effort: row.effort as SessionRecord['effort'],
+    permissionMode: row.permission_mode as SessionRecord['permissionMode'],
+    turnCount: row.turn_count,
+    createdAt: row.created_at,
+    lastActiveAt: row.last_active_at,
+  }
+}
+
+function rowToMessagePreview(row: MessageRow): MessagePreview {
+  return {
+    id: row.id,
+    sessionId: row.session_id,
+    turnId: row.turn_id,
+    role: row.role as MessagePreview['role'],
+    textPreview: row.text_preview,
+    toolCallCount: row.tool_call_count,
+    createdAt: row.created_at,
+  }
+}
