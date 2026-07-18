@@ -1,5 +1,7 @@
 import { logger } from '../service/logger'
 
+import { registerBackendHandlers } from './domains/backend'
+import { registerSessionHandlers } from './domains/session'
 import { registerSettingsHandlers } from './domains/settings'
 import { registerSystemHandlers } from './domains/system'
 import { registerWorkspaceHandlers } from './domains/workspace'
@@ -13,5 +15,7 @@ export async function registerAllHandlers(): Promise<void> {
   registerWorkspaceHandlers()
   registerSettingsHandlers()
   registerSystemHandlers()
+  registerBackendHandlers()
+  registerSessionHandlers()
   log.info('all handlers registered')
 }
