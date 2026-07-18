@@ -7,6 +7,7 @@ import type { BrowserWindow } from 'electron'
 import { BackendManager } from './backend/manager'
 import { DatabaseService } from './service/database'
 import { logger } from './service/logger'
+import { PtyManager } from './service/pty-manager'
 import { SettingsStore } from './service/settings-store'
 
 const log = logger.domain('context')
@@ -16,11 +17,20 @@ class Context {
   readonly db: DatabaseService
   readonly settingsStore: SettingsStore
   readonly backendManager: BackendManager
+  readonly ptyManager: PtyManager
 
   constructor() {
     this.db = new DatabaseService()
     this.settingsStore = new SettingsStore()
     this.backendManager = new BackendManager()
+    this.ptyManager = new PtyManager({
+      onData: (id, data) => {
+        this.broadcast('pty:data', { id, data })
+      },
+      onExit: (id, exitCode) => {
+        this.broadcast('pty:exit', { id, exitCode })
+      },
+    })
   }
 
   registerWindow(id: string, win: BrowserWindow): void {

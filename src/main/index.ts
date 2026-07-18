@@ -29,6 +29,7 @@ void app.whenReady().then(async () => {
 app.on('before-quit', async (event) => {
   event.preventDefault()
   await ctx.backendManager.dispose()
+  ctx.ptyManager.killAll()
   app.exit(0)
 })
 

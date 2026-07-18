@@ -3,6 +3,7 @@ import { logger } from '../service/logger'
 import { registerBackendHandlers } from './domains/backend'
 import { registerFsHandlers } from './domains/fs'
 import { registerGitHandlers } from './domains/git'
+import { registerPtyHandlers } from './domains/pty'
 import { registerSessionHandlers } from './domains/session'
 import { registerSettingsHandlers } from './domains/settings'
 import { registerSystemHandlers } from './domains/system'
@@ -21,5 +22,6 @@ export async function registerAllHandlers(): Promise<void> {
   registerSessionHandlers()
   registerGitHandlers()
   registerFsHandlers()
+  registerPtyHandlers()
   log.info('all handlers registered')
 }
