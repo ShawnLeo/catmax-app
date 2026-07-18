@@ -1,9 +1,26 @@
+import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 
 import { is } from '@electron-toolkit/utils'
 import { BrowserWindow, shell } from 'electron'
 
 import { ctx } from './context'
+
+/**
+ * 解析 preload 产物路径。
+ *
+ * electron-vite 在 package.json type: "module" 时输出 .mjs，否则输出 .js。
+ * 两者都支持，避免 preload 加载失败导致 window.api 为 undefined。
+ */
+function resolvePreloadPath(): string {
+  const dir = join(__dirname, '../preload')
+  for (const filename of ['index.mjs', 'index.js']) {
+    const candidate = join(dir, filename)
+    if (existsSync(candidate)) return candidate
+  }
+  // fallback（让 electron 报具体错误）
+  return join(dir, 'index.js')
+}
 
 export function createMainWindow(): BrowserWindow {
   const win = new BrowserWindow({
@@ -16,7 +33,7 @@ export function createMainWindow(): BrowserWindow {
     title: 'catmax',
     backgroundColor: '#18181b', // 与 dark theme --background 接近，避免白闪
     webPreferences: {
-      preload: join(__dirname, '../preload/index.js'),
+      preload: resolvePreloadPath(),
       sandbox: false,
       contextIsolation: true,
       nodeIntegration: false,

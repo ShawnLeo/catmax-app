@@ -1,4 +1,5 @@
-import type { PermissionMode } from '@shared/backend/types'
+import type { EffortLevel, PermissionMode } from '@shared/backend/types'
+import type { BackendId } from '@shared/constants'
 import type { SessionView } from '@shared/domain'
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
@@ -10,6 +11,17 @@ export const useSessionStore = defineStore('session', () => {
 
   const currentSession = computed(() => sessions.value.find((s) => s.id === currentSessionId.value))
 
+  /** 按 backend 分组（当前后端 = continuable，其他 = readonly） */
+  const sessionsByBackend = computed(() => {
+    const continuable: SessionView[] = []
+    const readonly: SessionView[] = []
+    for (const s of sessions.value) {
+      if (s.continuable) continuable.push(s)
+      else readonly.push(s)
+    }
+    return { continuable, readonly }
+  })
+
   async function load(workspaceId: string): Promise<void> {
     loading.value = true
     try {
@@ -19,16 +31,24 @@ export const useSessionStore = defineStore('session', () => {
     }
   }
 
+  /** 与后端对账（启动时、切工作区时、切后端时调） */
+  async function reconcile(workspaceId: string): Promise<void> {
+    const { added, removed } = await window.api.session.reconcile({ workspaceId })
+    if (added.length > 0 || removed.length > 0) {
+      await load(workspaceId)
+    }
+  }
+
   async function create(args: {
     workspaceId: string
     cwd: string
+    backend?: BackendId
     model?: string
-    effort?: 'low' | 'medium' | 'high' | 'xhigh' | 'max'
+    effort?: EffortLevel
     permissionMode?: PermissionMode
     initialPrompt?: string
   }): Promise<string> {
     const { sessionId } = await window.api.session.create(args)
-    // 重新加载列表（简化：让 UI 立即看到新会话）
     await load(args.workspaceId)
     return sessionId
   }
@@ -50,7 +70,9 @@ export const useSessionStore = defineStore('session', () => {
     currentSessionId,
     loading,
     currentSession,
+    sessionsByBackend,
     load,
+    reconcile,
     create,
     remove,
     setCurrent,

@@ -24,6 +24,7 @@ import {
 } from '@shared/backend/types'
 import type { BackendId } from '@shared/constants'
 
+import { ClaudeAdapter } from './claude/adapter'
 import { CodexAdapter } from './codex/adapter'
 
 const log = logger.domain('backend-manager')
@@ -34,7 +35,7 @@ export class BackendManager {
 
   constructor() {
     this.adapters.set('codex', new CodexAdapter())
-    // Plan 3+: this.adapters.set('claude', new ClaudeAdapter())
+    this.adapters.set('claude', new ClaudeAdapter())
   }
 
   /** 当前后端 */

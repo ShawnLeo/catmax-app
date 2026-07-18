@@ -27,6 +27,7 @@
   /* 组件色 */
   --color-sidebar: var(--sidebar-background);
   --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-border: var(--sidebar-border);
   --color-code-block: var(--code-block-background);
   --color-tool-call: var(--tool-call-background);
   --color-composer: var(--composer-background);
