@@ -1,5 +1,7 @@
 import { IPC, PUSH } from '@shared/constants'
 import type { BackendHandlers, BackendPushEvents } from '@shared/ipc/backend'
+import type { FsHandlers } from '@shared/ipc/fs'
+import type { GitHandlers } from '@shared/ipc/git'
 import type { SessionHandlers } from '@shared/ipc/session'
 import type { SettingsHandlers } from '@shared/ipc/settings'
 import type { SystemHandlers } from '@shared/ipc/system'
@@ -59,6 +61,15 @@ export const api = {
     remove: requestMain<SessionHandlers, 'session.remove'>(IPC.SESSION_REMOVE),
     reconcile: requestMain<SessionHandlers, 'session.reconcile'>(IPC.SESSION_RECONCILE),
     detail: requestMain<SessionHandlers, 'session.detail'>(IPC.SESSION_DETAIL),
+  },
+  git: {
+    status: requestMain<GitHandlers, 'git.status'>(IPC.GIT_STATUS),
+  },
+  fs: {
+    readDirectory: requestMain<FsHandlers, 'fs.readDirectory'>(IPC.FS_READ_DIRECTORY),
+    readFilePreview: requestMain<FsHandlers, 'fs.readFilePreview'>(IPC.FS_READ_FILE_PREVIEW),
+    openInEditor: requestMain<FsHandlers, 'fs.openInEditor'>(IPC.FS_OPEN_IN_EDITOR),
+    pathExists: requestMain<FsHandlers, 'fs.pathExists'>(IPC.FS_PATH_EXISTS),
   },
 }
 

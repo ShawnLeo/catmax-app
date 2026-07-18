@@ -41,6 +41,13 @@ export const IPC = {
   SESSION_REMOVE: 'session.remove',
   SESSION_RECONCILE: 'session.reconcile',
   SESSION_DETAIL: 'session.detail',
+  // git
+  GIT_STATUS: 'git.status',
+  // fs
+  FS_READ_DIRECTORY: 'fs.readDirectory',
+  FS_READ_FILE_PREVIEW: 'fs.readFilePreview',
+  FS_OPEN_IN_EDITOR: 'fs.openInEditor',
+  FS_PATH_EXISTS: 'fs.pathExists',
 } as const
 
 /** 推送事件名 */
@@ -67,3 +74,6 @@ export const DEFAULT_THEME_MODE = 'system' as const
 export const DEFAULT_FONT_SIZE = 14
 export const DEFAULT_CHAT_FONT_SIZE = 15
 export const DEFAULT_CODE_FONT_SIZE = 13
+
+/** 默认编辑器 */
+export const DEFAULT_EDITOR = 'vscode' as const satisfies EditorId
