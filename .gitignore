@@ -5,8 +5,8 @@ dist/
 *.log
 .env
 .env.local
-.vscode/!?(\.gitignore)
 .idea/
+.eslintcache
 # build artifacts
 coverage/
 .vite/

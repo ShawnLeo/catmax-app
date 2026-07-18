@@ -43,6 +43,7 @@
     "electron-builder": "^24.13.3",
     "electron-vite": "^2.3.0",
     "eslint": "^8.57.0",
+    "eslint-plugin-import": "^2.32.0",
     "eslint-plugin-vue": "^9.28.0",
     "happy-dom": "^15.0.0",
     "markdown-it": "^14.1.0",

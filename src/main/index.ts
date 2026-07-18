@@ -1,5 +1,6 @@
-import { app, shell, BrowserWindow } from 'electron'
 import { join } from 'node:path'
+
+import { app, shell, BrowserWindow } from 'electron'
 
 function createWindow(): void {
   const mainWindow = new BrowserWindow({
