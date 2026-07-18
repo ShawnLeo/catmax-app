@@ -41,6 +41,13 @@ export const IPC = {
   SESSION_REMOVE: 'session.remove',
   SESSION_RECONCILE: 'session.reconcile',
   SESSION_DETAIL: 'session.detail',
+  // git
+  GIT_STATUS: 'git.status',
+  // fs
+  FS_READ_DIRECTORY: 'fs.readDirectory',
+  FS_READ_FILE_PREVIEW: 'fs.readFilePreview',
+  FS_OPEN_IN_EDITOR: 'fs.openInEditor',
+  FS_PATH_EXISTS: 'fs.pathExists',
 } as const
 
 /** 推送事件名 */
