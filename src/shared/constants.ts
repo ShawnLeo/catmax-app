@@ -27,13 +27,29 @@ export const IPC = {
   SYSTEM_PLATFORM_INFO: 'system.platformInfo',
   SYSTEM_OPEN_DIALOG: 'system.openDialog',
   SYSTEM_OPEN_EXTERNAL: 'system.openExternal',
+  // backend
+  BACKEND_LIST: 'backend.list',
+  BACKEND_CURRENT: 'backend.current',
+  BACKEND_SWITCH: 'backend.switch',
+  BACKEND_LIST_MODELS: 'backend.listModels',
+  BACKEND_START_TURN: 'backend.startTurn',
+  BACKEND_INTERRUPT_TURN: 'backend.interruptTurn',
+  BACKEND_RESPOND_APPROVAL: 'backend.respondApproval',
+  // session
+  SESSION_LIST: 'session.list',
+  SESSION_CREATE: 'session.create',
+  SESSION_REMOVE: 'session.remove',
+  SESSION_RECONCILE: 'session.reconcile',
+  SESSION_DETAIL: 'session.detail',
 } as const
 
 /** 推送事件名 */
 export const PUSH = {
   BACKEND_TURN_EVENT: 'backend:turnEvent',
   BACKEND_SWITCHED: 'backend:switched',
+  BACKEND_STATUS_CHANGED: 'backend:statusChanged',
   PTY_DATA: 'pty:data',
+  PTY_EXIT: 'pty:exit',
 } as const
 
 /** 存储相关 */
