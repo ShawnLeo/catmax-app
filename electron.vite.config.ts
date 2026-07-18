@@ -35,10 +35,10 @@ export default defineConfig({
       tailwindcss(),
       AutoImport({
         imports: ['vue', 'vue-router', 'pinia'],
-        dts: 'src/renderer/src/auto-imports.d.ts',
+        dts: resolve(__dirname, 'src/renderer/src/auto-imports.d.ts'),
       }),
       Components({
-        dts: 'src/renderer/src/components.d.ts',
+        dts: resolve(__dirname, 'src/renderer/src/components.d.ts'),
       }),
     ],
   },
