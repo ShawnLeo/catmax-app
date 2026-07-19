@@ -275,6 +275,11 @@ export class CodexAdapter implements AgentBackend {
     return { messages: [] }
   }
 
+  // Task 2 will replace this stub with a real implementation calling thread/read.
+  async getHistory(_backendThreadId: string): Promise<{ messages: never[] }> {
+    throw new BackendError('not-initialized', 'getHistory not yet implemented (Task 2)')
+  }
+
   // ============ Turn（核心） ============
 
   /**

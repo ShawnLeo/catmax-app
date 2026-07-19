@@ -138,6 +138,11 @@ export class ClaudeAdapter implements AgentBackend {
     return { messages: [] }
   }
 
+  // Task 3 will replace this stub with a real --resume replay implementation.
+  async getHistory(_backendThreadId: string): Promise<{ messages: never[] }> {
+    throw new Error('getHistory not yet implemented (Task 3)')
+  }
+
   async *startTurn(args: StartTurnArgs): AsyncIterable<TurnEvent> {
     const internalTurnId = randomUUID()
     yield { type: 'turn_started', turnId: internalTurnId, sessionId: args.sessionId }
