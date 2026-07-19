@@ -21,6 +21,7 @@ export const useMessageStore = defineStore('message', () => {
   const pendingApproval = ref<PendingApproval | null>(null)
   const lastError = ref<string | null>(null)
   const lastUsage = ref<TokenUsage | null>(null)
+  const loading = ref(false)
 
   /** 把 TurnEvent 累积成 NormalizedMessage[] */
   function applyEvent(event: TurnEvent): void {
@@ -143,6 +144,18 @@ export const useMessageStore = defineStore('message', () => {
     lastUsage.value = null
   }
 
+  function setMessages(newMessages: NormalizedMessage[]): void {
+    messages.value = newMessages
+  }
+
+  function setLoading(v: boolean): void {
+    loading.value = v
+  }
+
+  function setError(msg: string | null): void {
+    lastError.value = msg
+  }
+
   return {
     messages,
     currentTurnId,
@@ -150,8 +163,12 @@ export const useMessageStore = defineStore('message', () => {
     pendingApproval,
     lastError,
     lastUsage,
+    loading,
     applyEvent,
     pushUserMessage,
     reset,
+    setMessages,
+    setLoading,
+    setError,
   }
 })

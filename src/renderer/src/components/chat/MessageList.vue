@@ -1,6 +1,14 @@
 <template>
   <div ref="container" class="h-full overflow-y-auto">
-    <div class="max-w-3xl mx-auto px-6 py-4 flex flex-col gap-6">
+    <div
+      v-if="messageStore.loading"
+      class="flex items-center justify-center h-full text-muted-foreground"
+    >
+      <div class="text-center">
+        <div class="animate-pulse text-sm">加载历史中...</div>
+      </div>
+    </div>
+    <div v-else class="max-w-3xl mx-auto px-6 py-4 flex flex-col gap-6">
       <MessageItem v-for="message in messageStore.messages" :key="message.id" :message="message" />
     </div>
   </div>

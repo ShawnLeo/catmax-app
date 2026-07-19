@@ -65,6 +65,20 @@ export const useSessionStore = defineStore('session', () => {
     currentSessionId.value = sessionId
   }
 
+  async function loadHistory(sessionId: string): Promise<void> {
+    const { useMessageStore } = await import('@renderer/stores/message')
+    const messageStore = useMessageStore()
+    messageStore.setLoading(true)
+    try {
+      const detail = await window.api.session.detail({ sessionId })
+      messageStore.setMessages(detail.messages)
+    } catch (e) {
+      messageStore.setError(e instanceof Error ? e.message : String(e))
+    } finally {
+      messageStore.setLoading(false)
+    }
+  }
+
   return {
     sessions,
     currentSessionId,
@@ -76,5 +90,6 @@ export const useSessionStore = defineStore('session', () => {
     create,
     remove,
     setCurrent,
+    loadHistory,
   }
 })
