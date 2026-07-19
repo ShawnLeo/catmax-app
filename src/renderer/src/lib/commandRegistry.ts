@@ -28,8 +28,13 @@ class CommandRegistry {
 
   register(cmd: Command): () => void {
     this.commands.set(cmd.id, cmd)
+    let unbindShortcut: (() => void) | null = null
+    if (cmd.shortcut) {
+      unbindShortcut = this.bindShortcut(cmd.shortcut, () => void cmd.action())
+    }
     return () => {
       this.commands.delete(cmd.id)
+      unbindShortcut?.()
     }
   }
 
@@ -74,6 +79,31 @@ class CommandRegistry {
     if (cmd) {
       await cmd.action()
     }
+  }
+
+  /**
+   * 解析快捷键字符串（'mod+k' / 'ctrl+shift+p' / 'cmd+,'）并绑定到 window keydown。
+   * 'mod' 在 macOS 等价于 cmd，在其他平台等价于 ctrl。
+   * 返回 unbind 函数。
+   */
+  private bindShortcut(shortcut: string, callback: () => void): () => void {
+    const parts = shortcut.toLowerCase().split('+')
+    const wantMod = parts.includes('mod') || parts.includes('cmd') || parts.includes('ctrl')
+    const wantShift = parts.includes('shift')
+    const wantAlt = parts.includes('alt')
+    const key = parts[parts.length - 1]!
+
+    const handler = (e: KeyboardEvent): void => {
+      const isMod = e.metaKey || e.ctrlKey
+      if (wantMod !== isMod) return
+      if (wantShift !== e.shiftKey) return
+      if (wantAlt !== e.altKey) return
+      if (e.key.toLowerCase() !== key) return
+      e.preventDefault()
+      callback()
+    }
+    window.addEventListener('keydown', handler)
+    return () => window.removeEventListener('keydown', handler)
   }
 }
 

@@ -20,7 +20,10 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "rebuild:native": "electron-rebuild -f -w better-sqlite3 -w node-pty",
-    "rebuild:node": "pnpm rebuild better-sqlite3 node-pty"
+    "rebuild:node": "pnpm rebuild better-sqlite3 node-pty",
+    "dist:mac": "pnpm build && cross-env ELECTRON_MIRROR=https://npmmirror.com/mirrors/electron/ ELECTRON_BUILDER_BINARIES_MIRROR=https://npmmirror.com/mirrors/electron-builder-binaries/ electron-builder --mac",
+    "dist:win": "pnpm build && cross-env ELECTRON_MIRROR=https://npmmirror.com/mirrors/electron/ ELECTRON_BUILDER_BINARIES_MIRROR=https://npmmirror.com/mirrors/electron-builder-binaries/ electron-builder --win",
+    "dist": "pnpm build && cross-env ELECTRON_MIRROR=https://npmmirror.com/mirrors/electron/ ELECTRON_BUILDER_BINARIES_MIRROR=https://npmmirror.com/mirrors/electron-builder-binaries/ electron-builder"
   },
   "dependencies": {
     "@vueuse/core": "^14.3.0",
@@ -55,6 +58,7 @@
     "@vue/test-utils": "^2.4.0",
     "@vue/tsconfig": "^0.9.1",
     "autoprefixer": "^10.4.20",
+    "cross-env": "^10.1.0",
     "electron": "^31.0.0",
     "electron-builder": "^24.13.3",
     "electron-vite": "^2.3.0",

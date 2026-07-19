@@ -51,7 +51,7 @@
 <script setup lang="ts">
 import { commandRegistry, type Command } from '@renderer/lib/commandRegistry'
 import { SearchIcon } from 'lucide-vue-next'
-import { ref, computed, watch, nextTick, onMounted, onUnmounted } from 'vue'
+import { ref, computed, watch, nextTick } from 'vue'
 
 const visible = defineModel<boolean>('visible', { default: false })
 
@@ -100,14 +100,4 @@ function selectPrev(): void {
     selectedIndex.value--
   }
 }
-
-function onKey(e: KeyboardEvent): void {
-  if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
-    e.preventDefault()
-    visible.value = !visible.value
-  }
-}
-
-onMounted(() => window.addEventListener('keydown', onKey))
-onUnmounted(() => window.removeEventListener('keydown', onKey))
 </script>

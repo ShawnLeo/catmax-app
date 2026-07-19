@@ -169,6 +169,9 @@ export interface AgentBackend {
   listSessions(cwd?: string): Promise<SessionSummary[]>
   resumeSession(backendThreadId: string): Promise<{ messages: NormalizedMessage[] }>
 
+  /** 读取会话历史（用于 UI 回放，不影响后端状态） */
+  getHistory(backendThreadId: string): Promise<{ messages: NormalizedMessage[] }>
+
   startTurn(args: StartTurnArgs): AsyncIterable<TurnEvent>
 
   interrupt(turnId: string): Promise<void>

@@ -18,6 +18,7 @@ import {
   type ApprovalDecision,
   type BackendStatus,
   type ModelOption,
+  type NormalizedMessage,
   type StartSessionArgs,
   type StartTurnArgs,
   type TurnEvent,
@@ -167,6 +168,21 @@ export class BackendManager {
   /** 响应 approval */
   async respondApproval(decision: ApprovalDecision): Promise<void> {
     return this.getCurrent().respondApproval(decision)
+  }
+
+  /**
+   * 读会话历史（按 session.backend 选 adapter，不是当前 backend）。
+   * 用于 UI 点击侧边栏会话时显示完整历史，只读、不影响后端状态。
+   */
+  async getHistory(
+    backend: BackendId,
+    backendThreadId: string,
+  ): Promise<{ messages: NormalizedMessage[] }> {
+    const adapter = this.adapters.get(backend)
+    if (!adapter) {
+      throw new BackendError('not-initialized', `unknown backend: ${backend}`)
+    }
+    return adapter.getHistory(backendThreadId)
   }
 
   /** 列出后端会话（透传给 adapter） */

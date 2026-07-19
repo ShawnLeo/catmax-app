@@ -92,7 +92,7 @@ watch(
 async function selectSession(id: string): Promise<void> {
   sessionStore.setCurrent(id)
   messageStore.reset()
-  // TODO Plan 4+: 加载历史消息（session.detail）
+  await sessionStore.loadHistory(id)
 }
 
 async function removeSession(id: string): Promise<void> {

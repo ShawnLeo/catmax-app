@@ -36,6 +36,7 @@ import {
   type ApprovalDecision,
   type BackendCapabilities,
   type ModelOption,
+  type NormalizedMessage,
   type SessionSummary,
   type StartSessionArgs,
   type StartTurnArgs,
@@ -44,6 +45,11 @@ import {
 
 import { type ProcessSpawner, RealProcessSpawner } from '../process-spawner'
 
+import {
+  codexTurnsToMessages,
+  extractTurns,
+  mergeAssistantAndToolMessages,
+} from './history-mapping'
 import {
   codexApprovalToRequest,
   codexCommandToOutput,
@@ -273,6 +279,20 @@ export class CodexAdapter implements AgentBackend {
     // TODO Plan 3+: 把 codex 返回的 items 转成 NormalizedMessage[]
     // MVP 阶段先返回空（用户重开历史会话时显示空，能继续聊）
     return { messages: [] }
+  }
+
+  /** 读会话历史：调 thread/read 拿 turn 数组，转成 NormalizedMessage[] */
+  async getHistory(backendThreadId: string): Promise<{ messages: NormalizedMessage[] }> {
+    await this.ensureInitialized()
+    const result = await this.sendRequest('thread/read', {
+      threadId: backendThreadId,
+      includeTurns: true,
+    })
+    const turns = extractTurns(result)
+    const messages = codexTurnsToMessages(turns)
+    const merged = mergeAssistantAndToolMessages(messages)
+    log.info('history loaded', backendThreadId, merged.length, 'messages')
+    return { messages: merged }
   }
 
   // ============ Turn（核心） ============

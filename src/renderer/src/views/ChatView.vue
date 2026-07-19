@@ -27,13 +27,13 @@
     <button
       class="absolute top-2 right-2 z-10 p-1.5 rounded-md bg-background/80 hover:bg-muted text-muted-foreground hover:text-foreground"
       title="切换右栏"
-      @click="rightPanelVisible = !rightPanelVisible"
+      @click="uiStore.toggleRightPanel()"
     >
       <PanelRightIcon class="w-4 h-4" />
     </button>
 
     <!-- 右栏面板 -->
-    <RightPanel :visible="rightPanelVisible" />
+    <RightPanel :visible="uiStore.rightPanelVisible" />
   </div>
 </template>
 
@@ -50,6 +50,7 @@ import { useBackendStore } from '@renderer/stores/backend'
 import { useGitStore } from '@renderer/stores/git'
 import { useMessageStore } from '@renderer/stores/message'
 import { useSessionStore } from '@renderer/stores/session'
+import { useUiStore } from '@renderer/stores/ui'
 import { useWorkspaceStore } from '@renderer/stores/workspace'
 import type { EffortLevel, PermissionMode } from '@shared/backend/types'
 import { PanelRightIcon } from 'lucide-vue-next'
@@ -62,9 +63,8 @@ const backendStore = useBackendStore()
 const sessionStore = useSessionStore()
 const messageStore = useMessageStore()
 const gitStore = useGitStore()
+const uiStore = useUiStore()
 useStreamMessage()
-
-const rightPanelVisible = ref(false)
 
 // 工作区切换时刷新 git status
 watch(
@@ -80,11 +80,14 @@ watch(
 )
 
 // 右栏首次打开时加载 git
-watch(rightPanelVisible, async (visible) => {
-  if (visible && workspaceStore.currentWorkspace && !gitStore.status.isRepo) {
-    await gitStore.refresh(workspaceStore.currentWorkspace.path)
-  }
-})
+watch(
+  () => uiStore.rightPanelVisible,
+  async (visible) => {
+    if (visible && workspaceStore.currentWorkspace && !gitStore.status.isRepo) {
+      await gitStore.refresh(workspaceStore.currentWorkspace.path)
+    }
+  },
+)
 
 interface RuntimeConfig {
   model: string | null

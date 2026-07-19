@@ -10,12 +10,17 @@
 import { randomUUID } from 'node:crypto'
 
 import { logger } from '@main/service/logger'
-import { type AssistantMessage, type ResultMessage } from '@shared/backend/claude-schema'
+import {
+  type AssistantMessage,
+  type ClaudeStreamMessage,
+  type ResultMessage,
+} from '@shared/backend/claude-schema'
 import {
   type AgentBackend,
   type ApprovalDecision,
   type BackendCapabilities,
   type ModelOption,
+  type NormalizedMessage,
   type SessionSummary,
   type StartSessionArgs,
   type StartTurnArgs,
@@ -24,6 +29,7 @@ import {
 
 import { type ProcessSpawner, RealProcessSpawner } from '../process-spawner'
 
+import { claudeReplayToMessages } from './history-mapping'
 import { assistantToEvents, resultToEvent, userToolResultToEvents } from './mapping'
 import { encodeUserMessage, LineBuffer, parseClaudeLine } from './protocol'
 
@@ -136,6 +142,67 @@ export class ClaudeAdapter implements AgentBackend {
     // 不需要主动 resume——下次 startTurn 会用 --resume
     void backendThreadId
     return { messages: [] }
+  }
+
+  /**
+   * 读会话历史：spawn `claude --resume <id>`，不写 stdin（不发新 user 消息）。
+   * claude 会自动重放历史 user/assistant 消息到 stdout，最后发 result 通知。
+   * 收到 result 后 kill 进程。
+   */
+  async getHistory(backendThreadId: string): Promise<{ messages: NormalizedMessage[] }> {
+    const binary = this.opts.binaryPath ?? 'claude'
+    const proc = this.spawner.spawn({
+      command: binary,
+      args: ['-p', '--output-format', 'stream-json', '--verbose', '--resume', backendThreadId],
+      ...(this.opts.cwd !== undefined ? { cwd: this.opts.cwd } : {}),
+    })
+
+    const replayed: ClaudeStreamMessage[] = []
+    let resolveDone!: () => void
+    const donePromise = new Promise<void>((resolve) => {
+      resolveDone = resolve
+    })
+    const lineBuffer = new LineBuffer()
+    let done = false
+
+    const onChunk = (chunk: Buffer): void => {
+      const lines = lineBuffer.push(chunk)
+      for (const line of lines) {
+        const msg = parseClaudeLine(line)
+        if (!msg) continue
+        if (msg.type === 'result') {
+          done = true
+          resolveDone()
+          return
+        }
+        if (msg.type === 'assistant' || msg.type === 'user') {
+          replayed.push(msg)
+        }
+        // system 忽略
+      }
+    }
+
+    proc.child.stdout?.on('data', onChunk)
+    proc.child.on('exit', () => {
+      if (!done) {
+        done = true
+        resolveDone()
+      }
+    })
+
+    // 不写 stdin（不发新 user 消息）——直接 close，让 claude 进入重放模式
+    proc.endInput()
+
+    await donePromise
+    try {
+      proc.kill('SIGTERM')
+    } catch {
+      // 已退出
+    }
+
+    const normalized = claudeReplayToMessages(replayed)
+    log.info('history loaded', backendThreadId, normalized.length, 'messages')
+    return { messages: normalized }
   }
 
   async *startTurn(args: StartTurnArgs): AsyncIterable<TurnEvent> {
