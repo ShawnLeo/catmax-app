@@ -136,11 +136,10 @@ export const getSessionDetail = async (args: { sessionId: string }) => {
   if (!session) {
     throw new SessionError('not-found', `session not found: ${args.sessionId}`)
   }
-  // 用会话自己的后端拉全文
-  // 注意：Plan 2 简化，直接用当前 adapter；Plan 3 改成按 session.backend 选 adapter
-  // MVP：先返回空 messages（resume 是 Plan 3+）
+  // 用会话自己的后端拉历史（不是当前后端）——这样切换后端后仍能回看旧会话
+  const { messages } = await ctx.backendManager.getHistory(session.backend, session.backendThreadId)
   return {
     session: toView(session),
-    messages: [],
+    messages,
   }
 }
