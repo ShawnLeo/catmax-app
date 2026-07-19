@@ -12,15 +12,17 @@
 |---|---|
 | 🤖 **双后端 code agent** | 一键切换 `codex` / `claude`，会话按后端分区（可继续 vs 只读） |
 | 💬 **流式聊天** | Markdown 渲染 + Shiki 语法高亮 + tool call 卡片 + approval 弹窗 + 中断 |
+| 📜 **会话历史回放** | 重启 App 后点击旧会话立即看到完整历史（含 tool call） |
 | 📁 **工作区模型** | 多工作区管理，绑定本地文件夹作为 CWD |
 | 🗂 **会话持久化** | SQLite 索引 + settings.json（Zod 校验） |
 | 🌳 **文件树**（只读） | gitignore 感知，Shiki 高亮预览 |
 | 🌿 **Git Status 面板**（只读） | 分支、staged/unstaged/untracked、最近 5 条 commit |
 | 🖥 **内置终端** | xterm.js + node-pty，多实例，自适应 resize |
 | 🔧 **编辑器集成** | VS Code / Cursor / IntelliJ / WebStorm / Sublime，`file:line:column` 定位 |
-| ⌨️ **⌘K 命令面板** | 插件化命令注册系统 + 模糊搜索 + 键盘导航 |
+| ⌨️ **完整快捷键体系** | ⌘K（命令面板）+ ⌘N（新建）+ ⌘B（sidebar）+ ⌘J（右栏）+ ⌘,（设置）+ ⌘1-9（切换会话） |
 | 🎨 **可扩展主题** | 三层 token + OKLCH + `data-theme` 属性，深/浅/跟随系统 |
 | 🔐 **凭证加密存储** | Electron safeStorage（macOS Keychain / Windows DPAPI） |
+| 📦 **可分发** | electron-builder 一键产出 macOS dmg（arm64 + x64）+ Windows nsis 安装包 |
 
 ---
 
@@ -105,15 +107,22 @@ pnpm typecheck        # TS 类型检查（node + web 双 tsconfig）
 pnpm lint             # ESLint 检查
 pnpm lint:fix         # ESLint 自动修复
 pnpm format           # Prettier 格式化
-pnpm test             # 跑全部测试（vitest）
+pnpm test             # 跑全部测试（vitest，165 个）
 pnpm test:watch       # watch 模式
 
 # native module 维护（双 ABI 处理）
 pnpm rebuild:native   # 为 Electron 重编 better-sqlite3 + node-pty（dev/build 前）
 pnpm rebuild:node     # 为 Node 重编（test 前，因为 vitest 跑在 Node 下）
+
+# 打包发布
+pnpm dist:mac         # 产出 macOS dmg（arm64 + x64）
+pnpm dist:win         # 产出 Windows nsis 安装包
+pnpm dist             # 当前平台默认目标
 ```
 
 **为什么需要双 ABI？** Electron 和 Node 用不同的 V8 版本，native module（better-sqlite3、node-pty）需要分别编译。`pnpm dev` / `pnpm build` 已经自动调 `rebuild:native`，但跑 `pnpm test` 前需要手动 `pnpm rebuild:node`。
+
+**关于打包镜像**：`dist:*` 脚本用 `cross-env` 设置 `ELECTRON_MIRROR` 和 `ELECTRON_BUILDER_BINARIES_MIRROR` 指向 npmmirror（国内加速）。海外用户可以在 `package.json` 里去掉这两个 env。
 
 ---
 
@@ -189,11 +198,11 @@ pnpm rebuild:node     # 先切到 Node ABI（双 ABI 处理）
 pnpm test
 ```
 
-当前 **152 个自动化测试**覆盖：
+当前 **165 个自动化测试**覆盖：
 
-- **shared/**：constants、settings-schema（Zod 校验）
-- **service/**：database（CRUD + FK cascade）、settings-store、git-service、file-tree、editor-launcher、pty-manager
-- **backend/**：codex 协议解析、event 映射、CodexAdapter（mock spawn 完整流程）、claude schema/mapping/adapter
+- **shared/**：constants、settings-schema（Zod 校验）、codex/claude JSON-RPC schema
+- **service/**：database（CRUD + FK cascade）、settings-store、git-service、file-tree、editor-launcher、pty-manager、codex-resolver
+- **backend/**：codex 协议解析、event 映射、CodexAdapter（mock spawn 完整流程）、codex history mapping、claude schema/mapping/adapter/history-mapping
 - **ipc/**：typed IPC、workspace/settings handlers
 
 测试不依赖真实 codex/claude CLI——通过 mock spawn + fixture 隔离。
@@ -271,19 +280,20 @@ Layer 3: 组件 token（按需，如 --sidebar-background / --code-block-backgro
 - [Plan 3: Claude + Sidebar](docs/superpowers/plans/2026-07-18-plan-3-claude-and-sidebar.md) — Claude 适配器 + 完整侧边栏
 - [Plan 4a: Git + Files + Editor](docs/superpowers/plans/2026-07-18-plan-4a-git-files-editor.md) — 文件系统相关
 - [Plan 4b: Terminal + Cmd-K](docs/superpowers/plans/2026-07-18-plan-4b-terminal-and-cmdk.md) — 终端 + 命令面板
+- [Plan 5: History + Packaging + Shortcuts](docs/superpowers/plans/2026-07-19-plan-5-history-packaging-shortcuts.md) — 会话历史回放 + 打包 + 快捷键
 
 ---
 
 ## 🛣 路线图
 
-MVP 14 项能力已全部完成。后续规划的方向（未实现）：
+MVP 14 项能力 + 会话历史回放 + 快捷键体系 + 可打包分发 已全部完成。后续规划的方向（未实现）：
 
-- **会话历史回放** — 当前 `session.detail` 返回空消息，需要实现 codex rollout / claude session json 的解析
 - **自动化引擎（cron）** — 借鉴 Codex 的 RRule 调度，定时跑 agent
 - **Inbox 系统** — 后台运行结果进入 inbox 审查
 - **Cloud worktree 快照** — 基于 git 的云端执行（prepare/upload snapshot）
 - **跨后端会话迁移** — 把 codex 会话 fork 到 claude
 - **自研 agent loop** — 不依赖 codex/claude CLI，直接调 LLM API
+- **自动更新** — `electron-updater` 已装但未接入
 - **多窗口** — 每个工作区独立窗口
 - **Linux 支持** — 当前 macOS + Windows
 - **OAuth2 PKCE** — 自有账号系统（如果要对外发布）
