@@ -280,4 +280,47 @@ describe('CodexAdapter', () => {
     expect(models).toHaveLength(2)
     expect(models[0]!.id).toBe('gpt-5.1-codex')
   })
+
+  test('getHistory 返回 NormalizedMessage 数组', async () => {
+    const { spawner, stdout, stdin } = createMockSpawner()
+    const adapter = new CodexAdapter({ spawner })
+
+    stdin.on('data', (data) => {
+      const lines = data.toString().split('\n').filter(Boolean)
+      for (const line of lines) {
+        const msg = JSON.parse(line)
+        if (msg.method === 'initialize') {
+          pushLine(stdout, { id: msg.id, result: { ok: true } })
+        } else if (msg.method === 'thread/read' && msg.id !== undefined) {
+          pushLine(stdout, {
+            id: msg.id,
+            result: {
+              thread: {
+                id: 'thr_1',
+                turns: [
+                  {
+                    id: 'turn_1',
+                    items: [
+                      {
+                        type: 'user_message',
+                        id: 'u1',
+                        content: [{ type: 'text', text: 'hello' }],
+                      },
+                      { type: 'agent_message', id: 'a1', text: 'world' },
+                    ],
+                  },
+                ],
+              },
+            },
+          })
+        }
+      }
+    })
+
+    const { messages } = await adapter.getHistory('thr_1')
+    expect(messages).toHaveLength(2)
+    expect(messages[0]!.role).toBe('user')
+    expect(messages[1]!.role).toBe('assistant')
+    expect(messages[1]!.textBlocks?.[0]?.text).toBe('world')
+  })
 })
