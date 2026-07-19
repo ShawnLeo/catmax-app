@@ -1,0 +1,54 @@
+appId: com.catmax.app
+productName: catmax
+copyright: Copyright © 2026 shawn
+directories:
+  output: dist
+  buildResources: build
+files:
+  - '!**/.vscode/*'
+  - '!src/*'
+  - '!docs/*'
+  - '!tests/*'
+  - '!*.md'
+  - '!electron.vite.config.*'
+  - '!{.eslintcache,.eslintrc.cjs,.prettierrc,.editorconfig}'
+  - '!{.DS_Store,.git,.gitignore,.idea,.vscode}'
+asarUnpack:
+  - resources/**
+  - '**/*.{node,dll}'
+
+# macOS
+mac:
+  target:
+    - target: dmg
+      arch: [arm64, x64]
+  category: public.app-category.developer-tools
+  hardenedRuntime: true
+  entitlements: build/entitlements.mac.plist
+  entitlementsInherit: build/entitlements.mac.plist
+  # 不打 notarize（自用项目，省 Apple Developer 账号）
+
+dmg:
+  artifactName: ${productName}-${version}-${arch}.${ext}
+  contents:
+    - x: 130
+      y: 220
+    - x: 410
+      'y': 220
+      type: link
+      path: /Applications
+
+# Windows
+win:
+  target:
+    - target: nsis
+      arch: [x64]
+
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+  artifactName: ${productName}-Setup-${version}-${arch}.${ext}
+
+extraMetadata:
+  main: ./out/main/index.js
