@@ -4,6 +4,8 @@ import { ref } from 'vue'
 export const useUiStore = defineStore('ui', () => {
   const sidebarCollapsed = ref(false)
   const settingsDialogOpen = ref(false)
+  const rightPanelVisible = ref(false)
+  const commandPaletteVisible = ref(false)
 
   function toggleSidebar(): void {
     sidebarCollapsed.value = !sidebarCollapsed.value
@@ -17,5 +19,33 @@ export const useUiStore = defineStore('ui', () => {
     settingsDialogOpen.value = false
   }
 
-  return { sidebarCollapsed, settingsDialogOpen, toggleSidebar, openSettings, closeSettings }
+  function toggleRightPanel(): void {
+    rightPanelVisible.value = !rightPanelVisible.value
+  }
+
+  function openCommandPalette(): void {
+    commandPaletteVisible.value = true
+  }
+
+  function closeCommandPalette(): void {
+    commandPaletteVisible.value = false
+  }
+
+  function toggleCommandPalette(): void {
+    commandPaletteVisible.value = !commandPaletteVisible.value
+  }
+
+  return {
+    sidebarCollapsed,
+    settingsDialogOpen,
+    rightPanelVisible,
+    commandPaletteVisible,
+    toggleSidebar,
+    openSettings,
+    closeSettings,
+    toggleRightPanel,
+    openCommandPalette,
+    closeCommandPalette,
+    toggleCommandPalette,
+  }
 })

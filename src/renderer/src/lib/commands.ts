@@ -11,6 +11,7 @@ export async function registerDefaultCommands(): Promise<void> {
   const { useWorkspaceStore } = await import('@renderer/stores/workspace')
   const { useBackendStore } = await import('@renderer/stores/backend')
   const { useSessionStore } = await import('@renderer/stores/session')
+  const { useUiStore } = await import('@renderer/stores/ui')
   const router = (await import('@renderer/router')).router
 
   // 这里不能用 useXxxStore（需要在 setup 内），改成在 action 里调
@@ -29,7 +30,7 @@ export async function registerDefaultCommands(): Promise<void> {
     title: '打开设置',
     category: 'Navigation',
     keywords: ['settings', 'preference', 'config'],
-    shortcut: '⌘,',
+    shortcut: 'mod+,',
     action: () => {
       void router.push('/settings')
     },
@@ -58,6 +59,7 @@ export async function registerDefaultCommands(): Promise<void> {
     title: '新建会话',
     category: 'Session',
     keywords: ['session', 'new', 'chat'],
+    shortcut: 'mod+n',
     action: () => {
       const s = useSessionStore()
       s.setCurrent('')
@@ -97,6 +99,64 @@ export async function registerDefaultCommands(): Promise<void> {
       await b.refresh()
     },
   })
+
+  commandRegistry.register({
+    id: 'app.toggle-sidebar',
+    title: '切换侧边栏',
+    category: 'View',
+    keywords: ['sidebar', 'toggle', 'hide'],
+    shortcut: 'mod+b',
+    action: () => {
+      const u = useUiStore()
+      u.toggleSidebar()
+    },
+  })
+
+  commandRegistry.register({
+    id: 'app.toggle-right-panel',
+    title: '切换右栏面板',
+    category: 'View',
+    keywords: ['panel', 'right', 'toggle'],
+    shortcut: 'mod+j',
+    action: () => {
+      const u = useUiStore()
+      u.toggleRightPanel()
+    },
+  })
+
+  commandRegistry.register({
+    id: 'app.command-palette',
+    title: '打开命令面板',
+    category: 'App',
+    keywords: ['palette', 'search', 'command'],
+    shortcut: 'mod+k',
+    action: () => {
+      // 通过 uiStore 控制全局 commandPaletteVisible（App.vue 双向绑定）
+      // toggle 让 mod+k 既能开也能关
+      const u = useUiStore()
+      u.toggleCommandPalette()
+    },
+  })
+
+  // ⌘1-9 切换到最近的会话（最后一个 = 最近）
+  for (let i = 1; i <= 9; i++) {
+    const slot = i
+    commandRegistry.register({
+      id: `session.switch-${slot}`,
+      title: `切换到会话 ${slot}`,
+      category: 'Session',
+      keywords: ['session', 'switch', `slot ${slot}`],
+      shortcut: `mod+${slot}`,
+      action: () => {
+        const s = useSessionStore()
+        const target = s.sessions[s.sessions.length - slot]
+        if (target) {
+          s.setCurrent(target.id)
+          void s.loadHistory(target.id)
+        }
+      },
+    })
+  }
 }
 
 // 不立即调，由 main.ts 控制
