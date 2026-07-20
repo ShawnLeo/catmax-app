@@ -42,6 +42,8 @@ export const IPC = {
   SESSION_CREATE: 'session.create',
   SESSION_REMOVE: 'session.remove',
   SESSION_RECONCILE: 'session.reconcile',
+  SESSION_SCAN_IMPORTABLE: 'session.scanImportable',
+  SESSION_IMPORT: 'session.import',
   SESSION_DETAIL: 'session.detail',
   // git
   GIT_STATUS: 'git.status',

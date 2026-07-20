@@ -5,9 +5,11 @@ import { handleRendererRequest } from '../../typed'
 import {
   createSession,
   getSessionDetail,
+  importSessions,
   listSessions,
   reconcileSessions,
   removeSession,
+  scanImportableSessions,
 } from './handlers'
 
 export function registerSessionHandlers(): void {
@@ -18,6 +20,11 @@ export function registerSessionHandlers(): void {
     'session.reconcile',
     reconcileSessions,
   )
+  handleRendererRequest<SessionHandlers, 'session.scanImportable'>(
+    'session.scanImportable',
+    scanImportableSessions,
+  )
+  handleRendererRequest<SessionHandlers, 'session.import'>('session.import', importSessions)
   handleRendererRequest<SessionHandlers, 'session.detail'>('session.detail', getSessionDetail)
 }
 

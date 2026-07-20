@@ -1,9 +1,18 @@
 import { randomUUID } from 'node:crypto'
 
+import { encodeCwdToProjectDir } from '@main/backend/claude/jsonl-reader'
 import { ctx } from '@main/context'
 import { logger } from '@main/service/logger'
-import type { SessionRecord, SessionView } from '@shared/domain'
-import type { CreateSessionArgs } from '@shared/ipc/session'
+import type { SessionSummary } from '@shared/backend/types'
+import type { BackendId } from '@shared/constants'
+import type { SessionRecord, SessionView, WorkspaceRecord } from '@shared/domain'
+import type {
+  CreateSessionArgs,
+  ImportSessionArgs,
+  ImportSessionsResult,
+  ImportableSession,
+  ScanImportableResult,
+} from '@shared/ipc/session'
 
 const log = logger.domain('session-handler')
 
@@ -138,6 +147,184 @@ export const reconcileSessions = async (args: { workspaceId: string }) => {
 
   log.info('reconciled', { added: added.length, removed: removed.length })
   return { added, removed }
+}
+
+/**
+ * 扫描所有 backend 在磁盘/RPC 上存在、但 catmax db 还未登记的会话。
+ *
+ * - claude：扫所有 ~/.claude/projects/* 目录下的 .jsonl 文件
+ * - codex：调 thread/list（不传 cwd，拿全部 thread）
+ *
+ * 返回每条会话 + 标记：
+ * - alreadyImported：是否已在 db（任意 workspace）
+ * - matchedWorkspaceId（claude only）：反推 cwd 精确匹配到的 workspace，没有则 undefined
+ *
+ * 单 backend 失败容错——记录到 errors 数组，不影响其他 backend 的扫描结果。
+ */
+export const scanImportableSessions = async (): Promise<ScanImportableResult> => {
+  const { byBackend, errors } = await ctx.backendManager.listAllSessionsAcrossBackends()
+
+  const workspaces = ctx.db.listWorkspaces()
+  // encoded(path) → workspaceId，用于 claude 反推 cwd 的精确正向匹配
+  const encodedToWorkspace = new Map<string, string>()
+  for (const ws of workspaces) {
+    encodedToWorkspace.set(encodeCwdToProjectDir(ws.path), ws.id)
+  }
+
+  // 列出 db 里所有已登记 session——用 (backend, backendThreadId) 做 key 查重
+  const allDbSessions: Array<{ backend: BackendId; backendThreadId: string; workspaceId: string }> =
+    []
+  for (const ws of workspaces) {
+    for (const s of ctx.db.listSessions(ws.id)) {
+      allDbSessions.push({
+        backend: s.backend,
+        backendThreadId: s.backendThreadId,
+        workspaceId: ws.id,
+      })
+    }
+  }
+  const dbKeyToWorkspace = new Map<string, string>()
+  for (const s of allDbSessions) {
+    dbKeyToWorkspace.set(`${s.backend}:${s.backendThreadId}`, s.workspaceId)
+  }
+
+  const sessions: ImportableSession[] = []
+  let unmatchedCount = 0
+
+  for (const [backendId, summaryList] of Object.entries(byBackend) as Array<
+    [BackendId, SessionSummary[]]
+  >) {
+    for (const s of summaryList) {
+      if (!s.backendThreadId) continue // 跳过无效条目
+      const dbKey = `${backendId}:${s.backendThreadId}`
+      const existingWorkspaceId = dbKeyToWorkspace.get(dbKey)
+      const alreadyImported = existingWorkspaceId !== undefined
+
+      // claude 才有 cwd——正向编码匹配
+      let matchedWorkspaceId: string | undefined
+      if (s.cwd) {
+        const encoded = encodeCwdToProjectDir(s.cwd)
+        matchedWorkspaceId = encodedToWorkspace.get(encoded)
+        if (!matchedWorkspaceId && !alreadyImported) {
+          unmatchedCount++
+        }
+      }
+
+      // exactOptionalPropertyTypes: true 不允许把 undefined 传给 optional 字段，
+      // 所以条件赋值——只有 cwd/sizeBytes 等有值时才写到对象上。
+      const item: ImportableSession = {
+        backend: backendId,
+        backendThreadId: s.backendThreadId,
+        title: s.title,
+        lastActiveAt: s.lastActiveAt,
+        model: s.model,
+        alreadyImported,
+      }
+      if (s.cwd !== undefined) item.cwd = s.cwd
+      if (s.sizeBytes !== undefined) item.sizeBytes = s.sizeBytes
+      if (existingWorkspaceId !== undefined) item.existingWorkspaceId = existingWorkspaceId
+      if (matchedWorkspaceId !== undefined) item.matchedWorkspaceId = matchedWorkspaceId
+      sessions.push(item)
+    }
+  }
+
+  // 按最后活跃时间倒序——最近的在前
+  sessions.sort((a, b) => b.lastActiveAt - a.lastActiveAt)
+
+  log.info('scanImportable', {
+    total: sessions.length,
+    alreadyImported: sessions.filter((s) => s.alreadyImported).length,
+    unmatched: unmatchedCount,
+    errors: errors.length,
+  })
+
+  return { sessions, unmatchedCount, errors }
+}
+
+/**
+ * 把外部会话登记到 catmax db，纳入指定 workspace。
+ *
+ * - 重复导入容错：如果 (backend, backendThreadId) 已存在，跳过
+ * - 拉一次 getHistory 拿 aiTitle——claude 在 jsonl 头部写了 ai-title 行，能拿到；
+ *   拉失败容错：title 用 backendThreadId 前 8 字符作 fallback，仍登记
+ * - backend 字段用会话自己的 backend（不是 currentBackend）
+ *
+ * 注意：导入后用户点开会话时 getSessionDetail 会再调 getHistory，
+ * 这里拉一次只是为了拿到标题——title 拿到后立即回写 db。
+ */
+export const importSessions = async (args: ImportSessionArgs): Promise<ImportSessionsResult> => {
+  const workspaces = ctx.db.listWorkspaces()
+  const workspaceById = new Map<string, WorkspaceRecord>()
+  for (const ws of workspaces) workspaceById.set(ws.id, ws)
+
+  const imported: SessionView[] = []
+  const skipped: Array<{ backendThreadId: string; reason: string }> = []
+
+  for (const item of args.sessions) {
+    const ws = workspaceById.get(item.workspaceId)
+    if (!ws) {
+      skipped.push({
+        backendThreadId: item.backendThreadId,
+        reason: `workspace not found: ${item.workspaceId}`,
+      })
+      continue
+    }
+
+    // 重复检查——db 里已存在 (backend, backendThreadId) 就跳过
+    const existing = ctx.db.findSessionByBackendThreadId(item.backend, item.backendThreadId)
+    if (existing) {
+      skipped.push({
+        backendThreadId: item.backendThreadId,
+        reason: `already imported (session ${existing.id})`,
+      })
+      continue
+    }
+
+    // 拉历史拿 aiTitle——claude 用 ws.path 作 cwd 读 jsonl；codex 不需要 cwd
+    let title: string | null = null
+    try {
+      const { aiTitle } = await ctx.backendManager.getHistory(
+        item.backend,
+        item.backendThreadId,
+        ws.path,
+      )
+      title = aiTitle ?? null
+    } catch (e) {
+      log.warn(
+        `importSessions: getHistory failed for ${item.backend}:${item.backendThreadId}, using fallback title:`,
+        e,
+      )
+    }
+    // fallback：title 为 null 时用 backendThreadId 前 8 字符
+    if (!title) {
+      title = item.backendThreadId.slice(0, 8)
+    }
+
+    const now = Date.now()
+    const sessionId = randomUUID()
+    ctx.db.insertSession({
+      id: sessionId,
+      backend: item.backend,
+      backendThreadId: item.backendThreadId,
+      workspaceId: item.workspaceId,
+      title,
+      model: null,
+      effort: null,
+      permissionMode: null,
+      turnCount: 0,
+      // 没拿到磁盘记录的创建时间，用 lastActiveAt 代替；如果 summary 里有更精确的可以补
+      createdAt: now,
+      lastActiveAt: now,
+    })
+    const inserted = ctx.db.findSessionById(sessionId)
+    if (inserted) {
+      imported.push(toView(inserted))
+      log.info('imported session', sessionId, `(${item.backend})`)
+    }
+  }
+
+  log.info('importSessions done', { imported: imported.length, skipped: skipped.length })
+  return { imported, skipped }
 }
 
 export const getSessionDetail = async (args: { sessionId: string }) => {

@@ -17,7 +17,12 @@
           class="flex-1"
           @update:model-value="(v: string | number) => updatePath('codex', String(v))"
         />
-        <Button variant="outline" size="sm" :disabled="picking === 'codex'" @click="pickFile('codex')">
+        <Button
+          variant="outline"
+          size="sm"
+          :disabled="picking === 'codex'"
+          @click="pickFile('codex')"
+        >
           {{ picking === 'codex' ? '...' : '浏览' }}
         </Button>
       </div>
@@ -33,7 +38,12 @@
           class="flex-1"
           @update:model-value="(v: string | number) => updatePath('claude', String(v))"
         />
-        <Button variant="outline" size="sm" :disabled="picking === 'claude'" @click="pickFile('claude')">
+        <Button
+          variant="outline"
+          size="sm"
+          :disabled="picking === 'claude'"
+          @click="pickFile('claude')"
+        >
           {{ picking === 'claude' ? '...' : '浏览' }}
         </Button>
       </div>

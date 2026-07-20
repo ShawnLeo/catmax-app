@@ -87,9 +87,7 @@ describe('Bug C: CodexAdapter.initialize 失败时清理子进程', () => {
       for (const line of lines) {
         const msg = JSON.parse(line)
         if (msg.method === 'initialize' && msg.id !== undefined) {
-          stdout.write(
-            JSON.stringify({ id: msg.id, result: { ok: true } }) + '\n',
-          )
+          stdout.write(JSON.stringify({ id: msg.id, result: { ok: true } }) + '\n')
         }
       }
     })

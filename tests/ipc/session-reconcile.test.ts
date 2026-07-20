@@ -8,10 +8,10 @@
  *
  * 现在：listSessions 失败时跳过 backend sync，返回空 added/removed（不阻塞 UI）。
  */
+import { randomUUID } from 'node:crypto'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { randomUUID } from 'node:crypto'
 
 import { describe, expect, test, afterEach, vi } from 'vitest'
 
@@ -74,8 +74,8 @@ describe('Bug B: reconcileSessions 容错', () => {
   })
 
   test('workspace 不存在时仍抛 SessionError（不 swallow 业务错误）', async () => {
-    await expect(
-      reconcileSessions({ workspaceId: 'definitely-does-not-exist' }),
-    ).rejects.toThrow(/workspace not found/)
+    await expect(reconcileSessions({ workspaceId: 'definitely-does-not-exist' })).rejects.toThrow(
+      /workspace not found/,
+    )
   })
 })

@@ -83,9 +83,8 @@ export function parseSystemProxy(scutilOutput: string): {
   // - localhost / *.local
   // - apple.com 系列
   const meaningful = bypassList.filter((s) => {
-    if (
-      s.match(/^(192\.168\.\d+\.\d+\/\d+|10\.\d+\.\d+\.\d+\/\d+|172\.\d+\.\d+\.\d+\/\d+)$/)
-    ) return false
+    if (s.match(/^(192\.168\.\d+\.\d+\/\d+|10\.\d+\.\d+\.\d+\/\d+|172\.\d+\.\d+\.\d+\/\d+)$/))
+      return false
     if (s === '127.0.0.1' || s.startsWith('127.')) return false
     if (s === 'localhost') return false
     if (s.endsWith('.local') || s === '*.local') return false

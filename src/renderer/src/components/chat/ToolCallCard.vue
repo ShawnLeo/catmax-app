@@ -1,4 +1,13 @@
 <template>
+  <!--
+    工具调用卡片：shell 命令 / 文件编辑 / 文件读取 / MCP / 其他。
+
+    展开后根据 tool.info 是否有结构化 edit 字段分派渲染：
+    - 有 edit：用 DiffView 渲染真正的 diff（文件编辑场景）
+    - 无 edit：detail 走终端样式 <pre>（黑底，命令 / 路径 / JSON）
+
+    工具输出（tool.output.output）独立展示，shell 命令的 stdout 走这里。
+  -->
   <div
     :class="[
       'rounded-md border text-sm font-sans overflow-hidden',
@@ -32,16 +41,22 @@
 
     <!-- 展开后：详细输出 -->
     <div v-if="expanded" class="border-t border-tool-call-border">
-      <!-- 命令/diff 详情 -->
+      <!-- 文件编辑：优先用 DiffView 渲染结构化 diff -->
+      <DiffView v-if="tool.info.edit" :edit="tool.info.edit" />
+
+      <!-- 非 diff 场景：detail 走终端样式 <pre>（黑底，命令/JSON/路径） -->
       <pre
-        v-if="tool.info.detail"
-        class="font-mono text-[12px] bg-code-block text-foreground p-3 overflow-x-auto whitespace-pre-wrap"
+        v-else-if="tool.info.detail"
+        class="font-mono text-[12px] bg-terminal text-foreground p-3 overflow-x-auto whitespace-pre-wrap"
         >{{ tool.info.detail }}</pre>
 
-      <!-- 输出 -->
+      <!-- 工具输出（如 shell 命令的 stdout） -->
       <pre
         v-if="tool.output?.output"
-        class="font-mono text-[12px] bg-code-block text-foreground p-3 border-t border-tool-call-border overflow-x-auto whitespace-pre-wrap"
+        :class="[
+          'font-mono text-[12px] bg-terminal text-foreground/80 p-3 overflow-x-auto whitespace-pre-wrap',
+          tool.info.edit || tool.info.detail ? 'border-t border-tool-call-border' : '',
+        ]"
         >{{ tool.output.output }}</pre>
     </div>
   </div>
@@ -51,6 +66,8 @@
 import type { NormalizedMessage } from '@shared/backend/types'
 import { ChevronDownIcon, TerminalIcon, FileEditIcon, WrenchIcon } from 'lucide-vue-next'
 import { ref, type Component } from 'vue'
+
+import DiffView from './DiffView.vue'
 
 defineProps<{
   tool: NonNullable<NormalizedMessage['toolBlocks']>[number]

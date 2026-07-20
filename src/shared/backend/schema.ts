@@ -242,10 +242,12 @@ export const modelListResultSchema = z
             // 对象数组，每个含 reasoningEffort + description
             supportedReasoningEfforts: z
               .array(
-                z.object({
-                  reasoningEffort: z.string(),
-                  description: z.string().optional(),
-                }).passthrough(),
+                z
+                  .object({
+                    reasoningEffort: z.string(),
+                    description: z.string().optional(),
+                  })
+                  .passthrough(),
               )
               .optional(),
             defaultReasoningEffort: z.string().optional(),

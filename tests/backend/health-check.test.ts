@@ -6,9 +6,8 @@
  * 把 macOS Gatekeeper 拦截（SIGKILL）也都笼统报 "spawn-failed"。
  * 用户看到 codex 不可用，但完全不知道为什么 / 怎么修。
  */
-import { describe, expect, test } from 'vitest'
-
 import { checkCliHealth } from '@main/backend/health-check'
+import { describe, expect, test } from 'vitest'
 
 describe('checkCliHealth', () => {
   test('命令不存在 → not-installed', () => {

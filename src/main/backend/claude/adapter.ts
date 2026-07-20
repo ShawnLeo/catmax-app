@@ -28,11 +28,10 @@ import {
   type TurnEvent,
 } from '@shared/backend/types'
 
+import { checkCliHealth } from '../health-check'
 import { type ProcessSpawner, RealProcessSpawner } from '../process-spawner'
 
-import { checkCliHealth } from '../health-check'
-
-import { readHistoryFromJsonl } from './jsonl-reader'
+import { listClaudeSessionsFromDisk, readHistoryFromJsonl } from './jsonl-reader'
 import {
   StreamEventAggregator,
   assistantToEvents,
@@ -155,10 +154,11 @@ export class ClaudeAdapter implements AgentBackend {
   }
 
   async listSessions(cwd?: string): Promise<SessionSummary[]> {
-    // MVP：claude 不维护可枚举的 session 列表（要 `claude --resume` 才能看到，且不友好）
-    // 返回空——App db 里有索引即可
-    void cwd
-    return []
+    // 扫磁盘枚举 ~/.claude/projects/<encoded-cwd>/*.jsonl。
+    // - 传 cwd：只扫单个项目目录（reconcile 用）
+    // - 不传 cwd：扫所有项目目录（「扫描导入」全盘模式用）
+    // 之前直接返回 [] 是 MVP 阶段没做，现在能扫了——jsonl 文件就是事实来源。
+    return listClaudeSessionsFromDisk(cwd)
   }
 
   async resumeSession(backendThreadId: string): Promise<{ messages: never[] }> {
@@ -191,7 +191,13 @@ export class ClaudeAdapter implements AgentBackend {
         `claude getHistory(${backendThreadId}, cwd=${spawnCwd ?? '<inherit>'}): session jsonl not found`,
       )
     }
-    log.info('history loaded from jsonl', backendThreadId, result.messages.length, 'messages, title=', result.aiTitle)
+    log.info(
+      'history loaded from jsonl',
+      backendThreadId,
+      result.messages.length,
+      'messages, title=',
+      result.aiTitle,
+    )
     return { messages: result.messages, aiTitle: result.aiTitle }
   }
 

@@ -14,11 +14,11 @@
  * 之前 bug：ClaudeAdapter 没加 --include-partial-messages，claude 等整块生成完才
  * 推一个完整 assistant 消息——UI 看起来是"全部响应完才一次性渲染"。
  */
-import { describe, expect, test } from 'vitest'
 
 import { StreamEventAggregator } from '@main/backend/claude/mapping'
 import type { StreamEventMessage } from '@shared/backend/claude-schema'
 import type { TurnEvent } from '@shared/backend/types'
+import { describe, expect, test } from 'vitest'
 
 function makeStreamEvent(event: unknown): StreamEventMessage {
   return { type: 'stream_event', event } as StreamEventMessage
@@ -63,9 +63,7 @@ describe('StreamEventAggregator', () => {
     })
     expect(events[1]).toMatchObject({ type: 'reasoning_delta', text: '问' })
     // 同一 block 的 itemId 应该一致
-    expect((events[0] as { itemId: string }).itemId).toBe(
-      (events[1] as { itemId: string }).itemId,
-    )
+    expect((events[0] as { itemId: string }).itemId).toBe((events[1] as { itemId: string }).itemId)
   })
 
   test('text_delta → text_delta（逐 token 累积）', () => {

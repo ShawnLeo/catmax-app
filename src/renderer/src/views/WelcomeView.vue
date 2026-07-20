@@ -57,8 +57,9 @@ async function addWorkspace(): Promise<void> {
       properties: ['openDirectory'],
     })
     if (!result.canceled && result.filePaths.length > 0) {
-      const ws = await workspaceStore.add(result.filePaths[0]!)
-      openWorkspace(ws.id)
+      // add() 内部已 setCurrent(ws.id)，这里只需导航
+      await workspaceStore.add(result.filePaths[0]!)
+      router.push('/chat')
     }
   } finally {
     adding.value = false

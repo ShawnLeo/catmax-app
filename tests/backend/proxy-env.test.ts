@@ -2,10 +2,10 @@
 /**
  * proxy-env helper 测试：把 settings.httpProxy 转成 spawn env。
  */
-import { describe, expect, test } from 'vitest'
 
 import { parseSystemProxy, proxySettingsToEnv } from '@main/backend/proxy-env'
 import type { HttpProxy } from '@shared/settings-schema'
+import { describe, expect, test } from 'vitest'
 
 describe('proxySettingsToEnv', () => {
   test('enabled=false 时返回空对象（不影响子进程）', () => {
@@ -113,10 +113,9 @@ describe('parseSystemProxy (macOS scutil)', () => {
   })
 
   test('代理禁用 → 返回 null', () => {
-    const disabled = scutilOutput.replace('HTTPEnable : 1', 'HTTPEnable : 0').replace(
-      'HTTPSEnable : 1',
-      'HTTPSEnable : 0',
-    )
+    const disabled = scutilOutput
+      .replace('HTTPEnable : 1', 'HTTPEnable : 0')
+      .replace('HTTPSEnable : 1', 'HTTPSEnable : 0')
     expect(parseSystemProxy(disabled)).toBeNull()
   })
 

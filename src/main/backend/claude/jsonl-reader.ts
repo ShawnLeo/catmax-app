@@ -19,14 +19,14 @@
  * 注意：jsonl 里 `user.message.content` 可能是 **string**（不是 array），
  * 和 stream-json 输出格式有差异。本模块处理这个差异。
  */
-import { createReadStream, existsSync } from 'node:fs'
-import { createInterface } from 'node:readline'
+import { createReadStream, existsSync, readdirSync, statSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
+import { createInterface } from 'node:readline'
 
 import { logger } from '@main/service/logger'
-import type { NormalizedMessage } from '@shared/backend/types'
 import type { ClaudeStreamMessage } from '@shared/backend/claude-schema'
+import type { NormalizedMessage } from '@shared/backend/types'
 
 import { claudeReplayToMessages } from './history-mapping'
 
@@ -43,6 +43,18 @@ export function encodeCwdToProjectDir(cwd: string): string {
 }
 
 /**
+ * 反向解码：把 claude projects 目录名还原成绝对 cwd 路径。
+ * `-Users-shawn-foo` → `/Users/shawn/foo`。
+ *
+ * 注意歧义：路径里本身含 `-` 时（如 `/Users/shawn-foo`）编码后也是 `-Users-shawn-foo`，
+ * 反推无法区分。所以本函数的返回值只是"候选 cwd"——上层应该用 workspace 路径正向编码
+ * 比对来精确匹配（encodeCwdToProjectDir 是单射，不存在歧义）。
+ */
+export function decodeProjectDirToCwd(dir: string): string {
+  return dir.replace(/-/g, '/')
+}
+
+/**
  * 推算 session 的 jsonl 文件路径。
  *   ~/.claude/projects/<encoded-cwd>/<sessionId>.jsonl
  */
@@ -50,6 +62,154 @@ export function resolveSessionJsonlPath(sessionId: string, cwd?: string): string
   const baseCwd = cwd ?? process.cwd()
   const projectDir = encodeCwdToProjectDir(baseCwd)
   return join(homedir(), '.claude', 'projects', projectDir, `${sessionId}.jsonl`)
+}
+
+/**
+ * claude 磁盘会话扫描结果——比 SessionSummary 多了 cwd 和 sizeBytes。
+ * 与 SessionSummary 的 cwd?/sizeBytes? 可选字段对齐，可作为它的超集使用。
+ */
+export interface ClaudeSessionOnDisk {
+  backendThreadId: string
+  title: string | null
+  lastActiveAt: number
+  model: string | null
+  /** 反推的 cwd（项目目录名 decode 回来，可能歧义，上层用 workspace 正向匹配兜底） */
+  cwd: string
+  /** jsonl 文件大小（字节） */
+  sizeBytes: number
+}
+
+/**
+ * 流式扫 jsonl 文件，同时拿 aiTitle 和 model。
+ *
+ * 为什么不用 readFileSync 头部 4KB：
+ * - claude 通常先写 queue-operation / user message / 大体积 attachment（嵌入文件全文），
+ *   再写 ai-title——实测 76/90 的会话 ai-title 偏移 > 4KB，中位 26KB，最大 284KB，
+ *   4KB 截断会漏掉 99% 的 title（曾导致扫描导入 UI 看不到标题）。
+ * - readFileSync 没有 length 参数，本来就是全量读，4KB 截断只省搜索不省 I/O，
+ *   且 title/model 各读一遍又把 I/O 翻倍。
+ *
+ * 现在用 createReadStream + readline，遇到第一个 ai-title 和 assistant.model 就记下，
+ * 两个都拿到 early break——大文件不全读，且只读一遍同时拿两个字段。
+ *
+ * 容错：读半行 / parse 失败 / 文件不可读 都返回 null，不抛。
+ */
+async function readTitleAndModel(
+  filePath: string,
+): Promise<{ title: string | null; model: string | null }> {
+  let title: string | null = null
+  let model: string | null = null
+  try {
+    const stream = createInterface({
+      input: createReadStream(filePath, { encoding: 'utf-8' }),
+      crlfDelay: Infinity,
+    })
+    for await (const rawLine of stream) {
+      const line = rawLine.trim()
+      if (!line) continue
+      // JSON.parse 每行有成本——先粗筛，行里没有 "type" 字段的一律跳过
+      // （queue-operation/user/assistant/ai-title 等都有 "type"）
+      if (!line.includes('"type"')) continue
+      try {
+        const obj = JSON.parse(line) as {
+          type?: string
+          aiTitle?: string
+          message?: { model?: string }
+        }
+        if (!title && obj.type === 'ai-title' && obj.aiTitle) {
+          title = obj.aiTitle
+        }
+        if (!model && obj.type === 'assistant' && obj.message?.model) {
+          model = obj.message.model
+        }
+        // 两个都拿到就停——后面几十万行不读了
+        if (title && model) break
+      } catch {
+        // 半行 / 损坏行——继续扫下一行
+      }
+    }
+  } catch {
+    // 文件不可读——返回 null/null
+  }
+  return { title, model }
+}
+
+/**
+ * 扫磁盘枚举 claude 会话。
+ *
+ * - 传 cwd：只扫 encodeCwdToProjectDir(cwd) 对应子目录
+ * - 不传 cwd：扫所有 ~/.claude/projects/* 子目录（全盘扫描，给「扫描导入」功能用）
+ *
+ * 跳过：非 `.jsonl` 文件、隐藏文件、stat 失败的文件。
+ * title/model 用流式读——遇到首个 ai-title / assistant.model 就记下，两个都
+ * 拿到 early break（见 readTitleAndModel 为什么不全量读）。
+ * lastActiveAt 用文件 mtime（毫秒）。
+ *
+ * 单个文件出错不影响整个扫描——只跳过该文件。
+ */
+export async function listClaudeSessionsFromDisk(cwd?: string): Promise<ClaudeSessionOnDisk[]> {
+  const projectsRoot = join(homedir(), '.claude', 'projects')
+
+  // 决定要扫的子目录列表：[{dir, cwd}]
+  type Target = { dirName: string; decodedCwd: string }
+  let targets: Target[]
+  if (cwd) {
+    // 单目录模式——cwd 是精确的，无歧义
+    const dirName = encodeCwdToProjectDir(cwd)
+    targets = [{ dirName, decodedCwd: cwd }]
+  } else {
+    // 全盘模式——枚举所有项目目录，cwd 是反推的（可能歧义）
+    try {
+      const entries = readdirSync(projectsRoot, { withFileTypes: true })
+      targets = entries
+        .filter((e) => e.isDirectory() && !e.name.startsWith('.'))
+        .map((e) => ({ dirName: e.name, decodedCwd: decodeProjectDirToCwd(e.name) }))
+    } catch {
+      // ~/.claude/projects 不存在（claude 从未运行过）
+      log.info('projects root not found, returning empty:', projectsRoot)
+      return []
+    }
+  }
+
+  const results: ClaudeSessionOnDisk[] = []
+  for (const { dirName, decodedCwd } of targets) {
+    const dirPath = join(projectsRoot, dirName)
+    let files: string[]
+    try {
+      files = readdirSync(dirPath)
+    } catch {
+      continue // 子目录读不了——跳过
+    }
+    for (const fileName of files) {
+      if (!fileName.endsWith('.jsonl') || fileName.startsWith('.')) continue
+      const filePath = join(dirPath, fileName)
+      try {
+        const stat = statSync(filePath)
+        if (!stat.isFile()) continue
+        const sessionId = fileName.slice(0, -'.jsonl'.length)
+        const { title, model } = await readTitleAndModel(filePath)
+        results.push({
+          backendThreadId: sessionId,
+          cwd: decodedCwd,
+          title,
+          model,
+          lastActiveAt: stat.mtimeMs,
+          sizeBytes: stat.size,
+        })
+      } catch {
+        // 单文件出错跳过
+      }
+    }
+  }
+
+  log.info(
+    'scan from disk',
+    cwd ? `(cwd=${cwd})` : '(all projects)',
+    '→',
+    results.length,
+    'sessions',
+  )
+  return results
 }
 
 /** jsonl 文件里一行的解析结果（claudeReplayToMessages 需要的形态） */

@@ -75,6 +75,38 @@ export interface ToolCallInfo {
   kind: 'shell_command' | 'file_edit' | 'file_read' | 'mcp' | 'other'
   title: string
   detail?: string
+  /**
+   * file_edit only：结构化编辑数据，前端用来渲染红绿 diff（优先于 detail）。
+   * 后端 mapping 层从 claude Edit/Write/MultiEdit input 或 codex file_change.diff 提取。
+   * 没有这个字段时前端回退到把 detail 当纯文本展示。
+   */
+  edit?: ToolEditInfo
+}
+
+/**
+ * 文件编辑的结构化数据——前端 DiffView 用来渲染真正的 diff（红绿块），不是 JSON.stringify。
+ *
+ * 三种来源对应三种 type：
+ * - `unified_diff`：codex 的 file_change item 自带标准 unified diff 文本（@@ ... @@ + 行级 +/-）
+ * - `string_replace`：claude Edit 工具——一组 old_string → new_string
+ * - `full_content`：claude Write 工具——整文件覆盖（没有"old"概念，展示完整新内容）
+ *
+ * MultiEdit 走 `edits` 数组（多组 string_replace）。
+ */
+export interface ToolEditInfo {
+  type: 'unified_diff' | 'string_replace' | 'full_content'
+  /** 被编辑的文件路径（用于 header 显示） */
+  filePath: string
+  /** type === 'unified_diff'：标准 git diff 文本 */
+  diff?: string
+  /** type === 'string_replace'：单组替换的原文 */
+  oldString?: string
+  /** type === 'string_replace'：单组替换的新文 */
+  newString?: string
+  /** type === 'full_content'：完整新文件内容 */
+  content?: string
+  /** MultiEdit：多组替换（type 仍是 'string_replace'，前端遍历渲染多块） */
+  edits?: Array<{ oldString: string; newString: string }>
 }
 
 /** 工具输出（归一化） */
@@ -206,6 +238,11 @@ export interface SessionSummary {
   title: string | null
   lastActiveAt: number
   model: string | null
+  /** claude only：磁盘上反推出的 cwd（jsonl 文件所在项目目录名 decode 回来），
+   *  用于「扫描导入」时与已注册 workspace 路径匹配。codex thread/list 不返回此字段。 */
+  cwd?: string
+  /** claude only：jsonl 文件大小（字节），导入 UI 显示用 */
+  sizeBytes?: number
 }
 
 /** Adapter 抛的错误 */

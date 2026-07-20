@@ -1,5 +1,5 @@
-import { app, BrowserWindow } from 'electron'
 import { is } from '@electron-toolkit/utils'
+import { app, BrowserWindow } from 'electron'
 
 import { ctx } from './context'
 import { registerAllHandlers } from './ipc/register'

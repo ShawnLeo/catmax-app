@@ -1,5 +1,5 @@
-import { ctx } from '@main/context'
 import { parseSystemProxy } from '@main/backend/proxy-env'
+import { ctx } from '@main/context'
 import type { DetectedSystemProxy, OpenDialogArgs, PlatformInfo } from '@shared/ipc/system'
 import { dialog, shell } from 'electron'
 
@@ -39,7 +39,11 @@ export const openExternal = async (args: { url: string }): Promise<void> => {
 export const detectProxy = async (): Promise<DetectedSystemProxy> => {
   // Linux: 直接读 env
   if (process.platform === 'linux') {
-    const url = process.env.HTTPS_PROXY ?? process.env.https_proxy ?? process.env.HTTP_PROXY ?? process.env.http_proxy
+    const url =
+      process.env.HTTPS_PROXY ??
+      process.env.https_proxy ??
+      process.env.HTTP_PROXY ??
+      process.env.http_proxy
     if (url) {
       return {
         enabled: true,
@@ -71,10 +75,13 @@ export const detectProxy = async (): Promise<DetectedSystemProxy> => {
     try {
       const { execSync } = await import('node:child_process')
       const regQuery = (key: string) =>
-        execSync(`reg query "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings" /v ${key}`, {
-          encoding: 'utf-8',
-          timeout: 3000,
-        }).trim()
+        execSync(
+          `reg query "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings" /v ${key}`,
+          {
+            encoding: 'utf-8',
+            timeout: 3000,
+          },
+        ).trim()
       const enableStr = regQuery('ProxyEnable')
       const enabled = /ProxyEnable\s+REG_DWORD\s+0x1/i.test(enableStr)
       if (!enabled) {

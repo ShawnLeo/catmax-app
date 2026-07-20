@@ -16,14 +16,15 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-import { describe, expect, test, afterEach } from 'vitest'
-
 import {
+  decodeProjectDirToCwd,
   encodeCwdToProjectDir,
+  listClaudeSessionsFromDisk,
   readClaudeSessionJsonl,
   readHistoryFromJsonl,
   resolveSessionJsonlPath,
 } from '@main/backend/claude/jsonl-reader'
+import { describe, expect, test, afterEach } from 'vitest'
 
 const tempDirs: string[] = []
 
@@ -245,5 +246,184 @@ describe('ClaudeAdapter.getHistory 集成（Bug E-2）', () => {
     const adapter = new ClaudeAdapter()
     const result = await adapter.getHistory('sess-F', '/cwd-F')
     expect(result.aiTitle).toBeNull()
+  })
+})
+
+describe('decodeProjectDirToCwd', () => {
+  test('encodeCwdToProjectDir 的逆运算（路径不含 - 时无歧义）', () => {
+    expect(decodeProjectDirToCwd('-Users-shawn-foo')).toBe('/Users/shawn/foo')
+    expect(decodeProjectDirToCwd('-tmp')).toBe('/tmp')
+  })
+})
+
+describe('listClaudeSessionsFromDisk', () => {
+  /** 造一个 fake HOME 含多个项目目录 + jsonl，返回 fakeHome 路径 */
+  function setupFakeProjectsHome(): string {
+    const fakeHome = mkdtempSync(join(tmpdir(), 'claude-scan-'))
+    tempDirs.push(fakeHome)
+    process.env.HOME = fakeHome
+
+    const projectsRoot = join(fakeHome, '.claude', 'projects')
+    mkdirSync(projectsRoot, { recursive: true })
+
+    // 项目 1：/test/proj-a，2 个 session（其中一个有 ai-title）
+    const projA = join(projectsRoot, '-test-proj-a')
+    mkdirSync(projA, { recursive: true })
+    writeFileSync(
+      join(projA, 'sess-a1.jsonl'),
+      [
+        JSON.stringify({ type: 'ai-title', aiTitle: 'Project A Session 1' }),
+        JSON.stringify({
+          type: 'assistant',
+          message: { id: 'm1', role: 'assistant', model: 'claude-sonnet', content: [] },
+        }),
+      ].join('\n') + '\n',
+      'utf-8',
+    )
+    writeFileSync(
+      join(projA, 'sess-a2.jsonl'),
+      [JSON.stringify({ type: 'user', message: { role: 'user', content: 'hi' } })].join('\n') +
+        '\n',
+      'utf-8',
+    )
+
+    // 项目 2：/test/proj-b，1 个 session，没有 ai-title
+    const projB = join(projectsRoot, '-test-proj-b')
+    mkdirSync(projB, { recursive: true })
+    writeFileSync(
+      join(projB, 'sess-b1.jsonl'),
+      [JSON.stringify({ type: 'user', message: { role: 'user', content: 'hello' } })].join('\n') +
+        '\n',
+      'utf-8',
+    )
+
+    // 非 .jsonl 文件——应该被跳过
+    writeFileSync(join(projA, 'README.txt'), 'ignore me', 'utf-8')
+    // 隐藏文件——应该被跳过
+    writeFileSync(join(projA, '.hidden.jsonl'), '{}', 'utf-8')
+    // 损坏 jsonl——应能扫到（stat 成功），但 title 为 null
+    writeFileSync(join(projA, 'sess-broken.jsonl'), '{not valid json\n', 'utf-8')
+
+    return fakeHome
+  }
+
+  test('不传 cwd：扫所有项目目录的所有 .jsonl', async () => {
+    setupFakeProjectsHome()
+    const result = await listClaudeSessionsFromDisk()
+    // a1 + a2 + broken + b1 = 4 个有效 jsonl
+    expect(result.length).toBe(4)
+    const ids = result.map((r) => r.backendThreadId).sort()
+    expect(ids).toEqual(['sess-a1', 'sess-a2', 'sess-b1', 'sess-broken'])
+  })
+
+  test('从 jsonl 流式读 aiTitle，没有 ai-title 行时为 null', async () => {
+    setupFakeProjectsHome()
+    const result = await listClaudeSessionsFromDisk()
+    const a1 = result.find((r) => r.backendThreadId === 'sess-a1')
+    const a2 = result.find((r) => r.backendThreadId === 'sess-a2')
+    expect(a1?.title).toBe('Project A Session 1')
+    expect(a2?.title).toBeNull()
+  })
+
+  test('从 jsonl 读 model', async () => {
+    setupFakeProjectsHome()
+    const result = await listClaudeSessionsFromDisk()
+    const a1 = result.find((r) => r.backendThreadId === 'sess-a1')
+    expect(a1?.model).toBe('claude-sonnet')
+  })
+
+  test('cwd 字段是反推出来的（可能歧义，但格式正确）', async () => {
+    setupFakeProjectsHome()
+    const result = await listClaudeSessionsFromDisk()
+    const a1 = result.find((r) => r.backendThreadId === 'sess-a1')
+    expect(a1?.cwd).toBe('/test/proj/a') // 注意歧义：原本是 /test/proj-a
+  })
+
+  test('sizeBytes 是文件大小', async () => {
+    setupFakeProjectsHome()
+    const result = await listClaudeSessionsFromDisk()
+    for (const r of result) {
+      expect(r.sizeBytes).toBeGreaterThan(0)
+    }
+  })
+
+  test('lastActiveAt 是文件 mtime（毫秒）', async () => {
+    setupFakeProjectsHome()
+    const result = await listClaudeSessionsFromDisk()
+    for (const r of result) {
+      expect(r.lastActiveAt).toBeGreaterThan(0)
+      // 是毫秒级时间戳（应该接近现在）
+      expect(Date.now() - r.lastActiveAt).toBeLessThan(60_000)
+    }
+  })
+
+  test('传 cwd：只扫单个项目目录', async () => {
+    setupFakeProjectsHome()
+    const result = await listClaudeSessionsFromDisk('/test/proj-a')
+    expect(result.length).toBe(3) // a1 + a2 + broken
+    expect(result.every((r) => r.cwd === '/test/proj-a')).toBe(true) // cwd 无歧义
+  })
+
+  test('projects 目录不存在时返回空数组', async () => {
+    const fakeHome = mkdtempSync(join(tmpdir(), 'empty-home-'))
+    tempDirs.push(fakeHome)
+    process.env.HOME = fakeHome
+    // 不创建 .claude/projects 目录
+    const result = await listClaudeSessionsFromDisk()
+    expect(result).toEqual([])
+  })
+
+  test('跳过隐藏目录（. 开头）', async () => {
+    const fakeHome = mkdtempSync(join(tmpdir(), 'hidden-dir-'))
+    tempDirs.push(fakeHome)
+    process.env.HOME = fakeHome
+    const projectsRoot = join(fakeHome, '.claude', 'projects')
+    mkdirSync(join(projectsRoot, '.cache'), { recursive: true }) // 隐藏目录
+    mkdirSync(join(projectsRoot, '-real-proj'), { recursive: true })
+    writeFileSync(
+      join(projectsRoot, '-real-proj', 'x.jsonl'),
+      JSON.stringify({ type: 'user', message: { role: 'user', content: 'x' } }) + '\n',
+      'utf-8',
+    )
+
+    const result = await listClaudeSessionsFromDisk()
+    expect(result.length).toBe(1) // 只有 -real-proj 下的，.cache 被跳过
+    expect(result[0]?.backendThreadId).toBe('x')
+  })
+
+  test('ai-title 不在文件头部时（>4KB）仍能扫到——回归测', async () => {
+    // 之前 readFileSync + 截断 4KB 的实现会漏掉这种——实测 76/90 的真实会话
+    // ai-title 偏移中位 26KB，4KB 截断丢了 99%。改成流式扫后才能拿到。
+    const fakeHome = mkdtempSync(join(tmpdir(), 'late-title-'))
+    tempDirs.push(fakeHome)
+    process.env.HOME = fakeHome
+    const projectsRoot = join(fakeHome, '.claude', 'projects')
+    const projDir = join(projectsRoot, '-test-late')
+    mkdirSync(projDir, { recursive: true })
+
+    // 先写一个巨大的 attachment（> 4KB）把 ai-title 挤到后面
+    const bigAttachment = JSON.stringify({
+      type: 'attachment',
+      attachment: {
+        type: 'file',
+        filename: 'huge.json',
+        content: { type: 'text', file: { filePath: 'huge.json', content: 'x'.repeat(20_000) } },
+      },
+    })
+    const lines = [
+      JSON.stringify({ type: 'queue-operation', operation: 'enqueue' }),
+      bigAttachment,
+      JSON.stringify({ type: 'ai-title', aiTitle: 'Late Title' }),
+      JSON.stringify({
+        type: 'assistant',
+        message: { id: 'm1', role: 'assistant', model: 'claude-sonnet', content: [] },
+      }),
+    ]
+    writeFileSync(join(projDir, 'sess-late.jsonl'), lines.join('\n') + '\n', 'utf-8')
+
+    const result = await listClaudeSessionsFromDisk()
+    expect(result.length).toBe(1)
+    expect(result[0]?.title).toBe('Late Title')
+    expect(result[0]?.model).toBe('claude-sonnet')
   })
 })

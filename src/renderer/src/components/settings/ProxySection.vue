@@ -3,8 +3,8 @@
     <header>
       <h2 class="text-lg font-semibold text-foreground">网络代理</h2>
       <p class="text-sm text-muted-foreground">
-        为后端 CLI（codex / claude）注入 HTTPS_PROXY 环境变量。
-        macOS 系统代理不会自动传给命令行工具，需要在这里显式配置。
+        为后端 CLI（codex / claude）注入 HTTPS_PROXY 环境变量。 macOS
+        系统代理不会自动传给命令行工具，需要在这里显式配置。
       </p>
     </header>
 
@@ -142,7 +142,10 @@ async function detectSystemProxy(): Promise<void> {
   try {
     const detected = await window.api.system.detectProxy()
     if (!detected.enabled) {
-      setStatus('未检测到系统代理（macOS 用 scutil --proxy，Linux 看 env，Windows 看注册表）', 'error')
+      setStatus(
+        '未检测到系统代理（macOS 用 scutil --proxy，Linux 看 env，Windows 看注册表）',
+        'error',
+      )
       return
     }
     // 把检测结果写入 settings

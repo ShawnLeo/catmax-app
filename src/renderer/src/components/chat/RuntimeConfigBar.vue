@@ -19,13 +19,10 @@
         :value="status.id"
         :disabled="!status.available"
         :title="
-          status.available
-            ? status.version ?? undefined
-            : explainBackendError(status.error).title
+          status.available ? (status.version ?? undefined) : explainBackendError(status.error).title
         "
       >
-        {{ status.id
-        }}{{ status.available ? '' : ` (${explainBackendError(status.error).title})` }}
+        {{ status.id }}{{ status.available ? '' : ` (${explainBackendError(status.error).title})` }}
       </option>
     </select>
 

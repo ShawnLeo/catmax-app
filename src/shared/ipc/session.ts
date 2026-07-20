@@ -15,6 +15,49 @@ export interface CreateSessionArgs {
   initialPrompt?: string
 }
 
+/** 「扫描导入」扫到的单条 importable session */
+export interface ImportableSession {
+  backend: BackendId
+  backendThreadId: string
+  title: string | null
+  lastActiveAt: number
+  model: string | null
+  /** claude only：反推出的 cwd */
+  cwd?: string
+  /** claude only：jsonl 文件大小 */
+  sizeBytes?: number
+  /** 是否已在 db（任意 workspace） */
+  alreadyImported: boolean
+  /** alreadyImported=true 时所在 workspace id */
+  existingWorkspaceId?: string
+  /** claude only：反推 cwd 精确匹配到的 workspace id */
+  matchedWorkspaceId?: string
+}
+
+export interface ScanImportableResult {
+  sessions: ImportableSession[]
+  /** claude 反推 cwd 无法精确匹配任何 workspace 的条数（不含 alreadyImported） */
+  unmatchedCount: number
+  /** 单 backend 失败时的错误（如 codex 进程未启动） */
+  errors: Array<{ backend: BackendId; error: string }>
+}
+
+/** 单条导入项——用户在 dialog 里勾选 + 选好 workspace 后产出 */
+export interface ImportSessionItem {
+  backend: BackendId
+  backendThreadId: string
+  workspaceId: string
+}
+
+export interface ImportSessionArgs {
+  sessions: ImportSessionItem[]
+}
+
+export interface ImportSessionsResult {
+  imported: SessionView[]
+  skipped: Array<{ backendThreadId: string; reason: string }>
+}
+
 export type SessionHandlers = {
   'session.list': (args: { workspaceId: string }) => Promise<SessionView[]>
   'session.create': (args: CreateSessionArgs) => Promise<{ sessionId: string }>
@@ -23,6 +66,8 @@ export type SessionHandlers = {
     added: SessionView[]
     removed: string[]
   }>
+  'session.scanImportable': () => Promise<ScanImportableResult>
+  'session.import': (args: ImportSessionArgs) => Promise<ImportSessionsResult>
   'session.detail': (args: { sessionId: string }) => Promise<{
     session: SessionView
     messages: NormalizedMessage[]

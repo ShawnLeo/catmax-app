@@ -12,7 +12,6 @@ import { randomUUID } from 'node:crypto'
 
 import { ctx } from '@main/context'
 import { logger } from '@main/service/logger'
-import type { AppSettings } from '@shared/settings-schema'
 import {
   BackendError,
   type AgentBackend,
@@ -20,11 +19,13 @@ import {
   type BackendStatus,
   type ModelOption,
   type NormalizedMessage,
+  type SessionSummary,
   type StartSessionArgs,
   type StartTurnArgs,
   type TurnEvent,
 } from '@shared/backend/types'
 import type { BackendId } from '@shared/constants'
+import type { AppSettings } from '@shared/settings-schema'
 
 import { ClaudeAdapter } from './claude/adapter'
 import { CodexAdapter } from './codex/adapter'
@@ -273,10 +274,7 @@ export class BackendManager {
    * sessionIdMap 把它映射到了真实 session_id；onRealSessionId 回调时 db 的
    * backend_thread_id 已经被回写成真实 id。所以查 db 时要用真实 id。
    */
-  private async refreshClaudeSessionTitle(
-    backendThreadId: string,
-    cwd?: string,
-  ): Promise<void> {
+  private async refreshClaudeSessionTitle(backendThreadId: string, cwd?: string): Promise<void> {
     // 翻译占位 id → 真实 id（onRealSessionId 回调时记下来的）
     const realThreadId = this.claudeSessionIdMap.get(backendThreadId) ?? backendThreadId
     const session = ctx.db.findSessionByBackendThreadId('claude', realThreadId)
@@ -336,6 +334,49 @@ export class BackendManager {
   /** 列出后端会话（透传给 adapter） */
   async listSessions(cwd?: string) {
     return this.getCurrent().listSessions(cwd)
+  }
+
+  /**
+   * 全盘扫描所有 backend 的会话（用于「扫描导入」功能）。
+   *
+   * 与 `listSessions` 的差异：
+   * - 不只查当前 backend，遍历所有 adapter（codex + claude）
+   * - 不传 cwd——codex thread/list 返回全部；claude 扫所有 ~/.claude/projects/*
+   * - 单 backend 失败容错——记到 errors 数组，不影响其他 backend 的结果
+   *
+   * 注意 codex 调 listSessions 会触发 ensureInitialized——如果 codex 进程没在线
+   * 会卡 30s 超时，所以这里用 Promise.allSettled 不阻塞其他 backend。
+   */
+  async listAllSessionsAcrossBackends(): Promise<{
+    byBackend: Record<BackendId, SessionSummary[]>
+    errors: Array<{ backend: BackendId; error: string }>
+  }> {
+    const backendIds = Array.from(this.adapters.keys())
+    const settled = await Promise.allSettled(
+      backendIds.map(async (id) => ({
+        backend: id,
+        sessions: await this.adapters.get(id)!.listSessions(),
+      })),
+    )
+
+    const byBackend = {} as Record<BackendId, SessionSummary[]>
+    const errors: Array<{ backend: BackendId; error: string }> = []
+    for (const result of settled) {
+      if (result.status === 'fulfilled') {
+        byBackend[result.value.backend] = result.value.sessions
+      } else {
+        // 失败的 backend——在 byBackend 里给个空数组，UI 能正常 iterate
+        // 但要从未 fulfilled 列表里反推 backend id（allSettled 保留顺序，对照 backendIds）
+        const failedIdx = settled.indexOf(result)
+        const backend = backendIds[failedIdx] ?? 'codex'
+        byBackend[backend] = []
+        const message =
+          result.reason instanceof Error ? result.reason.message : String(result.reason)
+        errors.push({ backend, error: message })
+        log.warn(`listSessions failed for ${backend}:`, message)
+      }
+    }
+    return { byBackend, errors }
   }
 
   /** resume session（透传） */

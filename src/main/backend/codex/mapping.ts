@@ -59,10 +59,19 @@ export function codexItemToToolCallInfo(item: CodexItem): ToolCallInfo | null {
         .slice(0, 5)
         .join(', ')
       const summary = `${fc.changes.length} file(s): ${paths}`
+      // codex 的 change 自带标准 unified diff 文本（c.diff），结构化透传给前端 DiffView
+      const unifiedDiff = fc.changes
+        .filter((c) => c.diff)
+        .map((c) => c.diff!)
+        .join('\n')
       return {
         kind: 'file_edit',
         title: summary.slice(0, 80),
+        // detail 保留作为 fallback（前端没有 edit 字段或解析失败时用）
         detail: fc.changes.map((c) => `--- ${c.path} (${c.kind}) ---\n${c.diff ?? ''}`).join('\n'),
+        ...(unifiedDiff
+          ? { edit: { type: 'unified_diff' as const, filePath: paths, diff: unifiedDiff } }
+          : {}),
       }
     }
     case 'mcp_tool_call': {

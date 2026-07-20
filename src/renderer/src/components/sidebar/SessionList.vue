@@ -9,14 +9,23 @@
     </div>
 
     <template v-else>
-      <!-- 顶部：新建会话按钮 + backend tab -->
-      <button
-        class="w-full mb-2 px-3 py-2 text-sm text-primary hover:bg-muted rounded-md flex items-center gap-2 border border-sidebar-border"
-        @click="newSession"
-      >
-        <PlusIcon class="w-4 h-4" />
-        新建会话
-      </button>
+      <!-- 顶部：新建会话 + 扫描导入按钮 -->
+      <div class="flex gap-1.5 mb-2">
+        <button
+          class="flex-1 px-3 py-2 text-sm text-primary hover:bg-muted rounded-md flex items-center gap-2 border border-sidebar-border"
+          @click="newSession"
+        >
+          <PlusIcon class="w-4 h-4" />
+          新建会话
+        </button>
+        <button
+          class="px-2.5 py-2 text-xs text-muted-foreground hover:text-foreground hover:bg-muted rounded-md border border-sidebar-border"
+          title="扫描磁盘/RPC 上已存在但还没纳入 catmax 的 claude/codex 会话"
+          @click="importDialogOpen = true"
+        >
+          <DownloadIcon class="w-4 h-4" />
+        </button>
+      </div>
 
       <!-- backend tab —— 切 tab = 筛选该 backend 的会话 + 切换当前后端 -->
       <div class="flex border-b border-sidebar-border mb-2">
@@ -60,6 +69,9 @@
         </div>
       </div>
     </template>
+
+    <!-- 「扫描导入」对话框 -->
+    <ImportSessionsDialog v-if="importDialogOpen" @close="onImportDialogClose" />
   </div>
 </template>
 
@@ -70,14 +82,18 @@ import { useMessageStore } from '@renderer/stores/message'
 import { useSessionStore } from '@renderer/stores/session'
 import { useWorkspaceStore } from '@renderer/stores/workspace'
 import { BACKEND_IDS, type BackendId } from '@shared/constants'
-import { PlusIcon } from 'lucide-vue-next'
-import { computed, onMounted, watch } from 'vue'
+import { DownloadIcon, PlusIcon } from 'lucide-vue-next'
+import { computed, onMounted, ref, watch } from 'vue'
 
+import ImportSessionsDialog from './ImportSessionsDialog.vue'
 import SessionItem from './SessionItem.vue'
 
 const workspaceStore = useWorkspaceStore()
 const sessionStore = useSessionStore()
 const backendStore = useBackendStore()
+
+/** 「扫描导入」对话框显隐——点按钮打开，dialog 关闭时刷新会话列表 */
+const importDialogOpen = ref(false)
 const messageStore = useMessageStore()
 
 /** 当前 backend tab 下的会话——直接按 session.backend 筛选，不依赖 continuable 字段 */
@@ -171,5 +187,17 @@ async function removeSession(id: string): Promise<void> {
 function newSession(): void {
   sessionStore.setCurrent('')
   messageStore.reset()
+}
+
+/**
+ * 「扫描导入」对话框关闭时刷新当前 workspace 的 session 列表——
+ * 即使没有导入任何东西也刷新一下（用户可能用了"用此路径新建工作区"，
+ * workspaces 列表变了，重 load 一下让 badge 数字对齐）。
+ */
+async function onImportDialogClose(): Promise<void> {
+  importDialogOpen.value = false
+  if (workspaceStore.currentWorkspace) {
+    await sessionStore.load(workspaceStore.currentWorkspace.id)
+  }
 }
 </script>

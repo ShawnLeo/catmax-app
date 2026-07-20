@@ -24,6 +24,9 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     const args = name === undefined ? { path } : { path, name }
     const ws = await window.api.workspace.add(args)
     workspaces.value.unshift(ws)
+    // 添加完自动切到新工作区——用户显式添加的意图就是想用它。
+    // 之前每个调用点都得自己 setCurrent，容易漏（侧边栏/设置页/命令面板都漏过）。
+    currentWorkspaceId.value = ws.id
     return ws
   }
 

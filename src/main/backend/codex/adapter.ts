@@ -45,9 +45,8 @@ import {
   type TurnEvent,
 } from '@shared/backend/types'
 
-import { type ProcessSpawner, RealProcessSpawner } from '../process-spawner'
-
 import { checkCliHealth } from '../health-check'
+import { type ProcessSpawner, RealProcessSpawner } from '../process-spawner'
 
 import {
   codexTurnsToMessages,

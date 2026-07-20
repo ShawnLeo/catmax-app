@@ -6,17 +6,19 @@
  * 一直是空——侧边栏永远显示 "(新会话)"。修复后 getSessionDetail 会把 aiTitle 回写
  * db + 返回给 renderer。
  */
+import { randomUUID } from 'node:crypto'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { randomUUID } from 'node:crypto'
 
 import { describe, expect, test, afterEach, vi } from 'vitest'
 
 // 用 vi.hoisted 让 spy 数组在 mock 工厂里可访问（vi.mock 是 hoisted）
 const { updateTitleCalls } = vi.hoisted(() => ({ updateTitleCalls: [] as Array<[string, string]> }))
 // 每个 test 用 mockImplementation/mockResolvedValueOnce 控制返回值；这是 fallback 默认
-const { defaultAiTitle } = vi.hoisted(() => ({ defaultAiTitle: { value: 'Auto Title from Backend' } }))
+const { defaultAiTitle } = vi.hoisted(() => ({
+  defaultAiTitle: { value: 'Auto Title from Backend' },
+}))
 
 vi.mock('@main/context', async () => {
   const { DatabaseService } = await import('@main/service/database')

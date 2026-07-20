@@ -118,7 +118,9 @@ describe('Bug E-3: BackendManager.onRealSessionId 注入逻辑', () => {
   test('构造 ClaudeAdapter 时注入 onRealSessionId，调用时更新 db', async () => {
     // vi.mock 工厂被 hoist 到顶部时不能引用普通变量，必须用 vi.hoisted
     // 创建共享 spy。
-    const { updateCalls } = vi.hoisted(() => ({ updateCalls: [] as Array<[string, string, string]> }))
+    const { updateCalls } = vi.hoisted(() => ({
+      updateCalls: [] as Array<[string, string, string]>,
+    }))
     vi.mock('@main/context', () => ({
       ctx: {
         db: {

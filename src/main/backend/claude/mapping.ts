@@ -38,8 +38,70 @@ export function toolUseToInfo(block: ToolUseContent): ToolCallInfo {
         title: typeof input?.command === 'string' ? input.command.slice(0, 80) : block.name,
         detail: typeof input?.command === 'string' ? input.command : JSON.stringify(input),
       }
-    case 'Edit':
-    case 'Write':
+    case 'Edit': {
+      // Edit: { file_path, old_string, new_string } → 结构化 string_replace
+      const fp = typeof input?.file_path === 'string' ? input.file_path : ''
+      const oldStr = typeof input?.old_string === 'string' ? input.old_string : ''
+      const newStr = typeof input?.new_string === 'string' ? input.new_string : ''
+      return {
+        kind: 'file_edit',
+        title: `Edit: ${fp}`,
+        detail: JSON.stringify(input, null, 2), // 保留 fallback（前端优先用 edit）
+        ...(oldStr !== '' || newStr !== ''
+          ? {
+              edit: {
+                type: 'string_replace' as const,
+                filePath: fp,
+                oldString: oldStr,
+                newString: newStr,
+              },
+            }
+          : {}),
+      }
+    }
+    case 'MultiEdit': {
+      // MultiEdit: { file_path, edits: [{old_string, new_string}, ...] } → 多组 string_replace
+      const fp = typeof input?.file_path === 'string' ? input.file_path : ''
+      const rawEdits = Array.isArray(input?.edits) ? input!.edits : []
+      const edits: Array<{ oldString: string; newString: string }> = []
+      for (const e of rawEdits) {
+        if (typeof e !== 'object' || e === null) continue
+        const o = (e as { old_string?: unknown }).old_string
+        const n = (e as { new_string?: unknown }).new_string
+        if (typeof o === 'string' && typeof n === 'string') {
+          edits.push({ oldString: o, newString: n })
+        }
+      }
+      return {
+        kind: 'file_edit',
+        title: `MultiEdit: ${fp}`,
+        detail: JSON.stringify(input, null, 2),
+        ...(edits.length > 0
+          ? {
+              edit: {
+                type: 'string_replace' as const,
+                filePath: fp,
+                oldString: edits[0]!.oldString,
+                newString: edits[0]!.newString,
+                edits,
+              },
+            }
+          : {}),
+      }
+    }
+    case 'Write': {
+      // Write: { file_path, content } → 整文件覆盖
+      const fp = typeof input?.file_path === 'string' ? input.file_path : ''
+      const content = typeof input?.content === 'string' ? input.content : ''
+      return {
+        kind: 'file_edit',
+        title: `Write: ${fp}`,
+        detail: JSON.stringify(input, null, 2),
+        ...(content !== ''
+          ? { edit: { type: 'full_content' as const, filePath: fp, content } }
+          : {}),
+      }
+    }
     case 'NotebookEdit':
       return {
         kind: 'file_edit',

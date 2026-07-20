@@ -65,6 +65,10 @@ export const api = {
     create: requestMain<SessionHandlers, 'session.create'>(IPC.SESSION_CREATE),
     remove: requestMain<SessionHandlers, 'session.remove'>(IPC.SESSION_REMOVE),
     reconcile: requestMain<SessionHandlers, 'session.reconcile'>(IPC.SESSION_RECONCILE),
+    scanImportable: requestMain<SessionHandlers, 'session.scanImportable'>(
+      IPC.SESSION_SCAN_IMPORTABLE,
+    ),
+    import: requestMain<SessionHandlers, 'session.import'>(IPC.SESSION_IMPORT),
     detail: requestMain<SessionHandlers, 'session.detail'>(IPC.SESSION_DETAIL),
     onTitleChanged: (cb: (payload: SessionPushEvents['session:titleChanged']) => void) =>
       subscribeToMainEvent<SessionPushEvents, 'session:titleChanged'>(

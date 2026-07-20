@@ -58,10 +58,10 @@
 </template>
 
 <script setup lang="ts">
+import { useBackendStore } from '@renderer/stores/backend'
 import type { NormalizedMessage } from '@shared/backend/types'
 import { computed } from 'vue'
 
-import { useBackendStore } from '@renderer/stores/backend'
 import MarkdownView from './MarkdownView.vue'
 import ToolCallCard from './ToolCallCard.vue'
 
