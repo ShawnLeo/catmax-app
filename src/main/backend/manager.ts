@@ -12,6 +12,7 @@ import { randomUUID } from 'node:crypto'
 
 import { ctx } from '@main/context'
 import { logger } from '@main/service/logger'
+import type { AppSettings } from '@shared/settings-schema'
 import {
   BackendError,
   type AgentBackend,
@@ -27,16 +28,93 @@ import type { BackendId } from '@shared/constants'
 
 import { ClaudeAdapter } from './claude/adapter'
 import { CodexAdapter } from './codex/adapter'
+import { proxySettingsToEnv } from './proxy-env'
 
 const log = logger.domain('backend-manager')
 
 export class BackendManager {
   private adapters = new Map<BackendId, AgentBackend>()
   private currentBackendId: BackendId = 'codex'
+  /**
+   * claude 内部 sessionId（startSession 生成的占位 UUID）→ claude 真实 session_id 的映射。
+   * 由 onRealSessionId 回调写入，refreshClaudeSessionTitle 用它把 args.sessionId
+   * 翻译成真实 id 后再查 db（db 里的 backend_thread_id 已被 onRealSessionId 回写）。
+   */
+  private claudeSessionIdMap = new Map<string, string>()
 
   constructor() {
     this.adapters.set('codex', new CodexAdapter())
-    this.adapters.set('claude', new ClaudeAdapter())
+    this.adapters.set(
+      'claude',
+      new ClaudeAdapter({
+        // 拿到 claude 真实 session_id 时把 db 里 session.backend_thread_id 从占位 UUID
+        // 更新成真实 id。这样重启应用后用户点历史会话时，getHistory 调 claude --resume
+        // 才能真的找到会话。
+        onRealSessionId: (internalId, realSessionId) => {
+          // 记映射——refreshClaudeSessionTitle 用得到
+          this.claudeSessionIdMap.set(internalId, realSessionId)
+          if (internalId === realSessionId) return // 没变化（续接已有会话时）
+          try {
+            ctx.db.updateSessionBackendThreadId('claude', internalId, realSessionId)
+            log.info('persisted claude real session_id', internalId, '→', realSessionId)
+          } catch (e) {
+            log.warn('failed to persist claude real session_id:', e)
+          }
+        },
+      }),
+    )
+  }
+
+  /**
+   * 应用 settings.json 中的后端相关配置。
+   * 必须在 settingsStore.load() 之后调用：
+   * - 把 backendPaths.{codex,claude} 注入到对应 adapter（用作 binaryPath）
+   * - 把 defaultBackend 设为当前后端（不调 initialize——lazy 等真正用时再握手，
+   *   避免启动时强制拉起一个用户没在用的后端进程）
+   *
+   * 注意：只在当前后端与 settings 不一致时切换——用户在本次会话里手动切过的话，
+   * 这里不应该覆盖（但 settings 是启动时加载的，所以正常顺序下不会有冲突）。
+   */
+  applySettings(settings: AppSettings): void {
+    // 注入 binaryPath
+    const codexAdapter = this.adapters.get('codex')
+    if (codexAdapter instanceof CodexAdapter && settings.backendPaths.codex) {
+      codexAdapter.setBinaryPath(settings.backendPaths.codex)
+    }
+    const claudeAdapter = this.adapters.get('claude')
+    if (claudeAdapter instanceof ClaudeAdapter && settings.backendPaths.claude) {
+      claudeAdapter.setBinaryPath(settings.backendPaths.claude)
+    }
+
+    // 把代理设置转成 env 注入到所有 adapter —— codex/claude CLI 调 LLM API 时
+    // 都靠 HTTPS_PROXY 环境变量走代理（macOS 系统代理不会自动传给子进程）。
+    const proxyEnv = proxySettingsToEnv(settings.httpProxy)
+    if (Object.keys(proxyEnv).length > 0) {
+      for (const adapter of this.adapters.values()) {
+        if (adapter instanceof CodexAdapter || adapter instanceof ClaudeAdapter) {
+          adapter.setExtraEnv(proxyEnv)
+        }
+      }
+      log.info('applied proxy env to adapters:', Object.keys(proxyEnv))
+    } else {
+      // 用户关了代理——清掉之前注入的 env
+      for (const adapter of this.adapters.values()) {
+        if (adapter instanceof CodexAdapter || adapter instanceof ClaudeAdapter) {
+          adapter.setExtraEnv({})
+        }
+      }
+    }
+
+    // 应用 defaultBackend（仅当当前还是初始默认值时——避免覆盖运行时的 switchBackend）
+    if (settings.defaultBackend !== this.currentBackendId) {
+      const adapter = this.adapters.get(settings.defaultBackend)
+      if (adapter) {
+        this.currentBackendId = settings.defaultBackend
+        log.info('applied defaultBackend from settings:', settings.defaultBackend)
+      } else {
+        log.warn('defaultBackend in settings is unknown:', settings.defaultBackend)
+      }
+    }
   }
 
   /** 当前后端 */
@@ -139,12 +217,20 @@ export class BackendManager {
   async startTurn(args: StartTurnArgs): Promise<{ turnId: string }> {
     const turnId = randomUUID()
     const adapter = this.getCurrent()
+    const backendId = this.currentBackendId
 
     // 后台驱动事件流
     void (async () => {
       try {
         for await (const event of adapter.startTurn(args)) {
           ctx.broadcast('backend:turnEvent', { turnId, event })
+        }
+        // turn 正常结束后，触发 aiTitle 刷新（claude 在 jsonl 里写了 ai-title 行）
+        // 失败不阻塞——title 刷新失败不影响主流程
+        if (backendId === 'claude') {
+          void this.refreshClaudeSessionTitle(args.sessionId, args.cwd).catch((e) =>
+            log.warn('refreshClaudeSessionTitle failed:', e),
+          )
         }
       } catch (e) {
         const errorEvent: TurnEvent = {
@@ -160,6 +246,45 @@ export class BackendManager {
     return { turnId }
   }
 
+  /**
+   * turn 完成后从 jsonl 读 aiTitle，回写 db 并广播 sessionTitleChanged 事件
+   * 让 renderer 刷新侧边栏。
+   *
+   * args.sessionId 在 claude 场景下是 startSession 时的占位 UUID。adapter 内部
+   * sessionIdMap 把它映射到了真实 session_id；onRealSessionId 回调时 db 的
+   * backend_thread_id 已经被回写成真实 id。所以查 db 时要用真实 id。
+   */
+  private async refreshClaudeSessionTitle(
+    backendThreadId: string,
+    cwd?: string,
+  ): Promise<void> {
+    // 翻译占位 id → 真实 id（onRealSessionId 回调时记下来的）
+    const realThreadId = this.claudeSessionIdMap.get(backendThreadId) ?? backendThreadId
+    const session = ctx.db.findSessionByBackendThreadId('claude', realThreadId)
+    if (!session) {
+      log.warn('refreshClaudeSessionTitle: session not found for', realThreadId)
+      return
+    }
+    // 用 workspace.path 作为 cwd（claude jsonl 按 cwd 分目录存）
+    const workspace = ctx.db.findWorkspaceById(session.workspaceId)
+    const realCwd = cwd ?? workspace?.path
+    const claudeAdapter = this.adapters.get('claude') as AgentBackend | undefined
+    if (!claudeAdapter) return
+
+    try {
+      const { aiTitle } = await claudeAdapter.getHistory(realThreadId, realCwd)
+      if (aiTitle && aiTitle !== session.title) {
+        ctx.db.updateSessionTitle(session.id, aiTitle)
+        log.info('title refreshed after turn', session.id, aiTitle)
+        // 广播给 renderer——sessionStore 监听后更新本地 sessions 数组
+        ctx.broadcast('session:titleChanged', { sessionId: session.id, title: aiTitle })
+      }
+    } catch (e) {
+      // getHistory 可能失败（jsonl 还没刷盘 / 找不到文件等），不报错
+      log.warn('refreshClaudeSessionTitle: getHistory failed:', e)
+    }
+  }
+
   /** 中断 turn */
   async interruptTurn(turnId: string): Promise<void> {
     return this.getCurrent().interrupt(turnId)
@@ -173,16 +298,20 @@ export class BackendManager {
   /**
    * 读会话历史（按 session.backend 选 adapter，不是当前 backend）。
    * 用于 UI 点击侧边栏会话时显示完整历史，只读、不影响后端状态。
+   *
+   * cwd 必须传——claude adapter 用它作 spawn cwd（历史文件按 cwd 分目录存）。
+   * 返回值里的 aiTitle 是后端给的会话标题（claude jsonl 里的 aiTitle 字段）。
    */
   async getHistory(
     backend: BackendId,
     backendThreadId: string,
-  ): Promise<{ messages: NormalizedMessage[] }> {
+    cwd?: string,
+  ): Promise<{ messages: NormalizedMessage[]; aiTitle?: string | null }> {
     const adapter = this.adapters.get(backend)
     if (!adapter) {
       throw new BackendError('not-initialized', `unknown backend: ${backend}`)
     }
-    return adapter.getHistory(backendThreadId)
+    return adapter.getHistory(backendThreadId, cwd)
   }
 
   /** 列出后端会话（透传给 adapter） */

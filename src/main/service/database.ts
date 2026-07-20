@@ -188,6 +188,22 @@ export class DatabaseService {
     this.db.prepare('UPDATE sessions SET title = ? WHERE id = ?').run(title, id)
   }
 
+  /**
+   * 更新 session 的 backend_thread_id（claude 用：拿到真实 session_id 后回写）。
+   * byBackendThreadId 是当前的占位 id，用 (backend, backend_thread_id) 唯一约束定位行。
+   */
+  updateSessionBackendThreadId(
+    backend: string,
+    oldBackendThreadId: string,
+    newBackendThreadId: string,
+  ): void {
+    this.db
+      .prepare(
+        `UPDATE sessions SET backend_thread_id = ? WHERE backend = ? AND backend_thread_id = ?`,
+      )
+      .run(newBackendThreadId, backend, oldBackendThreadId)
+  }
+
   bumpSessionTurn(
     id: string,
     lastActiveAt: number,

@@ -107,6 +107,12 @@ describe('CodexAdapter', () => {
           pushLine(stdout, { id: msg.id, result: { ok: true } })
         } else if (msg.method === 'initialized') {
           initialized = true
+        } else if (msg.method === 'model/list' && msg.id !== undefined) {
+          // startTurn 没传 model 时会走 resolveDefaultModel → model/list
+          pushLine(stdout, {
+            id: msg.id,
+            result: { models: [{ id: 'gpt-5.6-codex', display_name: 'GPT-5.6' }] },
+          })
         } else if (msg.method === 'turn/start' && msg.id !== undefined) {
           // 回复 turn 对象
           pushLine(stdout, { id: msg.id, result: { turn: { id: 'codex_turn_1' } } })
@@ -159,6 +165,12 @@ describe('CodexAdapter', () => {
         const msg = JSON.parse(line)
         if (msg.method === 'initialize') {
           pushLine(stdout, { id: msg.id, result: { ok: true } })
+        } else if (msg.method === 'model/list' && msg.id !== undefined) {
+          // startTurn 没传 model 时会走 resolveDefaultModel → model/list
+          pushLine(stdout, {
+            id: msg.id,
+            result: { models: [{ id: 'gpt-5.6-codex', display_name: 'GPT-5.6' }] },
+          })
         } else if (msg.method === 'turn/start' && msg.id !== undefined) {
           pushLine(stdout, { id: msg.id, result: { turn: { id: 'codex_turn_1' } } })
           pushLine(stdout, {
@@ -251,7 +263,7 @@ describe('CodexAdapter', () => {
     expect(events.some((e) => e.type === 'turn_completed')).toBe(true)
   })
 
-  test('listModels 返回模型列表', async () => {
+  test('listModels 返回模型列表（映射 default / supportedEfforts，过滤 hidden）', async () => {
     const { spawner, stdout, stdin } = createMockSpawner()
     const adapter = new CodexAdapter({ spawner })
 
@@ -266,9 +278,18 @@ describe('CodexAdapter', () => {
             id: msg.id,
             result: {
               models: [
-                { id: 'gpt-5.1-codex', display_name: 'GPT-5.1 Codex' },
-                { id: 'gpt-5', display_name: 'GPT-5' },
-                { id: 'hidden-model', hidden: true }, // 应被过滤
+                {
+                  id: 'gpt-5.6-codex-sol',
+                  display_name: 'GPT-5.6 Sol',
+                  default: true,
+                  supported_reasoning_efforts: ['low', 'medium', 'high', 'xhigh', 'max'],
+                },
+                {
+                  id: 'gpt-5.6-codex-luna',
+                  display_name: 'GPT-5.6 Luna',
+                  supported_reasoning_efforts: ['low', 'medium'],
+                },
+                { id: 'hidden-internal-model', hidden: true }, // 应被过滤
               ],
             },
           })
@@ -278,7 +299,148 @@ describe('CodexAdapter', () => {
 
     const models = await adapter.listModels()
     expect(models).toHaveLength(2)
-    expect(models[0]!.id).toBe('gpt-5.1-codex')
+    expect(models[0]!.id).toBe('gpt-5.6-codex-sol')
+    // default 字段透传
+    expect(models[0]!.isDefault).toBe(true)
+    // supported_reasoning_efforts 只保留 capabilities 子集（low/medium/high）
+    expect(models[0]!.supportedEfforts).toEqual(['low', 'medium', 'high'])
+    // 没有 default 标记的第二项，capabilities 内的 efforts 也透传
+    expect(models[1]!.supportedEfforts).toEqual(['low', 'medium'])
+    expect(models[1]!.isDefault).toBeFalsy()
+  })
+
+  test('listModels 失败时返回空数组（不再硬编码过时 model id）', async () => {
+    const { spawner, stdout, stdin } = createMockSpawner()
+    const adapter = new CodexAdapter({ spawner })
+
+    stdin.on('data', (data) => {
+      const lines = data.toString().split('\n').filter(Boolean)
+      for (const line of lines) {
+        const msg = JSON.parse(line)
+        if (msg.method === 'initialize') {
+          pushLine(stdout, { id: msg.id, result: { ok: true } })
+        } else if (msg.method === 'model/list' && msg.id !== undefined) {
+          // 模拟 codex 拒绝（账户未登录 / 网络不通）
+          pushLine(stdout, {
+            id: msg.id,
+            error: { code: -1, message: 'unauthorized' },
+          })
+        }
+      }
+    })
+
+    const models = await adapter.listModels()
+    expect(models).toEqual([])
+  })
+
+  test('listModels 命中缓存（第二次不重新发 model/list）', async () => {
+    const { spawner, stdout, stdin } = createMockSpawner()
+    const adapter = new CodexAdapter({ spawner })
+
+    let listCallCount = 0
+    stdin.on('data', (data) => {
+      const lines = data.toString().split('\n').filter(Boolean)
+      for (const line of lines) {
+        const msg = JSON.parse(line)
+        if (msg.method === 'initialize') {
+          pushLine(stdout, { id: msg.id, result: { ok: true } })
+        } else if (msg.method === 'model/list' && msg.id !== undefined) {
+          listCallCount++
+          pushLine(stdout, {
+            id: msg.id,
+            result: { models: [{ id: 'gpt-5.6-codex', display_name: 'GPT-5.6' }] },
+          })
+        }
+      }
+    })
+
+    await adapter.listModels()
+    await adapter.listModels()
+    await adapter.listModels()
+    expect(listCallCount).toBe(1)
+  })
+
+  test('listModels 没声明 default 时把第一项标记为默认', async () => {
+    const { spawner, stdout, stdin } = createMockSpawner()
+    const adapter = new CodexAdapter({ spawner })
+
+    stdin.on('data', (data) => {
+      const lines = data.toString().split('\n').filter(Boolean)
+      for (const line of lines) {
+        const msg = JSON.parse(line)
+        if (msg.method === 'initialize') {
+          pushLine(stdout, { id: msg.id, result: { ok: true } })
+        } else if (msg.method === 'model/list' && msg.id !== undefined) {
+          pushLine(stdout, {
+            id: msg.id,
+            result: {
+              models: [
+                { id: 'gpt-5.6-codex-sol', display_name: 'GPT-5.6 Sol' },
+                { id: 'gpt-5.6-codex-luna', display_name: 'GPT-5.6 Luna' },
+              ],
+            },
+          })
+        }
+      }
+    })
+
+    const models = await adapter.listModels()
+    expect(models[0]!.isDefault).toBe(true)
+    expect(models[1]!.isDefault).toBeFalsy()
+  })
+
+  test('startTurn 在 args.model 为空时用 listModels 返回的默认模型', async () => {
+    const { spawner, stdout, stdin } = createMockSpawner()
+    const adapter = new CodexAdapter({ spawner })
+
+    const capturedTurnStart: any[] = []
+    stdin.on('data', (data) => {
+      const lines = data.toString().split('\n').filter(Boolean)
+      for (const line of lines) {
+        const msg = JSON.parse(line)
+        if (msg.method === 'initialize') {
+          pushLine(stdout, { id: msg.id, result: { ok: true } })
+        } else if (msg.method === 'model/list' && msg.id !== undefined) {
+          pushLine(stdout, {
+            id: msg.id,
+            result: {
+              models: [
+                {
+                  id: 'gpt-5.6-codex-luna',
+                  display_name: 'GPT-5.6 Luna',
+                  default: true,
+                },
+              ],
+            },
+          })
+        } else if (msg.method === 'turn/start' && msg.id !== undefined) {
+          capturedTurnStart.push(msg)
+          pushLine(stdout, { id: msg.id, result: { turn: { id: 'turn_1' } } })
+          // 推送 turn/started + turn/completed 让 generator 结束
+          pushLine(stdout, {
+            method: 'turn/started',
+            params: { turn: { id: 'turn_1', status: 'running', items: [] } },
+          })
+          pushLine(stdout, {
+            method: 'turn/completed',
+            params: { turn: { id: 'turn_1', status: 'completed', items: [] } },
+          })
+        }
+      }
+    })
+
+    // 不传 model，应该走 resolveDefaultModel → 'gpt-5.6-codex-luna'
+    const events: any[] = []
+    for await (const ev of adapter.startTurn({
+      sessionId: 'thr_test',
+      prompt: 'hi',
+    })) {
+      events.push(ev)
+    }
+
+    expect(capturedTurnStart).toHaveLength(1)
+    expect(capturedTurnStart[0]!.params.model).toBe('gpt-5.6-codex-luna')
+    expect(events.some((e) => e.type === 'turn_completed')).toBe(true)
   })
 
   test('getHistory 返回 NormalizedMessage 数组', async () => {

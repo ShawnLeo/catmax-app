@@ -3,14 +3,19 @@
  *
  * codex 的历史结构：
  *   thread.turns: Turn[]
- *     turn.items: Item[]（user_message / agent_message / command_execution / file_change / ...）
+ *     turn.items: Item[]（userMessage / agentMessage / command_execution / file_change / ...）
  *
  * 转换规则：
- *   - user_message → role: 'user', textBlocks
- *   - agent_message → role: 'assistant', textBlocks
+ *   - userMessage / user_message → role: 'user', textBlocks
+ *   - agentMessage / agent_message → role: 'assistant', textBlocks
  *   - command_execution / file_change / mcp_tool_call → 单独的 role: 'tool' message（之后由
  *     mergeAssistantAndToolMessages 合并到上一个 assistant 的 toolBlocks）
  *   - reasoning → 归到上一个 assistant message 的 textBlocks（kind: 'reasoning'）
+ *
+ * 协议变化：
+ *   - codex 0.93+ 把 item.type 从 snake_case（user_message）改成 camelCase（userMessage）
+ *   - catmax 内部 schema 还是 snake_case。这里在解析时做归一化——两种命名都识别，
+ *     统一成 snake_case 后再 switch。
  *
  * 注意：codexItemSchema 是 z.union 带 passthrough 兜底分支，switch(item.type) 不会收窄
  * item 字段，访问具体字段时需要 Extract + as cast（与 mapping.ts 一致）。
@@ -28,6 +33,26 @@ type FileChangeItem = Extract<CodexItem, { type: 'file_change' }>
 type UserMessageItem = Extract<CodexItem, { type: 'user_message' }>
 type AgentMessageItem = Extract<CodexItem, { type: 'agent_message' }>
 type ReasoningItem = Extract<CodexItem, { type: 'reasoning' }>
+
+/**
+ * 把 codex 0.93+ 的 camelCase type 名归一化回 snake_case（catmax 内部用）。
+ * - userMessage   → user_message
+ * - agentMessage  → agent_message
+ * - fileChange    → file_change
+ * - commandExecution → command_execution
+ * - mcpToolCall   → mcp_tool_call
+ * - 其他原样返回
+ */
+function normalizeItemType(type: string): string {
+  const camelMap: Record<string, string> = {
+    userMessage: 'user_message',
+    agentMessage: 'agent_message',
+    fileChange: 'file_change',
+    commandExecution: 'command_execution',
+    mcpToolCall: 'mcp_tool_call',
+  }
+  return camelMap[type] ?? type
+}
 
 /** 从 thread.read 响应提取 turn 数组 */
 export function extractTurns(readResult: unknown): unknown[] {
@@ -86,10 +111,12 @@ export function codexTurnsToMessages(turns: unknown[]): NormalizedMessage[] {
 /** 单个 codex item → NormalizedMessage（或 null 跳过） */
 function mapItemToMessage(item: CodexItem, turnId: string): NormalizedMessage | null {
   const itemId = item.id
+  // codex 0.93+ 把 type 改成了 camelCase，这里先归一化成 snake_case 走 switch
+  const itemType = normalizeItemType(item.type as string)
 
-  switch (item.type) {
+  switch (itemType) {
     case 'user_message': {
-      const content = (item as UserMessageItem).content
+      const content = (item as unknown as UserMessageItem).content
       const text = extractUserText(content)
       if (!text) return null
       return {
@@ -101,7 +128,7 @@ function mapItemToMessage(item: CodexItem, turnId: string): NormalizedMessage | 
       }
     }
     case 'agent_message': {
-      const text = (item as AgentMessageItem).text ?? ''
+      const text = (item as unknown as AgentMessageItem).text ?? ''
       return {
         id: itemId,
         role: 'assistant',
@@ -115,7 +142,7 @@ function mapItemToMessage(item: CodexItem, turnId: string): NormalizedMessage | 
       // reasoning 不单独成 message，会被合并到上一个 assistant 的 textBlocks（kind: reasoning）
       // 这里返回一个 assistant message，让 codexTurnsToMessages 当作 assistant 处理
       // —— 若 reasoning 单独出现（前面没有 assistant），就会作为一个 assistant 入列
-      const summary = extractReasoningSummary((item as ReasoningItem).summary)
+      const summary = extractReasoningSummary((item as unknown as ReasoningItem).summary)
       return {
         id: itemId,
         role: 'assistant',
@@ -134,10 +161,10 @@ function mapItemToMessage(item: CodexItem, turnId: string): NormalizedMessage | 
       const toolInfo = codexItemToToolCallInfo(item)
       if (!toolInfo) return null
       let output: ToolOutput | undefined
-      if (item.type === 'command_execution') {
-        output = codexCommandToOutput(item as CommandExecutionItem)
-      } else if (item.type === 'file_change') {
-        output = codexFileChangeToOutput(item as FileChangeItem)
+      if (itemType === 'command_execution') {
+        output = codexCommandToOutput(item as unknown as CommandExecutionItem)
+      } else if (itemType === 'file_change') {
+        output = codexFileChangeToOutput(item as unknown as FileChangeItem)
       }
       return {
         id: itemId,

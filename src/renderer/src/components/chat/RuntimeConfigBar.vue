@@ -4,6 +4,13 @@
     <select
       v-model="backendId"
       class="bg-secondary text-secondary-foreground text-xs px-2 py-1 rounded border-0 focus:outline-none"
+      :title="
+        backendStore.current && !backendStore.current.available
+          ? explainBackendError(backendStore.current.error).title +
+            '：' +
+            explainBackendError(backendStore.current.error).detail
+          : undefined
+      "
       @change="onBackendChange"
     >
       <option
@@ -11,8 +18,14 @@
         :key="status.id"
         :value="status.id"
         :disabled="!status.available"
+        :title="
+          status.available
+            ? status.version ?? undefined
+            : explainBackendError(status.error).title
+        "
       >
-        {{ status.id }}{{ status.available ? '' : ' (unavailable)' }}
+        {{ status.id
+        }}{{ status.available ? '' : ` (${explainBackendError(status.error).title})` }}
       </option>
     </select>
 
@@ -67,10 +80,11 @@
 </template>
 
 <script setup lang="ts">
+import { explainBackendError } from '@renderer/lib/backend-error'
 import { useBackendStore } from '@renderer/stores/backend'
 import type { EffortLevel, PermissionMode } from '@shared/backend/types'
 import type { BackendId } from '@shared/constants'
-import { computed } from 'vue'
+import { computed, watch } from 'vue'
 
 interface RuntimeConfigValue {
   model: string | null

@@ -27,6 +27,7 @@ export const IPC = {
   SYSTEM_PLATFORM_INFO: 'system.platformInfo',
   SYSTEM_OPEN_DIALOG: 'system.openDialog',
   SYSTEM_OPEN_EXTERNAL: 'system.openExternal',
+  SYSTEM_DETECT_PROXY: 'system.detectProxy',
   // backend
   BACKEND_LIST: 'backend.list',
   BACKEND_CURRENT: 'backend.current',
@@ -60,6 +61,8 @@ export const PUSH = {
   BACKEND_TURN_EVENT: 'backend:turnEvent',
   BACKEND_SWITCHED: 'backend:switched',
   BACKEND_STATUS_CHANGED: 'backend:statusChanged',
+  /** claude turn 完成后从 jsonl 读到 aiTitle 并回写 db 后，告知 renderer 刷新侧边栏标题 */
+  SESSION_TITLE_CHANGED: 'session:titleChanged',
   PTY_DATA: 'pty:data',
   PTY_EXIT: 'pty:exit',
 } as const

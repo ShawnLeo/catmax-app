@@ -57,6 +57,14 @@ export interface StartSessionArgs {
 export interface StartTurnArgs {
   sessionId: string
   prompt: string
+  /**
+   * 工作区目录（claude 用作 spawn 的 cwd；codex 在 thread/start 时已传，这里冗余但无害）。
+   * claude 是 per-turn process 模型——每个 turn 都要 spawn 新 claude 进程，
+   * 必须知道在哪个目录跑，否则 claude 会用 main 进程的 cwd，导致：
+   *   1) 文件操作工具（Read/Edit/Bash）作用在错误目录
+   *   2) 历史文件 ~/.claude/projects/<encoded-cwd>/ 存错地方，--resume 找不到
+   */
+  cwd?: string
   model?: string
   effort?: EffortLevel
   permissionMode?: PermissionMode
@@ -170,7 +178,10 @@ export interface AgentBackend {
   resumeSession(backendThreadId: string): Promise<{ messages: NormalizedMessage[] }>
 
   /** 读取会话历史（用于 UI 回放，不影响后端状态） */
-  getHistory(backendThreadId: string): Promise<{ messages: NormalizedMessage[] }>
+  getHistory(
+    backendThreadId: string,
+    cwd?: string,
+  ): Promise<{ messages: NormalizedMessage[]; aiTitle?: string | null }>
 
   startTurn(args: StartTurnArgs): AsyncIterable<TurnEvent>
 

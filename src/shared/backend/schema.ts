@@ -186,6 +186,50 @@ export const itemCompletedParamsSchema = z.object({
   item: codexItemSchema,
 })
 
+// ============ model/list ============
+
+/**
+ * codex app-server 的 model/list 响应 schema。
+ *
+ * codex 0.93+ 的 app-server 暴露这个方法返回**当前账户实际可用的**模型列表
+ * （ChatGPT 登录态自动鉴权）。比起 OpenAI 公开的 GET /v1/models（返回全平台模型、
+ * 不按账户过滤），这个才是用户真正能用的。
+ *
+ * codex 0.93+ 已经下线了 gpt-5.x-codex 系列（2026-03-11 起 GPT-5.1 系列全下线），
+ * 现在主流是 GPT-5.6 Sol/Terra/Luna。这个 schema 用 passthrough 兼容 codex 后续
+ * 新增字段（serviceTiers、additionalSpeedTiers、upgradeInfo 等）。
+ *
+ * 字段说明（来自 codex-rs/app-server/README.md）：
+ * - id: 模型 id（如 "gpt-5.6-codex-luna"），用于 thread/start 和 turn/start 的 model 参数
+ * - display_name: 展示名（如 "GPT-5.6 Luna"）
+ * - hidden: true 表示不对外展示（如内部/废弃模型）
+ * - default: true 表示是当前 provider 的默认模型
+ * - supported_reasoning_efforts: 该模型支持的 reasoning effort 列表
+ *   README 提醒"保留数组顺序，不要从 effort 名字推导顺序"
+ */
+export const modelListParamsSchema = z.object({
+  includeHidden: z.boolean().optional(),
+})
+
+export const modelListResultSchema = z
+  .object({
+    models: z
+      .array(
+        z
+          .object({
+            id: z.string(),
+            display_name: z.string().optional(),
+            hidden: z.boolean().optional(),
+            default: z.boolean().optional(),
+            description: z.string().optional(),
+            supported_reasoning_efforts: z.array(z.string()).optional(),
+          })
+          .passthrough(),
+      )
+      .default([]),
+  })
+  .passthrough()
+
 // ============ Approval 请求（server → client request，需要响应） ============
 
 export const commandApprovalParamsSchema = z.object({
@@ -213,3 +257,4 @@ export type JsonRpcRequest = z.infer<typeof jsonRpcRequestSchema>
 export type JsonRpcResponse = z.infer<typeof jsonRpcResponseSchema>
 export type JsonRpcNotification = z.infer<typeof jsonRpcNotificationSchema>
 export type CodexItem = z.infer<typeof codexItemSchema>
+export type ModelListResult = z.infer<typeof modelListResultSchema>

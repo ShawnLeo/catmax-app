@@ -87,7 +87,16 @@ export const reconcileSessions = async (args: { workspaceId: string }) => {
     throw new SessionError('workspace-not-found', `workspace not found: ${args.workspaceId}`)
   }
   // 拉后端当前真实列表
-  const backendSessions = await ctx.backendManager.listSessions(workspace.path)
+  // 容错：如果后端无法拉取（未安装 / 初始化超时 / 协议错误），不阻塞 UI——
+  // 把已有 App db 里的会话全部标记为 stale 即可，用户手动 retry 时再同步。
+  // 之前的 Bug：codex 未安装时 reconcile 会卡 30s initialize 超时然后抛错，
+  // 导致用户切到 claude 后发消息直接无响应。
+  let backendSessions: Awaited<ReturnType<typeof ctx.backendManager.listSessions>> = []
+  try {
+    backendSessions = await ctx.backendManager.listSessions(workspace.path)
+  } catch (e) {
+    log.warn('listSessions failed during reconcile, skipping backend sync:', e)
+  }
   const backendThreadIds = new Set(backendSessions.map((s) => s.backendThreadId))
 
   // App db 里的
@@ -136,10 +145,29 @@ export const getSessionDetail = async (args: { sessionId: string }) => {
   if (!session) {
     throw new SessionError('not-found', `session not found: ${args.sessionId}`)
   }
-  // 用会话自己的后端拉历史（不是当前后端）——这样切换后端后仍能回看旧会话
-  const { messages } = await ctx.backendManager.getHistory(session.backend, session.backendThreadId)
+  // 用会话自己的后端拉历史（不是当前后端）——这样切换后端后仍能回看旧会话。
+  // cwd 必须传——claude 把历史文件按 cwd 分目录存，不传 claude 会用 main 进程的
+  // cwd（catmax-app 自己根目录），导致 "No conversation found" 错误，UI 看到空历史。
+  const workspace = ctx.db.findWorkspaceById(session.workspaceId)
+  const cwd = workspace?.path
+  const { messages, aiTitle } = await ctx.backendManager.getHistory(
+    session.backend,
+    session.backendThreadId,
+    cwd,
+  )
+
+  // 后端返回了 aiTitle（claude 自动生成的会话标题）且 db 里 title 为空/不一致时，
+  // 把它回写到 db + 用回写后的 session 视图返回。这样侧边栏会话标题会刷新。
+  let updatedSession = session
+  if (aiTitle && aiTitle !== session.title) {
+    ctx.db.updateSessionTitle(session.id, aiTitle)
+    log.info('updated session title from backend', session.id, aiTitle)
+    updatedSession = ctx.db.findSessionById(session.id) ?? session
+  }
+
   return {
-    session: toView(session),
+    session: toView(updatedSession),
     messages,
+    aiTitle,
   }
 }

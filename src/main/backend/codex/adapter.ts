@@ -23,6 +23,7 @@ import {
   fileChangeApprovalParamsSchema,
   itemCompletedParamsSchema,
   itemStartedParamsSchema,
+  modelListResultSchema,
   turnCompletedParamsSchema,
   turnStartedParamsSchema,
   type CodexItem,
@@ -35,6 +36,7 @@ import {
   type AgentBackend,
   type ApprovalDecision,
   type BackendCapabilities,
+  type EffortLevel,
   type ModelOption,
   type NormalizedMessage,
   type SessionSummary,
@@ -44,6 +46,8 @@ import {
 } from '@shared/backend/types'
 
 import { type ProcessSpawner, RealProcessSpawner } from '../process-spawner'
+
+import { checkCliHealth } from '../health-check'
 
 import {
   codexTurnsToMessages,
@@ -138,6 +142,15 @@ export class CodexAdapter implements AgentBackend {
   private pendingApprovals = new Map<string, PendingApproval>()
   private initialized = false
 
+  /**
+   * model/list 缓存——避免每次 listModels() 都 RPC 往返。
+   * 存的是 Promise（而不是已 resolve 的值），这样并发调用者共享同一次 RPC：
+   *   - initialize() 预取 + 第一次 listModels() 同时触发时，只发一次 model/list
+   *   - 失败时把缓存清空（设回 null），下次调用会重试
+   * 进程退出时也清空（账户可能换了）。
+   */
+  private cachedModelsPromise: Promise<ModelOption[]> | null = null
+
   /** 当前 turn 的事件 sink（同一时刻只跑一个 turn） */
   private currentSink: TurnEventSink | null = null
   /** 内部 turnId → codex turnId 映射 */
@@ -148,54 +161,136 @@ export class CodexAdapter implements AgentBackend {
     this.spawner = opts.spawner ?? new RealProcessSpawner()
   }
 
+  /** 运行时设置 binaryPath（settings 加载后注入；不影响已 spawn 的进程） */
+  setBinaryPath(path: string): void {
+    if (this.initialized) {
+      log.warn('setBinaryPath called after initialize — will take effect on next re-init')
+    }
+    this.opts = { ...this.opts, binaryPath: path }
+  }
+
+  /** 注入额外的子进程环境变量（HTTPS_PROXY 等）；不影响已 spawn 的进程 */
+  setExtraEnv(env: Record<string, string>): void {
+    this.extraEnv = env
+  }
+  private extraEnv: Record<string, string> = {}
+
   // ============ 生命周期 ============
 
   async initialize(): Promise<void> {
     if (this.initialized) return
     if (!this.proc) {
       const binary = this.opts.binaryPath ?? 'codex'
+      // codex 0.93+ 的 app-server 默认就是 stdio，不需要 `--listen stdio://`。
+      // 旧版本（codex 0.x 早期）才有 --listen 参数。新版带上反而报错：
+      //   error: unexpected argument '--listen' found
+      // 这里不带，让两边都兼容（旧版默认行为也是 stdio）。
+      // 同时注入 extraEnv（HTTPS_PROXY 等代理环境变量）——由 BackendManager.applySettings 设置。
       this.proc = this.spawner.spawn({
         command: binary,
-        args: ['app-server', '--listen', 'stdio://'],
+        args: ['app-server'],
+        env: { ...this.extraEnv },
         ...(this.opts.cwd !== undefined ? { cwd: this.opts.cwd } : {}),
       })
       this.proc.child.stdout?.on('data', (chunk: Buffer) => this.onStdoutData(chunk))
       this.proc.child.stderr?.on('data', (chunk: Buffer) => {
-        log.warn('codex stderr:', chunk.toString('utf-8').trim())
+        // codex 的 stderr 带 ANSI 控制字符（颜色），先剥掉再处理
+        const rawText = chunk.toString('utf-8').trim()
+        const text = rawText.replace(/\x1B\[[0-9;]*m/g, '')
+        log.warn('codex stderr:', text)
+        // 监测致命的 API 错误（OpenAI 返回 400 等），立刻中断当前 turn——
+        // 不然用户会等到 60s idle 超时才知道问题。
+        // codex 的 stderr 里会带 "error=http 400 Bad Request: ..." 这样的字符串。
+        const apiErrMatch = text.match(/error=http (\d+)[^:]*:\s*(.+)/)
+        if (apiErrMatch) {
+          const code = apiErrMatch[1] ?? ''
+          const detail = (apiErrMatch[2] ?? '').slice(0, 300)
+          const friendly = friendlyApiError(code, detail)
+          log.warn(
+            'codex API error detected',
+            'hasSink=',
+            !!this.currentSink,
+            'hasTurnId=',
+            !!this.findCurrentTurnId(),
+          )
+          if (this.currentSink) {
+            const turnId = this.findCurrentTurnId() ?? ''
+            log.warn('codex API error → pushing error event:', friendly)
+            this.currentSink.push({
+              type: 'error',
+              turnId,
+              message: friendly,
+              recoverable: false,
+            })
+            // 紧接着推 turn_completed(error)，让 generator 正常结束
+            this.currentSink.push({
+              type: 'turn_completed',
+              turnId,
+              status: 'error',
+            })
+          }
+        }
       })
       this.proc.child.on('exit', (code, signal) => {
         log.warn('codex exited:', { code, signal })
         this.initialized = false
+        // 进程死了，缓存的 model 列表也可能过时（比如用户重新登录了别的账户）——清掉。
+        this.cachedModelsPromise = null
+        // 进程死了，pending 的 request 全 reject（避免 30s 超时白等）
+        this.rejectAllPending('codex process exited')
       })
     }
 
     // 发 initialize 握手
-    await this.sendRequest('initialize', {
-      clientInfo: { name: 'catmax-app', title: 'catmax', version: '0.1.0' },
-    })
+    try {
+      await this.sendRequest('initialize', {
+        clientInfo: { name: 'catmax-app', title: 'catmax', version: '0.1.0' },
+      })
+    } catch (e) {
+      // 握手失败——清理半连接的子进程，否则下次 initialize() 会复用死进程，
+      // 永远超时（Bug C）。让下次调用重新 spawn。
+      this.killAndClearProc()
+      throw e
+    }
     // 通知 initialized
     this.sendNotification('initialized', {})
     this.initialized = true
     log.info('initialized')
+    // 预取 model/list 填充缓存——不 await 不阻塞 initialize，
+    // 但第一次 startTurn 调 resolveDefaultModel 时大概率已命中缓存，
+    // 省一次 RPC 往返。失败也无所谓，listModels() 自己会重试。
+    void this.listModels().catch((e) => log.warn('model/list prefetch failed:', e))
+  }
+
+  /** kill 当前子进程并清空引用（用于 initialize 失败回滚） */
+  private killAndClearProc(): void {
+    if (this.proc) {
+      try {
+        this.proc.kill('SIGTERM')
+      } catch {
+        // 已退出
+      }
+      this.proc = null
+    }
+    this.lineBuffer = new LineBuffer()
+    this.initialized = false
+    this.cachedModelsPromise = null
+  }
+
+  /** reject 所有 pending request（用于进程意外退出） */
+  private rejectAllPending(reason: string): void {
+    for (const [id, { reject }] of this.pendingRequests) {
+      this.pendingRequests.delete(id)
+      reject(new BackendError('protocol', reason))
+    }
   }
 
   async healthCheck(): Promise<{ ok: boolean; version?: string; error?: string }> {
-    // 用 `codex --version` 检测可用性
-    try {
-      const { execSync } = await import('node:child_process')
-      const binary = this.opts.binaryPath ?? 'codex'
-      const output = execSync(`${binary} --version`, {
-        encoding: 'utf-8',
-        timeout: 5000,
-      })
-      return { ok: true, version: output.trim() }
-    } catch (e) {
-      const code = (e as NodeJS.ErrnoException)?.code
-      return {
-        ok: false,
-        error: code === 'ENOENT' ? 'not-installed' : 'spawn-failed',
-      }
-    }
+    // 用 `codex --version` 检测可用性 + 诊断失败原因。
+    // 之前用 execSync + 只判断 ENOENT/兜底，把 macOS Gatekeeper 拦截（SIGKILL）等情况
+    // 都笼统报 "spawn-failed"，用户没法知道为什么 codex 不可用。
+    const binary = this.opts.binaryPath ?? 'codex'
+    return checkCliHealth(binary, ['--version'])
   }
 
   async dispose(): Promise<void> {
@@ -204,6 +299,7 @@ export class CodexAdapter implements AgentBackend {
       this.proc = null
     }
     this.initialized = false
+    this.cachedModelsPromise = null
     this.pendingRequests.clear()
     this.pendingApprovals.clear()
     log.info('disposed')
@@ -214,30 +310,68 @@ export class CodexAdapter implements AgentBackend {
   }
 
   async listModels(): Promise<ModelOption[]> {
-    // 调 codex 的 model/list
-    try {
-      await this.ensureInitialized()
-      const result = await this.sendRequest('model/list', {})
-      const data =
-        (
-          result as {
-            models?: Array<{ id: string; display_name?: string; hidden?: boolean }>
-          }
-        ).models ?? []
-      return data
-        .filter((m) => !m.hidden)
-        .map((m) => ({
-          id: m.id,
-          displayName: m.display_name ?? m.id,
-        }))
-    } catch (e) {
-      log.warn('listModels failed, returning defaults:', e)
-      // 回退默认
-      return [
-        { id: 'gpt-5.1-codex', displayName: 'GPT-5.1 Codex', isDefault: true },
-        { id: 'gpt-5', displayName: 'GPT-5' },
-      ]
-    }
+    // 命中缓存直接返回——startSession/startTurn 频繁调用 resolveDefaultModel，
+    // 每次 RPC 往返一次 model/list 是浪费（codex 内部还要查 OpenAI）。
+    // 缓存的是 Promise，并发调用共享同一次 RPC。
+    if (this.cachedModelsPromise) return this.cachedModelsPromise
+
+    this.cachedModelsPromise = (async () => {
+      try {
+        await this.ensureInitialized()
+        const result = await this.sendRequest('model/list', {})
+        const parsed = modelListResultSchema.parse(result)
+        // codex capabilities.supportedEfforts 当前是 ['low','medium','high']，
+        // 模型若声明了 supported_reasoning_efforts，只暴露这个子集里的——
+        // 避免让 effort 下拉框出现 codex capabilities 还不认识的档位。
+        const allowedEfforts = new Set(this.capabilities.supportedEfforts)
+        const models: ModelOption[] = parsed.models
+          .filter((m) => !m.hidden)
+          .map((m) => {
+            const supportedEfforts = m.supported_reasoning_efforts
+              ?.filter((e) => allowedEfforts.has(e as EffortLevel))
+              .map((e) => e as EffortLevel)
+            return {
+              id: m.id,
+              displayName: m.display_name ?? m.id,
+              ...(m.description !== undefined ? { description: m.description } : {}),
+              ...(supportedEfforts !== undefined && supportedEfforts.length > 0
+                ? { supportedEfforts }
+                : {}),
+            }
+          })
+        // 标记默认模型：优先用 codex 声明的 default，否则取第一项。
+        // 这样 ChatView 的 watch 能 find(m => m.isDefault) 拿到一个有效 id。
+        if (models.length > 0) {
+          const hasDefault = models.some((m) => m.isDefault)
+          if (!hasDefault) models[0]!.isDefault = true
+        }
+        return models
+      } catch (e) {
+        // 失败时清缓存，下次调用会重试——可能是临时网络抖动 / codex 暂时没起来。
+        this.cachedModelsPromise = null
+        log.warn('listModels failed, returning empty:', e)
+        // 返回空数组——UI 下拉框显示空，由 backend 不可用 indicator 提示用户。
+        // 不再硬编码过时的 gpt-5.2-codex（已于 2026-03-11 随 GPT-5.1 系列下线），
+        // 也不硬编码 gpt-5.6-codex（账户不支持时报错同样不友好）。
+        return []
+      }
+    })()
+    return this.cachedModelsPromise
+  }
+
+  /**
+   * 解析默认模型 id —— 用户没在下拉框选时，startSession/startTurn 用这个。
+   * 优先用 listModels() 返回的 isDefault 项；都没有（账户没登录/网络不通）就抛错，
+   * 由上层显示明确错误，而不是发一个过时/无效的 model id 给 codex。
+   */
+  private async resolveDefaultModel(): Promise<string> {
+    const models = await this.listModels()
+    const def = models.find((m) => m.isDefault) ?? models[0]
+    if (def) return def.id
+    throw new BackendError(
+      'protocol',
+      '无法从 codex 获取可用模型列表——账户未登录 / 网络不通 / codex 版本不兼容',
+    )
   }
 
   // ============ 会话 ============
@@ -246,9 +380,13 @@ export class CodexAdapter implements AgentBackend {
     args: StartSessionArgs,
   ): Promise<{ sessionId: string; backendThreadId: string }> {
     await this.ensureInitialized()
+    // codex 0.93+ 的 thread/start 实际上要求 model（即便 schema 写 optional）
+    // 不传会导致 thread/start 卡住直到超时。用户没在 UI 选 model 时，
+    // 用 model/list 返回的默认模型（账户真实可用）。
+    const model = args.model ?? (await this.resolveDefaultModel())
     const result = await this.sendRequest('thread/start', {
       cwd: args.cwd,
-      ...(args.model !== undefined ? { model: args.model } : {}),
+      model,
       approvalPolicy: permissionToApproval(args.permissionMode),
     })
     const thread = (result as { thread?: { id?: string } }).thread
@@ -282,7 +420,11 @@ export class CodexAdapter implements AgentBackend {
   }
 
   /** 读会话历史：调 thread/read 拿 turn 数组，转成 NormalizedMessage[] */
-  async getHistory(backendThreadId: string): Promise<{ messages: NormalizedMessage[] }> {
+  async getHistory(
+    backendThreadId: string,
+    cwd?: string,
+  ): Promise<{ messages: NormalizedMessage[]; aiTitle?: string | null }> {
+    void cwd // codex 是 long-running app-server，cwd 在 thread/start 时已绑定，这里不用
     await this.ensureInitialized()
     const result = await this.sendRequest('thread/read', {
       threadId: backendThreadId,
@@ -318,10 +460,16 @@ export class CodexAdapter implements AgentBackend {
 
     try {
       // args.sessionId 实际是 backendThreadId（startSession 返回的）
+      // codex 0.93+ 的 turn/start 把 input 从 string 改成了 UserInput[] 数组：
+      //   旧版: input: "用户文本"
+      //   新版: input: [{ type: "text", text: "用户文本" }]
+      // 不改的话 codex 报 "Invalid request: invalid type: string ..., expected a sequence"。
+      // 同时 model 也是必需的（同 thread/start），用户没选时用 listModels 返回的默认。
+      const model = args.model ?? (await this.resolveDefaultModel())
       const turnResponse = await this.sendRequest('turn/start', {
         threadId: args.sessionId,
-        input: args.prompt,
-        ...(args.model !== undefined ? { model: args.model } : {}),
+        input: [{ type: 'text', text: args.prompt }],
+        model,
         ...(args.effort !== undefined ? { effort: args.effort } : {}),
         approvalPolicy: permissionToApproval(args.permissionMode),
       })
@@ -347,17 +495,37 @@ export class CodexAdapter implements AgentBackend {
       // Loop invariant: drain queue first, then check done. Notifications can
       // land in the queue synchronously before we even get here (mock streams),
       // and they may have already flipped `done` — we still must yield them.
+      // 加 turn 级别的 idle 超时（60 秒没收到任何事件就报错）—— 否则 codex
+      // 卡在 LLM API 调用时（如网络不通），UI 会一直显示 isRunning=true，无法操作。
+      const TURN_IDLE_TIMEOUT_MS = 60_000
+      let lastEventTime = Date.now()
       while (true) {
         while (state.queue.length > 0) {
           const event = state.queue.shift()!
+          lastEventTime = Date.now()
           yield event
           if (event.type === 'turn_completed' || event.type === 'error') {
             return
           }
         }
         if (state.done) return
+        // 计算剩余等待时间，idle 超时则 yield error
+        const remaining = TURN_IDLE_TIMEOUT_MS - (Date.now() - lastEventTime)
+        if (remaining <= 0) {
+          yield {
+            type: 'error',
+            turnId: internalTurnId,
+            message:
+              'codex 60 秒内没有响应——可能是网络问题（api.openai.com / chatgpt.com 不可达）或 ChatGPT token 过期。请在终端跑 `codex exec "test"` 验证。',
+            recoverable: false,
+          }
+          yield { type: 'turn_completed', turnId: internalTurnId, status: 'error' }
+          return
+        }
         await new Promise<void>((resolve) => {
           state.resolveWait = resolve
+          // idle 超时 timer——到点 resolve 让循环重新检查 remaining
+          setTimeout(resolve, Math.min(remaining, 5000))
         })
         state.resolveWait = null
       }
@@ -395,7 +563,11 @@ export class CodexAdapter implements AgentBackend {
   async steer(turnId: string, prompt: string): Promise<void> {
     const codexTurnId = this.turnIdMap.get(turnId)
     if (!codexTurnId) return
-    await this.sendRequest('turn/steer', { turnId: codexTurnId, input: prompt })
+    // codex 0.93+ turn/steer 的 input 也是 UserInput[] 数组（同 turn/start）
+    await this.sendRequest('turn/steer', {
+      turnId: codexTurnId,
+      input: [{ type: 'text', text: prompt }],
+    })
   }
 
   // ============ 内部：stdin/stdout 处理 ============
@@ -641,6 +813,34 @@ export class CodexAdapter implements AgentBackend {
 }
 
 /** 把 PermissionMode 翻译成 codex 的 approvalPolicy */
+/**
+ * 把 codex stderr 里的 OpenAI API 错误（"error=http 400: ..."）翻译成对用户友好的中文提示。
+ * codex 自己不会通过 stdout 把 API 错误通知给客户端（catmax），只在 stderr 打日志——
+ * 所以这里要从 stderr 主动抓取并转成 error event 推给 UI，否则用户要等 60s idle 超时。
+ */
+function friendlyApiError(httpCode: string, detail: string): string {
+  // 常见模式："The 'XXX' model is not supported when using Codex with a ChatGPT account."
+  const modelMatch = detail.match(/'([^']+)' model is not supported/)
+  if (modelMatch) {
+    return `OpenAI 拒绝了请求：${modelMatch[1]} model 不能用于当前账户。
+可能原因：你登录的是 ChatGPT 免费账户（chatgpt_plan_type=free），免费账户不支持 codex 调 LLM API。
+解决：登录 ChatGPT Plus / Pro / Team 账户，或换用 API Key 登录（codex login --api-key）。`
+  }
+
+  if (httpCode === '401') {
+    return `OpenAI 认证失败（401）。ChatGPT token 可能已过期——请在终端跑 \`codex login\` 重新登录。`
+  }
+  if (httpCode === '429') {
+    return `OpenAI 限流（429）。请求过于频繁或配额耗尽，稍后再试。`
+  }
+  if (httpCode.startsWith('5')) {
+    return `OpenAI 服务器错误（${httpCode}）。稍后再试。`
+  }
+
+  return `OpenAI API 错误（HTTP ${httpCode}）：${detail}`
+}
+
+/** 把 codex 的权限模式翻译成 codex 的 approvalPolicy */
 function permissionToApproval(mode?: string): string | undefined {
   switch (mode) {
     case 'default':

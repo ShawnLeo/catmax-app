@@ -54,7 +54,7 @@ import { useUiStore } from '@renderer/stores/ui'
 import { useWorkspaceStore } from '@renderer/stores/workspace'
 import type { EffortLevel, PermissionMode } from '@shared/backend/types'
 import { PanelRightIcon } from 'lucide-vue-next'
-import { onMounted, ref, watch } from 'vue'
+import { onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 
 const router = useRouter()
@@ -109,6 +109,21 @@ onMounted(async () => {
   await backendStore.refresh()
   await backendStore.loadModels()
   await sessionStore.load(workspaceStore.currentWorkspace.id)
+
+  // 订阅 session:titleChanged —— claude turn 完成后从 jsonl 读到 aiTitle，
+  // main 回写 db + 广播，这里同步更新本地 sessions 数组让侧边栏标题刷新。
+  unsubscribeTitleChanged = window.api.session.onTitleChanged(({ sessionId, title }) => {
+    const target = sessionStore.sessions.find((s) => s.id === sessionId)
+    if (target && target.title !== title) {
+      target.title = title
+    }
+  })
+})
+
+let unsubscribeTitleChanged: (() => void) | null = null
+onUnmounted(() => {
+  unsubscribeTitleChanged?.()
+  unsubscribeTitleChanged = null
 })
 
 watch(
@@ -120,6 +135,17 @@ watch(
     }
   },
   { immediate: true },
+)
+
+// 切换 backend 时清空 model selection——不同 backend 的 model id 不互通
+// （比如 claude 的 'sonnet' 传给 codex 会报 "The 'sonnet' model is not supported
+// when using Codex with a ChatGPT account"）。清空后上面的 watch 会从新 backend
+// 的 models 列表重新挑一个默认。
+watch(
+  () => backendStore.currentId,
+  () => {
+    runtimeConfig.value.model = null
+  },
 )
 
 async function onSend(text: string): Promise<void> {
@@ -135,6 +161,9 @@ async function onSend(text: string): Promise<void> {
       workspaceId: workspaceStore.currentWorkspace.id,
       cwd: workspaceStore.currentWorkspace.path,
       permissionMode: runtimeConfig.value.permissionMode,
+      // 第一条消息作为 initialPrompt——main handler 会 slice(0,50) 写入 db 的 title 字段，
+      // 侧边栏立即显示这条消息的开头，不再显示 "(新会话)"。
+      initialPrompt: text,
     }
     if (model !== null) createArgs.model = model
     if (effort !== null) createArgs.effort = effort
@@ -151,10 +180,12 @@ async function onSend(text: string): Promise<void> {
   messageStore.pushUserMessage(turnId, text)
 
   // 启动 turn（sessionId 字段实际传 backendThreadId 给 backend）
+  // cwd 必须传——claude adapter 用它作为 spawn cwd（per-turn process 模型）。
   const startArgs: Parameters<typeof window.api.backend.startTurn>[0] = {
     sessionId: session.backendThreadId,
     prompt: text,
     permissionMode: runtimeConfig.value.permissionMode,
+    cwd: workspaceStore.currentWorkspace.path,
   }
   if (model !== null) startArgs.model = model
   if (effort !== null) startArgs.effort = effort

@@ -3,7 +3,7 @@ import type { BackendHandlers, BackendPushEvents } from '@shared/ipc/backend'
 import type { FsHandlers } from '@shared/ipc/fs'
 import type { GitHandlers } from '@shared/ipc/git'
 import type { PtyHandlers, PtyPushEvents } from '@shared/ipc/pty'
-import type { SessionHandlers } from '@shared/ipc/session'
+import type { SessionHandlers, SessionPushEvents } from '@shared/ipc/session'
 import type { SettingsHandlers } from '@shared/ipc/settings'
 import type { SystemHandlers } from '@shared/ipc/system'
 import type { WorkspaceHandlers } from '@shared/ipc/workspace'
@@ -32,6 +32,7 @@ export const api = {
     platformInfo: requestMain<SystemHandlers, 'system.platformInfo'>(IPC.SYSTEM_PLATFORM_INFO),
     openDialog: requestMain<SystemHandlers, 'system.openDialog'>(IPC.SYSTEM_OPEN_DIALOG),
     openExternal: requestMain<SystemHandlers, 'system.openExternal'>(IPC.SYSTEM_OPEN_EXTERNAL),
+    detectProxy: requestMain<SystemHandlers, 'system.detectProxy'>(IPC.SYSTEM_DETECT_PROXY),
   },
   backend: {
     list: requestMain<BackendHandlers, 'backend.list'>(IPC.BACKEND_LIST),
@@ -62,6 +63,11 @@ export const api = {
     remove: requestMain<SessionHandlers, 'session.remove'>(IPC.SESSION_REMOVE),
     reconcile: requestMain<SessionHandlers, 'session.reconcile'>(IPC.SESSION_RECONCILE),
     detail: requestMain<SessionHandlers, 'session.detail'>(IPC.SESSION_DETAIL),
+    onTitleChanged: (cb: (payload: SessionPushEvents['session:titleChanged']) => void) =>
+      subscribeToMainEvent<SessionPushEvents, 'session:titleChanged'>(
+        PUSH.SESSION_TITLE_CHANGED,
+        cb,
+      ),
   },
   git: {
     status: requestMain<GitHandlers, 'git.status'>(IPC.GIT_STATUS),

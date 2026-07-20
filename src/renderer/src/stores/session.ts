@@ -72,6 +72,15 @@ export const useSessionStore = defineStore('session', () => {
     try {
       const detail = await window.api.session.detail({ sessionId })
       messageStore.setMessages(detail.messages)
+
+      // 后端给了 aiTitle 且 db 里之前没有标题时，main handler 已经回写 db。
+      // 这里同步更新本地 sessions 数组里的 title，让侧边栏立即显示新标题。
+      if (detail.aiTitle) {
+        const target = sessions.value.find((s) => s.id === sessionId)
+        if (target && target.title !== detail.aiTitle) {
+          target.title = detail.aiTitle
+        }
+      }
     } catch (e) {
       messageStore.setError(e instanceof Error ? e.message : String(e))
     } finally {

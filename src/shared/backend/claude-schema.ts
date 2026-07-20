@@ -10,7 +10,13 @@ import { z } from 'zod'
 
 // ============ 顶层消息 type 字段 ============
 
-export const claudeMessageTypeSchema = z.enum(['system', 'assistant', 'user', 'result'])
+export const claudeMessageTypeSchema = z.enum([
+  'system',
+  'assistant',
+  'user',
+  'result',
+  'stream_event',
+])
 
 // ============ system 消息（启动时一条） ============
 
@@ -121,6 +127,60 @@ export const resultMessageSchema = z.object({
   errors: z.array(z.string()).optional(),
 })
 
+// ============ stream_event 消息（加 --include-partial-messages 后逐 token 流） ============
+//
+// Claude 的 --include-partial-messages 模式下，每个 token 增量都包成一个 stream_event，
+// event 字段就是 Anthropic Messages API 的标准 streaming event：
+//   https://docs.anthropic.com/en/api/messages-streaming
+//
+// 关键 event.type：
+//   message_start / message_delta / message_stop     - message 级生命周期
+//   content_block_start / content_block_stop         - content block 级生命周期（带 index）
+//   content_block_delta                              - 真正的 token 增量
+//     - delta.type = 'text_delta' / 'thinking_delta' / 'input_json_delta'
+//     - delta.text / delta.thinking / delta.partial_json 是实际内容
+
+/** content_block_delta 的 delta 子类型（passthrough 容错未知类型） */
+export const streamDeltaSchema = z.union([
+  z.object({ type: z.literal('text_delta'), text: z.string() }),
+  z.object({ type: z.literal('thinking_delta'), thinking: z.string() }),
+  z.object({ type: z.literal('input_json_delta'), partial_json: z.string() }),
+  z.object({ type: z.string() }).passthrough(),
+])
+export type StreamDelta = z.infer<typeof streamDeltaSchema>
+
+/** content_block_start 携带的 block 描述（用于建立 index → block.type 映射） */
+export const streamContentBlockSchema = z
+  .object({
+    type: z.string(), // 'text' | 'thinking' | 'tool_use' | ...
+    // tool_use 时有 id 和 name；text/thinking 时有空字符串占位
+    id: z.string().optional(),
+    name: z.string().optional(),
+    text: z.string().optional(),
+    thinking: z.string().optional(),
+  })
+  .passthrough()
+export type StreamContentBlock = z.infer<typeof streamContentBlockSchema>
+
+/** stream_event.event 子结构（passthrough 容错未知 event.type） */
+export const streamEventPayloadSchema = z
+  .object({
+    type: z.string(), // 'message_start' | 'content_block_delta' | ...
+    index: z.number().optional(), // block index（content_block_* 系列必有）
+    delta: streamDeltaSchema.optional(), // content_block_delta 必有
+    content_block: streamContentBlockSchema.optional(), // content_block_start 必有
+    message: z.unknown().optional(), // message_start / message_delta 用
+  })
+  .passthrough()
+
+export const streamEventMessageSchema = z.object({
+  type: z.literal('stream_event'),
+  event: streamEventPayloadSchema,
+  session_id: z.string().optional(),
+  parent_tool_use_id: z.string().nullable().optional(),
+})
+export type StreamEventMessage = z.infer<typeof streamEventMessageSchema>
+
 // ============ 顶层联合 ============
 
 export const claudeStreamMessageSchema = z.union([
@@ -128,6 +188,7 @@ export const claudeStreamMessageSchema = z.union([
   assistantMessageSchema,
   userMessageSchema,
   resultMessageSchema,
+  streamEventMessageSchema,
 ])
 
 // ============ Type 导出 ============

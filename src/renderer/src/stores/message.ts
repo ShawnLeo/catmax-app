@@ -50,11 +50,18 @@ export const useMessageStore = defineStore('message', () => {
       case 'reasoning_delta': {
         const msg = findOrCreateAssistantMessage(event.turnId, event.itemId)
         if (!msg.textBlocks) msg.textBlocks = []
-        msg.textBlocks.push({
-          id: `${event.itemId}-reasoning-${Date.now()}`,
-          text: event.text,
-          kind: 'reasoning',
-        })
+        // Bug G：reasoning_delta 必须和 text_delta 一样按 itemId 累积到同一个 block，
+        // 否则每个 token delta 都被 push 成独立 block（UI 上显示成 46 个 span）。
+        const lastBlock = msg.textBlocks[msg.textBlocks.length - 1]
+        if (lastBlock && lastBlock.id === `${event.itemId}-reasoning`) {
+          lastBlock.text += event.text
+        } else {
+          msg.textBlocks.push({
+            id: `${event.itemId}-reasoning`,
+            text: event.text,
+            kind: 'reasoning',
+          })
+        }
         break
       }
       case 'tool_call_started': {
