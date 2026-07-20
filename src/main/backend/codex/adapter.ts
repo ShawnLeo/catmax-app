@@ -169,6 +169,11 @@ export class CodexAdapter implements AgentBackend {
     this.opts = { ...this.opts, binaryPath: path }
   }
 
+  /** 读当前 binaryPath（applySettings 用来对比是否变化决定要不要清模型缓存） */
+  getBinaryPath(): string | undefined {
+    return this.opts.binaryPath
+  }
+
   /** 注入额外的子进程环境变量（HTTPS_PROXY 等）；不影响已 spawn 的进程 */
   setExtraEnv(env: Record<string, string>): void {
     this.extraEnv = env
@@ -321,25 +326,27 @@ export class CodexAdapter implements AgentBackend {
         const result = await this.sendRequest('model/list', {})
         const parsed = modelListResultSchema.parse(result)
         // codex capabilities.supportedEfforts 当前是 ['low','medium','high']，
-        // 模型若声明了 supported_reasoning_efforts，只暴露这个子集里的——
+        // 模型若声明了 supportedReasoningEfforts，只暴露这个子集里的——
         // 避免让 effort 下拉框出现 codex capabilities 还不认识的档位。
         const allowedEfforts = new Set(this.capabilities.supportedEfforts)
-        const models: ModelOption[] = parsed.models
-          .filter((m) => !m.hidden)
-          .map((m) => {
-            const supportedEfforts = m.supported_reasoning_efforts
-              ?.filter((e) => allowedEfforts.has(e as EffortLevel))
-              .map((e) => e as EffortLevel)
-            return {
-              id: m.id,
-              displayName: m.display_name ?? m.id,
-              ...(m.description !== undefined ? { description: m.description } : {}),
-              ...(supportedEfforts !== undefined && supportedEfforts.length > 0
-                ? { supportedEfforts }
-                : {}),
-            }
-          })
-        // 标记默认模型：优先用 codex 声明的 default，否则取第一项。
+        const models: ModelOption[] = parsed.data.map((m) => {
+          const supportedEfforts = m.supportedReasoningEfforts
+            ?.map((e) => e.reasoningEffort)
+            .filter((e) => allowedEfforts.has(e as EffortLevel))
+            .map((e) => e as EffortLevel)
+          return {
+            id: m.id,
+            // 实测 codex 返回的 displayName 跟 id 一模一样（"gpt-5.2-codex"），
+            // 用户看着像 model id——保留 displayName 优先，没有再回退到 id。
+            displayName: m.displayName ?? m.id,
+            ...(m.description !== undefined ? { description: m.description } : {}),
+            ...(m.isDefault === true ? { isDefault: true } : {}),
+            ...(supportedEfforts !== undefined && supportedEfforts.length > 0
+              ? { supportedEfforts }
+              : {}),
+          }
+        })
+        // 兜底：如果 codex 没标任何 isDefault，把第一项设成默认，
         // 这样 ChatView 的 watch 能 find(m => m.isDefault) 拿到一个有效 id。
         if (models.length > 0) {
           const hasDefault = models.some((m) => m.isDefault)
@@ -351,8 +358,6 @@ export class CodexAdapter implements AgentBackend {
         this.cachedModelsPromise = null
         log.warn('listModels failed, returning empty:', e)
         // 返回空数组——UI 下拉框显示空，由 backend 不可用 indicator 提示用户。
-        // 不再硬编码过时的 gpt-5.2-codex（已于 2026-03-11 随 GPT-5.1 系列下线），
-        // 也不硬编码 gpt-5.6-codex（账户不支持时报错同样不友好）。
         return []
       }
     })()
@@ -372,6 +377,13 @@ export class CodexAdapter implements AgentBackend {
       'protocol',
       '无法从 codex 获取可用模型列表——账户未登录 / 网络不通 / codex 版本不兼容',
     )
+  }
+
+  invalidateModelsCache(): void {
+    // 清缓存后下次 listModels() 会重新发 model/list。
+    // 触发场景：切走 backend、改 codex binaryPath、UI 手动刷新按钮。
+    // 不需要清掉已 spawn 的子进程——model/list 是无状态的查询。
+    this.cachedModelsPromise = null
   }
 
   // ============ 会话 ============

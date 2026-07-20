@@ -195,17 +195,32 @@ export const itemCompletedParamsSchema = z.object({
  * （ChatGPT 登录态自动鉴权）。比起 OpenAI 公开的 GET /v1/models（返回全平台模型、
  * 不按账户过滤），这个才是用户真正能用的。
  *
- * codex 0.93+ 已经下线了 gpt-5.x-codex 系列（2026-03-11 起 GPT-5.1 系列全下线），
- * 现在主流是 GPT-5.6 Sol/Terra/Luna。这个 schema 用 passthrough 兼容 codex 后续
- * 新增字段（serviceTiers、additionalSpeedTiers、upgradeInfo 等）。
+ * 实测响应结构（codex-cli 0.93.0，ChatGPT 账户）：
+ *   {
+ *     data: [
+ *       {
+ *         id: "gpt-5.2-codex",                 // 传给 thread/start 的 model id
+ *         model: "gpt-5.2-codex",              // 上游 API id（通常同 id）
+ *         displayName: "gpt-5.2-codex",        // 展示名
+ *         description: "Latest frontier...",
+ *         supportedReasoningEfforts: [         // 注意是对象数组，不是字符串数组
+ *           { reasoningEffort: "low", description: "..." },
+ *           { reasoningEffort: "medium", description: "..." },
+ *           ...
+ *         ],
+ *         defaultReasoningEffort: "medium",
+ *         supportsPersonality: false,
+ *         isDefault: true                      // 注意是 isDefault 不是 default
+ *       },
+ *       ...
+ *     ],
+ *     nextCursor: null                          // 分页游标（未启用时 null）
+ *   }
  *
- * 字段说明（来自 codex-rs/app-server/README.md）：
- * - id: 模型 id（如 "gpt-5.6-codex-luna"），用于 thread/start 和 turn/start 的 model 参数
- * - display_name: 展示名（如 "GPT-5.6 Luna"）
- * - hidden: true 表示不对外展示（如内部/废弃模型）
- * - default: true 表示是当前 provider 的默认模型
- * - supported_reasoning_efforts: 该模型支持的 reasoning effort 列表
- *   README 提醒"保留数组顺序，不要从 effort 名字推导顺序"
+ * 注意：codex app-server README 写的是 `models` / `display_name` / `default` 等
+ * snake_case 字段名，但**实际线上返回的是 camelCase + data + isDefault**。
+ * README 跟实现对不上是 codex 那边的文档债，这里以实测为准。
+ * schema 用 passthrough 兼容 codex 后续可能新增/改名（如 serviceTiers、upgradeInfo）。
  */
 export const modelListParamsSchema = z.object({
   includeHidden: z.boolean().optional(),
@@ -213,20 +228,34 @@ export const modelListParamsSchema = z.object({
 
 export const modelListResultSchema = z
   .object({
-    models: z
+    // 实测字段名是 data（不是 README 写的 models）；passthrough 容忍未知字段
+    data: z
       .array(
         z
           .object({
             id: z.string(),
-            display_name: z.string().optional(),
-            hidden: z.boolean().optional(),
-            default: z.boolean().optional(),
+            // 上游 model id，目前同 id；保留兼容未来分离的情况
+            model: z.string().optional(),
+            // camelCase（不是 README 写的 display_name）
+            displayName: z.string().optional(),
             description: z.string().optional(),
-            supported_reasoning_efforts: z.array(z.string()).optional(),
+            // 对象数组，每个含 reasoningEffort + description
+            supportedReasoningEfforts: z
+              .array(
+                z.object({
+                  reasoningEffort: z.string(),
+                  description: z.string().optional(),
+                }).passthrough(),
+              )
+              .optional(),
+            defaultReasoningEffort: z.string().optional(),
+            // isDefault（不是 README 写的 default）
+            isDefault: z.boolean().optional(),
           })
           .passthrough(),
       )
       .default([]),
+    nextCursor: z.unknown().optional(),
   })
   .passthrough()
 

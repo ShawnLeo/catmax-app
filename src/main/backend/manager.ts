@@ -76,10 +76,13 @@ export class BackendManager {
    * 这里不应该覆盖（但 settings 是启动时加载的，所以正常顺序下不会有冲突）。
    */
   applySettings(settings: AppSettings): void {
-    // 注入 binaryPath
+    // 注入 binaryPath —— 路径变了的话同时清模型缓存，因为新 binary 可能是不同版本，
+    // 支持的模型列表可能不一样（比如 codex 升级后多了 gpt-5.3-codex）。
     const codexAdapter = this.adapters.get('codex')
     if (codexAdapter instanceof CodexAdapter && settings.backendPaths.codex) {
+      const pathChanged = codexAdapter.getBinaryPath() !== settings.backendPaths.codex
       codexAdapter.setBinaryPath(settings.backendPaths.codex)
+      if (pathChanged) codexAdapter.invalidateModelsCache()
     }
     const claudeAdapter = this.adapters.get('claude')
     if (claudeAdapter instanceof ClaudeAdapter && settings.backendPaths.claude) {
@@ -137,6 +140,11 @@ export class BackendManager {
     if (!adapter) {
       throw new BackendError('not-initialized', `unknown backend: ${id}`)
     }
+    // 切走当前后端时清掉它的模型缓存——下次切回来会重新发 model/list。
+    // 场景：用户在外部 codex login 换了账户，切回时希望看到新账户的模型列表，
+    // 而不是上次缓存的。无缓存的 adapter（claude）invalidateModelsCache 是 undefined，跳过。
+    const oldAdapter = this.adapters.get(this.currentBackendId)
+    oldAdapter?.invalidateModelsCache?.()
     await adapter.initialize()
     this.currentBackendId = id
     log.info('switched backend to', id)
@@ -201,6 +209,17 @@ export class BackendManager {
   /** 列出当前后端的模型 */
   async listModels(): Promise<ModelOption[]> {
     return this.getCurrent().listModels()
+  }
+
+  /**
+   * 强制刷新当前后端的模型列表——先清缓存再重新拉。
+   * UI 上的"刷新模型"按钮调它。场景：用户在外面 codex login 换了账户，
+   * 想立即看到新账户能用的模型，不想等下次切 backend。
+   */
+  async refreshModels(): Promise<ModelOption[]> {
+    const adapter = this.getCurrent()
+    adapter.invalidateModelsCache?.()
+    return adapter.listModels()
   }
 
   /** 启动会话 */

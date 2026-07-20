@@ -40,6 +40,16 @@
         {{ m.displayName }}
       </option>
     </select>
+    <!-- 刷新模型列表——清 main 端 cachedModelsPromise，重新拉一次 model/list -->
+    <button
+      type="button"
+      class="text-secondary-foreground/60 hover:text-secondary-foreground transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+      :disabled="refreshing"
+      title="刷新模型列表"
+      @click="onRefreshModels"
+    >
+      <RefreshCwIcon class="w-3 h-3" :class="refreshing ? 'animate-spin' : ''" />
+    </button>
 
     <!-- Effort -->
     <select
@@ -84,7 +94,8 @@ import { explainBackendError } from '@renderer/lib/backend-error'
 import { useBackendStore } from '@renderer/stores/backend'
 import type { EffortLevel, PermissionMode } from '@shared/backend/types'
 import type { BackendId } from '@shared/constants'
-import { computed, watch } from 'vue'
+import { RefreshCwIcon } from 'lucide-vue-next'
+import { computed, ref, watch } from 'vue'
 
 interface RuntimeConfigValue {
   model: string | null
@@ -149,6 +160,17 @@ function onModelChange(e: Event): void {
   const target = e.target as HTMLSelectElement
   const value = target.value === 'null' ? null : target.value
   emit('update:modelValue', { ...props.modelValue, model: value })
+}
+
+const refreshing = ref(false)
+async function onRefreshModels(): Promise<void> {
+  if (refreshing.value) return
+  refreshing.value = true
+  try {
+    await backendStore.refreshModels()
+  } finally {
+    refreshing.value = false
+  }
 }
 
 function onEffortChange(e: Event): void {

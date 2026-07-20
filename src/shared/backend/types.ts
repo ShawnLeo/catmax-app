@@ -171,6 +171,16 @@ export interface AgentBackend {
   dispose(): Promise<void>
 
   listModels(): Promise<ModelOption[]>
+  /**
+   * 清掉 listModels() 的内部缓存（如果 adapter 有的话）。
+   * 下次 listModels() 会重新拉。无缓存的 adapter（如 claude）可以不实现。
+   *
+   * 触发时机：
+   * - 用户切换 backend（切回来时模型列表可能已变，如换了登录账户）
+   * - applySettings 改了 binaryPath（codex 升级了版本）
+   * - 用户点了 UI 上的"刷新模型"按钮
+   */
+  invalidateModelsCache?(): void
   getCapabilities(): BackendCapabilities
 
   startSession(args: StartSessionArgs): Promise<{ sessionId: string; backendThreadId: string }>

@@ -18,6 +18,10 @@ export const listModels = async () => {
   return ctx.backendManager.listModels()
 }
 
+export const refreshModels = async () => {
+  return ctx.backendManager.refreshModels()
+}
+
 export const startTurn = async (args: StartTurnArgs) => {
   return ctx.backendManager.startTurn(args)
 }

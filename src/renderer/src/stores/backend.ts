@@ -34,6 +34,15 @@ export const useBackendStore = defineStore('backend', () => {
     models.value = await window.api.backend.listModels()
   }
 
+  /**
+   * 强制刷新模型列表——main 进程会先清掉缓存的 cachedModelsPromise 再重新拉。
+   * UI 上"刷新模型"按钮调它。场景：用户在外部 codex login 换了账户、
+   * codex 升级了版本，想立即看到新模型，不想等下次切 backend。
+   */
+  async function refreshModels(): Promise<void> {
+    models.value = await window.api.backend.refreshModels()
+  }
+
   return {
     statuses,
     currentId,
@@ -44,5 +53,6 @@ export const useBackendStore = defineStore('backend', () => {
     refresh,
     switchTo,
     loadModels,
+    refreshModels,
   }
 })

@@ -16,6 +16,7 @@ export type BackendHandlers = {
   'backend.current': () => Promise<{ id: BackendId }>
   'backend.switch': (args: { id: BackendId }) => Promise<void>
   'backend.listModels': () => Promise<ModelOption[]>
+  'backend.refreshModels': () => Promise<ModelOption[]>
   'backend.startTurn': (args: StartTurnArgs) => Promise<{ turnId: string }>
   'backend.interruptTurn': (args: { turnId: string }) => Promise<void>
   'backend.respondApproval': (args: ApprovalDecision) => Promise<void>

@@ -39,6 +39,9 @@ export const api = {
     current: requestMain<BackendHandlers, 'backend.current'>(IPC.BACKEND_CURRENT),
     switch: requestMain<BackendHandlers, 'backend.switch'>(IPC.BACKEND_SWITCH),
     listModels: requestMain<BackendHandlers, 'backend.listModels'>(IPC.BACKEND_LIST_MODELS),
+    refreshModels: requestMain<BackendHandlers, 'backend.refreshModels'>(
+      IPC.BACKEND_REFRESH_MODELS,
+    ),
     startTurn: requestMain<BackendHandlers, 'backend.startTurn'>(IPC.BACKEND_START_TURN),
     interruptTurn: requestMain<BackendHandlers, 'backend.interruptTurn'>(
       IPC.BACKEND_INTERRUPT_TURN,

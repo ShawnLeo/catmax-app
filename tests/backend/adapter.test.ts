@@ -111,7 +111,7 @@ describe('CodexAdapter', () => {
           // startTurn 没传 model 时会走 resolveDefaultModel → model/list
           pushLine(stdout, {
             id: msg.id,
-            result: { models: [{ id: 'gpt-5.6-codex', display_name: 'GPT-5.6' }] },
+            result: { data: [{ id: 'gpt-5.2-codex', displayName: 'gpt-5.2-codex' }] },
           })
         } else if (msg.method === 'turn/start' && msg.id !== undefined) {
           // 回复 turn 对象
@@ -169,7 +169,7 @@ describe('CodexAdapter', () => {
           // startTurn 没传 model 时会走 resolveDefaultModel → model/list
           pushLine(stdout, {
             id: msg.id,
-            result: { models: [{ id: 'gpt-5.6-codex', display_name: 'GPT-5.6' }] },
+            result: { data: [{ id: 'gpt-5.2-codex', displayName: 'gpt-5.2-codex' }] },
           })
         } else if (msg.method === 'turn/start' && msg.id !== undefined) {
           pushLine(stdout, { id: msg.id, result: { turn: { id: 'codex_turn_1' } } })
@@ -263,7 +263,7 @@ describe('CodexAdapter', () => {
     expect(events.some((e) => e.type === 'turn_completed')).toBe(true)
   })
 
-  test('listModels 返回模型列表（映射 default / supportedEfforts，过滤 hidden）', async () => {
+  test('listModels 返回模型列表（映射 isDefault / supportedEfforts）', async () => {
     const { spawner, stdout, stdin } = createMockSpawner()
     const adapter = new CodexAdapter({ spawner })
 
@@ -274,23 +274,35 @@ describe('CodexAdapter', () => {
         if (msg.method === 'initialize') {
           pushLine(stdout, { id: msg.id, result: { ok: true } })
         } else if (msg.method === 'model/list' && msg.id !== undefined) {
+          // codex 0.93.0 实测响应结构：顶层 data[]，字段 camelCase
           pushLine(stdout, {
             id: msg.id,
             result: {
-              models: [
+              data: [
                 {
-                  id: 'gpt-5.6-codex-sol',
-                  display_name: 'GPT-5.6 Sol',
-                  default: true,
-                  supported_reasoning_efforts: ['low', 'medium', 'high', 'xhigh', 'max'],
+                  id: 'gpt-5.2-codex',
+                  model: 'gpt-5.2-codex',
+                  displayName: 'gpt-5.2-codex',
+                  description: 'Latest frontier agentic coding model.',
+                  isDefault: true,
+                  defaultReasoningEffort: 'medium',
+                  supportedReasoningEfforts: [
+                    { reasoningEffort: 'low', description: '...' },
+                    { reasoningEffort: 'medium', description: '...' },
+                    { reasoningEffort: 'high', description: '...' },
+                    { reasoningEffort: 'xhigh', description: '...' }, // 不在 capabilities，应被过滤
+                  ],
                 },
                 {
-                  id: 'gpt-5.6-codex-luna',
-                  display_name: 'GPT-5.6 Luna',
-                  supported_reasoning_efforts: ['low', 'medium'],
+                  id: 'gpt-5.1-codex-mini',
+                  displayName: 'gpt-5.1-codex-mini',
+                  supportedReasoningEfforts: [
+                    { reasoningEffort: 'low' },
+                    { reasoningEffort: 'medium' },
+                  ],
                 },
-                { id: 'hidden-internal-model', hidden: true }, // 应被过滤
               ],
+              nextCursor: null,
             },
           })
         }
@@ -299,12 +311,11 @@ describe('CodexAdapter', () => {
 
     const models = await adapter.listModels()
     expect(models).toHaveLength(2)
-    expect(models[0]!.id).toBe('gpt-5.6-codex-sol')
-    // default 字段透传
+    expect(models[0]!.id).toBe('gpt-5.2-codex')
     expect(models[0]!.isDefault).toBe(true)
-    // supported_reasoning_efforts 只保留 capabilities 子集（low/medium/high）
+    // supportedReasoningEfforts 只保留 capabilities 子集（low/medium/high）
     expect(models[0]!.supportedEfforts).toEqual(['low', 'medium', 'high'])
-    // 没有 default 标记的第二项，capabilities 内的 efforts 也透传
+    // 第二项没标 isDefault；efforts 也只透传 low/medium
     expect(models[1]!.supportedEfforts).toEqual(['low', 'medium'])
     expect(models[1]!.isDefault).toBeFalsy()
   })
@@ -348,7 +359,7 @@ describe('CodexAdapter', () => {
           listCallCount++
           pushLine(stdout, {
             id: msg.id,
-            result: { models: [{ id: 'gpt-5.6-codex', display_name: 'GPT-5.6' }] },
+            result: { data: [{ id: 'gpt-5.2-codex', displayName: 'gpt-5.2-codex' }] },
           })
         }
       }
@@ -360,7 +371,39 @@ describe('CodexAdapter', () => {
     expect(listCallCount).toBe(1)
   })
 
-  test('listModels 没声明 default 时把第一项标记为默认', async () => {
+  test('invalidateModelsCache 后下次 listModels 重新发 model/list', async () => {
+    const { spawner, stdout, stdin } = createMockSpawner()
+    const adapter = new CodexAdapter({ spawner })
+
+    let listCallCount = 0
+    stdin.on('data', (data) => {
+      const lines = data.toString().split('\n').filter(Boolean)
+      for (const line of lines) {
+        const msg = JSON.parse(line)
+        if (msg.method === 'initialize') {
+          pushLine(stdout, { id: msg.id, result: { ok: true } })
+        } else if (msg.method === 'model/list' && msg.id !== undefined) {
+          listCallCount++
+          pushLine(stdout, {
+            id: msg.id,
+            result: { data: [{ id: 'gpt-5.2-codex', displayName: 'gpt-5.2-codex' }] },
+          })
+        }
+      }
+    })
+
+    await adapter.listModels()
+    expect(listCallCount).toBe(1)
+    // 缓存命中
+    await adapter.listModels()
+    expect(listCallCount).toBe(1)
+    // 清缓存后重新拉
+    adapter.invalidateModelsCache()
+    await adapter.listModels()
+    expect(listCallCount).toBe(2)
+  })
+
+  test('listModels 没声明 isDefault 时把第一项标记为默认', async () => {
     const { spawner, stdout, stdin } = createMockSpawner()
     const adapter = new CodexAdapter({ spawner })
 
@@ -374,9 +417,9 @@ describe('CodexAdapter', () => {
           pushLine(stdout, {
             id: msg.id,
             result: {
-              models: [
-                { id: 'gpt-5.6-codex-sol', display_name: 'GPT-5.6 Sol' },
-                { id: 'gpt-5.6-codex-luna', display_name: 'GPT-5.6 Luna' },
+              data: [
+                { id: 'gpt-5.2-codex', displayName: 'gpt-5.2-codex' },
+                { id: 'gpt-5.1-codex-max', displayName: 'gpt-5.1-codex-max' },
               ],
             },
           })
@@ -404,13 +447,7 @@ describe('CodexAdapter', () => {
           pushLine(stdout, {
             id: msg.id,
             result: {
-              models: [
-                {
-                  id: 'gpt-5.6-codex-luna',
-                  display_name: 'GPT-5.6 Luna',
-                  default: true,
-                },
-              ],
+              data: [{ id: 'gpt-5.2-codex', displayName: 'gpt-5.2-codex', isDefault: true }],
             },
           })
         } else if (msg.method === 'turn/start' && msg.id !== undefined) {
@@ -429,7 +466,7 @@ describe('CodexAdapter', () => {
       }
     })
 
-    // 不传 model，应该走 resolveDefaultModel → 'gpt-5.6-codex-luna'
+    // 不传 model，应该走 resolveDefaultModel → 'gpt-5.2-codex'
     const events: any[] = []
     for await (const ev of adapter.startTurn({
       sessionId: 'thr_test',
@@ -439,7 +476,7 @@ describe('CodexAdapter', () => {
     }
 
     expect(capturedTurnStart).toHaveLength(1)
-    expect(capturedTurnStart[0]!.params.model).toBe('gpt-5.6-codex-luna')
+    expect(capturedTurnStart[0]!.params.model).toBe('gpt-5.2-codex')
     expect(events.some((e) => e.type === 'turn_completed')).toBe(true)
   })
 

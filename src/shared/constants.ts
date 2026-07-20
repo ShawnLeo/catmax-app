@@ -33,6 +33,7 @@ export const IPC = {
   BACKEND_CURRENT: 'backend.current',
   BACKEND_SWITCH: 'backend.switch',
   BACKEND_LIST_MODELS: 'backend.listModels',
+  BACKEND_REFRESH_MODELS: 'backend.refreshModels',
   BACKEND_START_TURN: 'backend.startTurn',
   BACKEND_INTERRUPT_TURN: 'backend.interruptTurn',
   BACKEND_RESPOND_APPROVAL: 'backend.respondApproval',

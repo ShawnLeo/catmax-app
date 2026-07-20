@@ -7,6 +7,7 @@
       </header>
 
       <ThemeSection />
+      <BackendSection />
       <WorkspaceSection />
       <ProxySection />
 
@@ -26,6 +27,7 @@
 
 <script setup lang="ts">
 import ThemeSection from '@renderer/components/settings/ThemeSection.vue'
+import BackendSection from '@renderer/components/settings/BackendSection.vue'
 import WorkspaceSection from '@renderer/components/settings/WorkspaceSection.vue'
 import ProxySection from '@renderer/components/settings/ProxySection.vue'
 import { Button } from '@renderer/components/ui/button'
