@@ -32,6 +32,7 @@
   --color-tool-call: var(--tool-call-background);
   --color-composer: var(--composer-background);
   --color-terminal: var(--terminal-background);
+  --color-user-bubble: var(--user-bubble-background);
 
   /* 语义色 */
   --color-success: var(--color-success);

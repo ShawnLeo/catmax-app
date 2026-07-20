@@ -1,0 +1,46 @@
+<template>
+  <!--
+    IDE 打开文件标签——轻量 pill。
+
+    <ide_opened_file> 只声明"用户在 IDE 里打开了 X"，不带代码内容，
+    所以不支持展开——只显示路径，点击复制路径。
+
+    不带自带背景：在 MessageItem 气泡内渲染时由容器统一负责背景。
+    仍保留圆角/边框让它在没有气泡包裹时（理论上不会出现，但兼容）也能看。
+  -->
+  <button
+    type="button"
+    class="inline-flex items-center gap-1.5 my-0.5 px-1.5 py-0.5 rounded text-muted-foreground text-[12px] hover:text-foreground hover:bg-foreground/5 transition-colors font-mono"
+    :title="`复制路径：${data.filePath}`"
+    @click="copyPath"
+  >
+    <FileIcon class="w-3 h-3 flex-shrink-0" />
+    <span class="truncate max-w-[400px]">{{ shortPath }}</span>
+    <span v-if="copied" class="text-success ml-1">已复制</span>
+  </button>
+</template>
+
+<script setup lang="ts">
+import type { IdeOpenedFileData } from '@shared/backend/context-tag-types'
+import { basename } from '@renderer/lib/path'
+import { FileIcon } from 'lucide-vue-next'
+import { computed, ref } from 'vue'
+
+const props = defineProps<{ data: IdeOpenedFileData }>()
+
+const copied = ref(false)
+
+/** 只显示文件名（basename）——完整路径太长 truncate 会把文件名截没。
+ *  完整路径通过外层 button 的 title 属性 hover 可见。
+ */
+const shortPath = computed(() => basename(props.data.filePath))
+
+function copyPath(): void {
+  void navigator.clipboard.writeText(props.data.filePath).then(() => {
+    copied.value = true
+    setTimeout(() => {
+      copied.value = false
+    }, 1500)
+  })
+}
+</script>

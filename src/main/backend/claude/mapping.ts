@@ -102,22 +102,162 @@ export function toolUseToInfo(block: ToolUseContent): ToolCallInfo {
           : {}),
       }
     }
-    case 'NotebookEdit':
+    case 'NotebookEdit': {
+      // NotebookEdit: { notebook_path, cell_id, new_source, cell_type, edit_mode }
+      // 结构化成 full_content——以 new_source 作为"新内容"展示（绿块=新增/修改的 cell 源码）。
+      // 没有 old 概念（取不到原 cell），用 full_content 让 DiffView 全标绿。
+      const nbPath = typeof input?.notebook_path === 'string' ? input.notebook_path : ''
+      const newSource = typeof input?.new_source === 'string' ? input.new_source : ''
       return {
         kind: 'file_edit',
-        title:
-          typeof input?.file_path === 'string' ? `${block.name}: ${input.file_path}` : block.name,
+        title: `NotebookEdit: ${nbPath}`,
         detail: JSON.stringify(input, null, 2),
+        ...(newSource !== ''
+          ? { edit: { type: 'full_content' as const, filePath: nbPath, content: newSource } }
+          : {}),
       }
+    }
+    case 'NotebookRead':
     case 'Read':
     case 'Glob':
     case 'Grep':
       return {
         kind: 'file_read',
         title:
-          typeof input?.file_path === 'string' ? `${block.name}: ${input.file_path}` : block.name,
+          typeof input?.file_path === 'string'
+            ? `${block.name}: ${input.file_path}`
+            : typeof input?.notebook_path === 'string'
+              ? `${block.name}: ${input.notebook_path}`
+              : block.name,
         detail: JSON.stringify(input, null, 2),
       }
+    case 'WebSearch': {
+      // WebSearch: { query, allowed_domains?, blocked_domains? }
+      const query = typeof input?.query === 'string' ? input.query : ''
+      const allowedDomains = Array.isArray(input?.allowed_domains)
+        ? input.allowed_domains.filter((d): d is string => typeof d === 'string')
+        : undefined
+      const blockedDomains = Array.isArray(input?.blocked_domains)
+        ? input.blocked_domains.filter((d): d is string => typeof d === 'string')
+        : undefined
+      return {
+        kind: 'web',
+        title: query ? `WebSearch: ${query}` : 'WebSearch',
+        detail: JSON.stringify(input, null, 2),
+        ...(query !== ''
+          ? {
+              web: {
+                type: 'search' as const,
+                query,
+                ...(allowedDomains && allowedDomains.length > 0 ? { allowedDomains } : {}),
+                ...(blockedDomains && blockedDomains.length > 0 ? { blockedDomains } : {}),
+              },
+            }
+          : {}),
+      }
+    }
+    case 'WebFetch': {
+      // WebFetch: { url, prompt? }
+      const url = typeof input?.url === 'string' ? input.url : ''
+      const prompt = typeof input?.prompt === 'string' ? input.prompt : undefined
+      return {
+        kind: 'web',
+        title: url ? `WebFetch: ${url}` : 'WebFetch',
+        detail: JSON.stringify(input, null, 2),
+        ...(url !== ''
+          ? {
+              web: {
+                type: 'fetch' as const,
+                query: url,
+                ...(prompt ? { prompt } : {}),
+              },
+            }
+          : {}),
+      }
+    }
+    case 'Task': {
+      // Task: { description, prompt } —— 启动子 agent
+      const description = typeof input?.description === 'string' ? input.description : ''
+      const prompt = typeof input?.prompt === 'string' ? input.prompt : ''
+      return {
+        kind: 'task',
+        title: description ? `Task: ${description}` : 'Task',
+        detail: JSON.stringify(input, null, 2),
+        ...(description || prompt
+          ? { task: { description: description || 'subagent', prompt } }
+          : {}),
+      }
+    }
+    case 'EnterPlanMode':
+      // 进入计划模式：input 是 {}，没有数据，前端走专门组件显示提示文案
+      return {
+        kind: 'control',
+        title: 'Enter Plan Mode',
+        control: { type: 'enter_plan_mode' },
+      }
+    case 'ExitPlanMode': {
+      // 退出计划模式：input.plan 是 markdown 实施方案（用户审批的核心）
+      const plan = typeof input?.plan === 'string' ? input.plan : ''
+      return {
+        kind: 'control',
+        title: 'Exit Plan Mode',
+        ...(plan ? { detail: plan } : {}),
+        control: { type: 'exit_plan_mode', plan },
+      }
+    }
+    case 'TodoWrite': {
+      // 更新 todo 列表：input.todos 是 [{content, status, activeForm}]
+      const rawTodos = Array.isArray(input?.todos) ? input.todos : []
+      const todos = rawTodos
+        .filter((t: unknown): t is Record<string, unknown> => typeof t === 'object' && t !== null)
+        .map((t) => {
+          const statusRaw = t.status
+          const status: 'pending' | 'in_progress' | 'completed' =
+            statusRaw === 'completed'
+              ? 'completed'
+              : statusRaw === 'in_progress'
+                ? 'in_progress'
+                : 'pending'
+          const activeForm = typeof t.activeForm === 'string' ? t.activeForm : undefined
+          return {
+            content: typeof t.content === 'string' ? t.content : '',
+            status,
+            ...(activeForm !== undefined ? { activeForm } : {}),
+          }
+        })
+      return {
+        kind: 'control',
+        title: 'TodoWrite',
+        control: { type: 'todo_write', todos },
+      }
+    }
+    case 'AskUserQuestion': {
+      // 向用户提问：input.questions 是 [{header, question, options:[{label,description}]}]
+      const rawQs = Array.isArray(input?.questions) ? input.questions : []
+      const questions = rawQs
+        .filter((q: unknown): q is Record<string, unknown> => typeof q === 'object' && q !== null)
+        .map((q) => {
+          const rawOpts = Array.isArray(q.options) ? q.options : []
+          const options = rawOpts
+            .filter(
+              (o: unknown): o is Record<string, unknown> => typeof o === 'object' && o !== null,
+            )
+            .map((o) => ({
+              label: typeof o.label === 'string' ? o.label : '',
+              description: typeof o.description === 'string' ? o.description : '',
+            }))
+          return {
+            header: typeof q.header === 'string' ? q.header : '',
+            question: typeof q.question === 'string' ? q.question : '',
+            options,
+          }
+        })
+      return {
+        kind: 'control',
+        title: 'AskUserQuestion',
+        control: { type: 'ask_user_question', questions },
+      }
+    }
     default:
       // MCP tools 形如 mcp__server__tool
       if (block.name.startsWith('mcp__')) {

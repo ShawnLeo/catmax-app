@@ -136,22 +136,52 @@ function onClick(e: MouseEvent): void {
   @apply bg-muted/30;
 }
 
-/* ============ 代码块 wrapper（markdown.ts 注入的 header + body） ============ */
+/* ============ 代码块 wrapper（markdown.ts 注入的 header + body） ============
+ * Shiki 输出 <pre class="shiki"> 自带 inline style 背景，wrapper 背景给透明，
+ * 让 Shiki 自己的背景（亮色 #fff / 暗色 --shiki-dark-bg）覆盖整个块，
+ * header / body / pre 三者视觉融合，避免色差分层。
+ */
 .markdown-body :deep(.code-block-wrapper) {
-  @apply my-3 rounded-md overflow-hidden border border-border bg-code-block;
+  @apply my-3 rounded-md overflow-hidden border border-border;
+  background-color: transparent;
 }
 .markdown-body :deep(.code-block-header) {
   @apply flex items-center justify-between px-3 py-1 border-b border-border/50
     text-xs text-muted-foreground;
+  background-color: var(--code-block-background);
 }
 .markdown-body :deep(.code-block-copy) {
   @apply cursor-pointer hover:text-foreground transition-colors;
 }
-.markdown-body :deep(.code-block-body) {
-  @apply overflow-x-auto;
-}
+/* pre 自己负责横向滚动——长代码行在 pre 内部滚，不撑爆 wrapper。
+ * macOS Chromium 默认 overlay scrollbar（不悬停不可见），用户看不到能滚；
+ * 这里用 ::-webkit-scrollbar 强制常驻细滚动条，跟 VS Code 行为一致。
+ */
 .markdown-body :deep(.code-block-wrapper pre) {
-  @apply my-0 p-3 rounded-none border-0 bg-transparent;
+  @apply my-0 p-3 rounded-none border-0;
+  overflow-x: auto;
+}
+.markdown-body :deep(.code-block-wrapper pre code) {
+  display: block;
+  /* 用 white-space: pre 而不是 min-width: max-content——后者会让 code 整块
+   * 撑开到最长行宽度，scrollbar 一开始就出现在最右；pre 才对。
+   * code 必须 block，否则 inline 会被 pre 宽度夹住导致换行。 */
+  white-space: pre;
+}
+/* 代码块专属的细滚动条（覆盖全局 ::-webkit-scrollbar，让它常驻可见） */
+.markdown-body :deep(.code-block-wrapper pre::-webkit-scrollbar) {
+  height: 8px;
+  width: 8px;
+}
+.markdown-body :deep(.code-block-wrapper pre::-webkit-scrollbar-thumb) {
+  background-color: oklch(50% 0 0 / 0.35);
+  border-radius: 4px;
+}
+.markdown-body :deep(.code-block-wrapper pre::-webkit-scrollbar-thumb:hover) {
+  background-color: oklch(50% 0 0 / 0.55);
+}
+.markdown-body :deep(.code-block-wrapper pre::-webkit-scrollbar-track) {
+  background: transparent;
 }
 
 /* inline code（不在 pre 里的 `code`） */
@@ -174,5 +204,32 @@ function onClick(e: MouseEvent): void {
 }
 .markdown-body :deep(del) {
   @apply text-muted-foreground line-through;
+}
+
+/* ============ Shiki dual-theme：暗色模式激活 --shiki-dark* ============
+ * Shiki 1.29 dual-theme 输出单 <pre>：
+ *   - 亮色值走 inline style（background-color:#fff; color:#xxx）
+ *   - 暗色值藏在 CSS 变量里（--shiki-dark-bg / --shiki-dark）
+ * 必须靠 CSS 在暗色模式下把变量"激活"成真实 color/background-color。
+ * 用 !important 是因为 inline style 优先级最高（Shiki 官方文档的写法）。
+ * 切换由 <html data-theme="dark|light"> 触发，无需 JS 监听。
+ *
+ * 同时让 header / wrapper 边框 / 文字色协调到 shiki dark 系——
+ * 整个代码块（header + pre）统一深灰，不出现亮色"盖头"。
+ */
+[data-theme='dark'] .markdown-body :deep(.shiki),
+[data-theme='dark'] .markdown-body :deep(.shiki span) {
+  color: var(--shiki-dark) !important;
+  background-color: var(--shiki-dark-bg) !important;
+}
+/* 行内 span 不需要背景，只在 <pre> 上设 bg 即可——避免每行都带深灰块 */
+[data-theme='dark'] .markdown-body :deep(.shiki span) {
+  background-color: transparent !important;
+}
+/* header 用 Shiki 暗色背景的略浅版本（叠一层白 5%） */
+[data-theme='dark'] .markdown-body :deep(.code-block-header) {
+  background-color: color-mix(in oklch, var(--shiki-dark-bg) 92%, white 8%);
+  color: oklch(0.7 0.005 250);
+  border-bottom-color: oklch(1 0 0 / 0.08);
 }
 </style>

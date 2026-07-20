@@ -52,7 +52,8 @@ import { useMessageStore } from '@renderer/stores/message'
 import { useSessionStore } from '@renderer/stores/session'
 import { useUiStore } from '@renderer/stores/ui'
 import { useWorkspaceStore } from '@renderer/stores/workspace'
-import type { EffortLevel, PermissionMode } from '@shared/backend/types'
+import type { ContextBlock, EffortLevel, PermissionMode } from '@shared/backend/types'
+import { serializeContextTags } from '@shared/backend/context-tags'
 import { PanelRightIcon } from 'lucide-vue-next'
 import { onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
@@ -148,8 +149,8 @@ watch(
   },
 )
 
-async function onSend(text: string): Promise<void> {
-  if (!text.trim() || !workspaceStore.currentWorkspace) return
+async function onSend(text: string, attachments: ContextBlock[]): Promise<void> {
+  if ((!text.trim() && attachments.length === 0) || !workspaceStore.currentWorkspace) return
 
   const model = runtimeConfig.value.model
   const effort = runtimeConfig.value.effort
@@ -178,15 +179,19 @@ async function onSend(text: string): Promise<void> {
   const session = sessionStore.sessions.find((s) => s.id === sessionId)
   if (!session) return
 
-  // 推用户消息到 UI
+  // 推用户消息到 UI（带 contextBlocks，UI 渲染对应 tag 卡片）
   const turnId = randomUUID()
-  messageStore.pushUserMessage(turnId, text)
+  messageStore.pushUserMessage(turnId, text, attachments.length > 0 ? attachments : undefined)
+
+  // 发给后端的完整 prompt：把 attachments 序列化成 sentinel 标签拼到文本里
+  // 后端 adapter 收到的是单字符串，原样发给 claude/codex（不用改 adapter 契约）
+  const fullPrompt = serializeContextTags(text, attachments)
 
   // 启动 turn（sessionId 字段实际传 backendThreadId 给 backend）
   // cwd 必须传——claude adapter 用它作为 spawn cwd（per-turn process 模型）。
   const startArgs: Parameters<typeof window.api.backend.startTurn>[0] = {
     sessionId: session.backendThreadId,
-    prompt: text,
+    prompt: fullPrompt,
     permissionMode: runtimeConfig.value.permissionMode,
     cwd: workspaceStore.currentWorkspace.path,
   }

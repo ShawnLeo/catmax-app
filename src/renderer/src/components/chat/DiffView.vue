@@ -1,141 +1,173 @@
 <template>
   <!--
-    文件编辑的结构化 diff 渲染。
+    结构化 diff 渲染——基于 @git-diff-view/vue 实现 GitHub/Claude Code 风红绿行穿插。
 
-    三种来源对应三种渲染：
-    - unified_diff（codex）：标准 unified diff 文本，按行 +/- 前缀分色
-    - string_replace（claude Edit/MultiEdit）：原/新两段对比，红色块=原文、绿色块=新文
-    - full_content（claude Write）：整文件内容预览（大文件折叠）
+    三种 ToolEditInfo.type 都收敛成 DiffFile 实例传给底层组件：
+    - string_replace（claude Edit）：oldString + newString → 库自己算行级 diff
+    - full_content（claude Write）：空 oldContent + newContent → 整块绿色（新增）
+    - unified_diff（codex）：直接把 unified diff 文本作为 hunk 传进去（库原生支持）
 
-    ToolCallCard 在 tool.info.edit 存在时优先用本组件；否则回退到 <pre> detail。
+    渲染模式：Unified（行级穿插，跟 Claude Code 一致），不用 Split（side-by-side 太宽）。
+    主题跟随 catmax 的 [data-theme]——light/dark 联动。
+
+    语法高亮：用 lowlight 包自带的 highlighter 实例（基于 highlight.js，纯 JS 无 wasm，
+    不会触发 CSP 问题）。已注册了 100+ 种语言，直接用。
   -->
-  <div class="text-[12px] font-mono">
-    <!-- A. unified_diff：解析 git diff 文本 -->
-    <template v-if="edit.type === 'unified_diff' && unifiedLines.length > 0">
-      <div class="overflow-x-auto bg-code-block">
-        <div
-          v-for="(line, i) in unifiedLines"
-          :key="i"
-          :class="[
-            'px-3 leading-relaxed whitespace-pre',
-            line.kind === 'add' && 'bg-success/15 text-success',
-            line.kind === 'del' && 'bg-destructive/15 text-destructive',
-            line.kind === 'hunk' && 'text-muted-foreground bg-muted/30',
-            line.kind === 'normal' && 'text-foreground/90',
-          ]"
-        >
-          <span class="select-none inline-block w-4 text-muted-foreground/70">{{
-            line.prefix
-          }}</span
-          ><span>{{ line.text }}</span>
-        </div>
-      </div>
-    </template>
-
-    <!-- B. string_replace：单组或多组 old/new 对比 -->
-    <template v-else-if="edit.type === 'string_replace'">
-      <!-- MultiEdit：多组 -->
-      <template v-if="edit.edits && edit.edits.length > 1">
-        <div
-          v-for="(e, i) in edit.edits"
-          :key="i"
-          class="border-b border-border/50 last:border-b-0"
-        >
-          <div
-            class="px-3 py-1 text-[10px] uppercase tracking-wide text-muted-foreground bg-muted/50"
-          >
-            Edit {{ i + 1 }} / {{ edit.edits.length }}
-          </div>
-          <DiffReplaceBlock :old-string="e.oldString" :new-string="e.newString" />
-        </div>
-      </template>
-      <!-- 单组 Edit -->
-      <DiffReplaceBlock
-        v-else-if="edit.oldString !== undefined || edit.newString !== undefined"
-        :old-string="edit.oldString ?? ''"
-        :new-string="edit.newString ?? ''"
-      />
-    </template>
-
-    <!-- C. full_content：整文件预览，大文件折叠 -->
-    <template v-else-if="edit.type === 'full_content'">
-      <div
-        class="px-3 py-1 text-[11px] text-muted-foreground border-b border-border/50 bg-muted/30"
-      >
-        写入 {{ edit.content ? edit.content.length : 0 }} 字符
-      </div>
-      <pre
-        v-if="edit.content"
-        class="px-3 py-2 text-foreground/90 whitespace-pre-wrap overflow-x-auto bg-code-block"
-        :class="{ 'max-h-96 overflow-y-auto': isLargeContent }"
-        >{{
-          isLargeContent ? edit.content.split('\n').slice(0, 200).join('\n') : edit.content
-        }}</pre>
-      <button
-        v-if="isLargeContent"
-        class="w-full px-3 py-1 text-[11px] text-primary hover:underline bg-muted/30 border-t border-border/50 text-left"
-        @click="showFullContent = !showFullContent"
-      >
-        {{ showFullContent ? '收起' : `展开全部 (${edit.content?.split('\n').length ?? 0} 行)` }}
-      </button>
-    </template>
-
-    <!-- fallback：edit 字段存在但数据不全（极端情况） -->
-    <pre v-else class="px-3 py-2 text-foreground/90 whitespace-pre-wrap bg-code-block">{{
-      edit.filePath
-    }}</pre>
+  <div v-if="diffFile" class="diff-view-wrapper text-[12px]">
+    <DiffView
+      :diff-file="diffFile"
+      :diff-view-mode="DiffModeEnum.Unified"
+      :diff-view-theme="theme"
+      :diff-view-highlight="true"
+      :diff-view-font-size="12"
+      :register-highlighter="lowlightHighlighter"
+    />
   </div>
+  <!-- fallback：diffFile 构建失败（数据残缺等极端情况） -->
+  <pre
+    v-else
+    class="font-mono text-[12px] bg-terminal text-foreground/80 p-3 overflow-x-auto whitespace-pre-wrap"
+    >{{ fallbackText }}</pre
+  >
 </template>
 
 <script setup lang="ts">
 import type { ToolEditInfo } from '@shared/backend/types'
-import { computed, ref } from 'vue'
-
-import DiffReplaceBlock from './DiffReplaceBlock.vue'
+import { DiffModeEnum, DiffView } from '@git-diff-view/vue'
+import { DiffFile, generateDiffFile } from '@git-diff-view/file'
+// lowlight 包自带已注册的 highlighter 实例——直接 import 用，不用自己 init
+import { highlighter as lowlightHighlighter } from '@git-diff-view/lowlight'
+import '@git-diff-view/vue/styles/diff-view.css'
+import { computed, onMounted, onUnmounted, ref, shallowRef, watch } from 'vue'
 
 const props = defineProps<{ edit: ToolEditInfo }>()
 
-const showFullContent = ref(false)
+// ============ DiffFile 构建 ============
+const diffFile = shallowRef<DiffFile | null>(null)
 
-const isLargeContent = computed(() => {
-  if (props.edit.type !== 'full_content') return false
-  const lines = props.edit.content?.split('\n').length ?? 0
-  return lines > 200 && !showFullContent.value
-})
+function buildDiffFile() {
+  const edit = props.edit
+  try {
+    let file: DiffFile | null = null
+    const lang = guessLang(edit.filePath)
 
-/**
- * 解析 unified diff 文本为带类型的行数组。
- *
- * 只识别：
- * - `++ ` / `@@ ... @@` → hunk 头（灰）
- * - `+xxx` → 新增行（绿）
- * - `-xxx` → 删除行（红）
- * - ` xxx` / 其他 → 普通行
- * 跳过 diff 元信息（index / --- / +++）让阅读区更干净。
- */
-interface UnifiedLine {
-  prefix: string
-  text: string
-  kind: 'add' | 'del' | 'hunk' | 'normal'
+    if (edit.type === 'string_replace') {
+      // claude Edit / MultiEdit：oldString → newString 的行级 diff
+      // MultiEdit 暂时只渲染第一组（顶层 oldString/newString，mapping 已保证有第一组数据）
+      const oldStr = edit.oldString ?? ''
+      const newStr = edit.newString ?? ''
+      file = generateDiffFile(edit.filePath, oldStr, edit.filePath, newStr, lang, lang)
+    } else if (edit.type === 'full_content') {
+      // claude Write：整文件覆盖。oldContent 给空——所有行被标绿（新增）
+      file = generateDiffFile(edit.filePath, '', edit.filePath, edit.content ?? '', lang, lang)
+    } else if (edit.type === 'unified_diff' && edit.diff) {
+      // codex：直接把 unified diff 文本作为 hunk 数组传给构造器
+      // 库会 parse +/- 行并渲染
+      file = new DiffFile(edit.filePath, '', edit.filePath, '', [edit.diff], lang, lang)
+    }
+
+    if (file) {
+      file.initTheme(theme.value)
+      file.init()
+      file.buildSplitDiffLines()
+      file.buildUnifiedDiffLines()
+      diffFile.value = file
+    } else {
+      diffFile.value = null
+    }
+  } catch (e) {
+    console.warn('[DiffView] DiffFile 构建失败', e)
+    diffFile.value = null
+  }
 }
 
-const unifiedLines = computed<UnifiedLine[]>(() => {
-  if (props.edit.type !== 'unified_diff' || !props.edit.diff) return []
-  const out: UnifiedLine[] = []
-  for (const raw of props.edit.diff.split('\n')) {
-    if (raw.startsWith('+++') || raw.startsWith('---') || raw.startsWith('index ')) continue
-    if (raw.startsWith('@@')) {
-      out.push({ prefix: ' ', text: raw, kind: 'hunk' })
-    } else if (raw.startsWith('+')) {
-      out.push({ prefix: '+', text: raw.slice(1), kind: 'add' })
-    } else if (raw.startsWith('-')) {
-      out.push({ prefix: '-', text: raw.slice(1), kind: 'del' })
-    } else {
-      // 行首可能是空格（unified diff 的 context line）或空字符串
-      const text = raw.startsWith(' ') ? raw.slice(1) : raw
-      out.push({ prefix: ' ', text, kind: 'normal' })
+// ============ 主题联动 ============
+// catmax 用 <html data-theme="dark"|"light"> 切换，转成 git-diff-view 接受的 "dark"|"light"
+const theme = ref<'light' | 'dark'>(readTheme())
+
+function readTheme(): 'light' | 'dark' {
+  return document.documentElement.getAttribute('data-theme') === 'light' ? 'light' : 'dark'
+}
+
+// 监听 <html data-theme> 变化——切主题时重建 diffFile 让 initTheme 生效
+let themeObserver: MutationObserver | null = null
+onMounted(() => {
+  themeObserver = new MutationObserver(() => {
+    const newTheme = readTheme()
+    if (newTheme !== theme.value) {
+      theme.value = newTheme
+      buildDiffFile()
     }
+  })
+  themeObserver.observe(document.documentElement, {
+    attributes: true,
+    attributeFilter: ['data-theme'],
+  })
+  buildDiffFile()
+})
+
+onUnmounted(() => {
+  themeObserver?.disconnect()
+  themeObserver = null
+})
+
+// edit 变化时重建（ToolCallCard 复用 DiffView 实例，props 可能变）
+watch(() => props.edit, buildDiffFile, { deep: false })
+
+// ============ 工具函数 ============
+/** 从文件路径推语言 id（lowlight/highlight.js 接受的语言名） */
+function guessLang(filePath: string): string {
+  const ext = filePath.split('.').pop()?.toLowerCase() ?? ''
+  const map: Record<string, string> = {
+    ts: 'typescript',
+    tsx: 'tsx',
+    js: 'javascript',
+    jsx: 'jsx',
+    vue: 'xml',
+    html: 'xml',
+    xml: 'xml',
+    css: 'css',
+    scss: 'scss',
+    py: 'python',
+    rb: 'ruby',
+    go: 'go',
+    rs: 'rust',
+    java: 'java',
+    kt: 'kotlin',
+    md: 'markdown',
+    json: 'json',
+    yml: 'yaml',
+    yaml: 'yaml',
+    sh: 'bash',
+    zsh: 'bash',
+    sql: 'sql',
   }
-  return out
+  return map[ext] ?? ext ?? 'plaintext'
+}
+
+/** fallback 文本：构建失败时给个最小可用信息 */
+const fallbackText = computed(() => {
+  const e = props.edit
+  if (e.type === 'unified_diff') return e.diff ?? ''
+  if (e.type === 'full_content') return e.content ?? ''
+  return `${e.oldString ?? ''}\n---\n${e.newString ?? ''}`
 })
 </script>
+
+<style scoped>
+/* wrapper 不加额外背景——git-diff-view 自带 GitHub 风配色 */
+.diff-view-wrapper {
+  width: 100%;
+  overflow-x: auto;
+}
+
+/* 让 diff-view 的字体跟 catmax mono 字体一致 */
+.diff-view-wrapper :deep(.diff-view-content) {
+  font-family: var(--font-mono), monospace;
+}
+
+/* 让 diff 背景透明，融入 ToolCallCard 容器（避免突兀白底） */
+.diff-view-wrapper :deep(.diff-view) {
+  background-color: transparent;
+}
+</style>

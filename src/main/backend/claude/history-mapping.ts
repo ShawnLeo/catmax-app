@@ -26,6 +26,8 @@ import type {
   ToolUseContent,
   UserMessage,
 } from '@shared/backend/claude-schema'
+import { extractContextTags } from '@shared/backend/context-tags'
+import { sharedContextTagExtractors } from '@shared/backend/context-tag-handlers'
 import type { NormalizedMessage, ToolCallInfo } from '@shared/backend/types'
 
 import { toolResultToOutput, toolUseToInfo } from './mapping'
@@ -112,12 +114,16 @@ export function claudeReplayToMessages(messages: ClaudeStreamMessage[]): Normali
         } else if (block.type === 'text') {
           // user 真实输入文本——flush 当前 assistant，新建 user message
           flushAssistant()
-          const text = (block as TextContent).text
+          const rawText = (block as TextContent).text
+          // 提取 IDE context tag（<ide_selection> / <ide_opened_file> / <environment_context>）。
+          // 提取后 textBlocks 存去掉 tag 的纯 prompt，contextBlocks 存结构化 tag。
+          const { text, blocks } = extractContextTags(rawText, sharedContextTagExtractors)
           result.push({
             id: randomUUID(),
             role: 'user',
             turnId: 'history',
             textBlocks: [{ id: randomUUID(), text, kind: 'text' }],
+            ...(blocks.length > 0 ? { contextBlocks: blocks } : {}),
             createdAt: 0,
           })
         }

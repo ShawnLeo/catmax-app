@@ -22,6 +22,8 @@
  */
 import { randomUUID } from 'node:crypto'
 
+import { sharedContextTagExtractors } from '@shared/backend/context-tag-handlers'
+import { extractContextTags } from '@shared/backend/context-tags'
 import type { CodexItem } from '@shared/backend/schema'
 import type { NormalizedMessage, ToolOutput } from '@shared/backend/types'
 
@@ -117,13 +119,16 @@ function mapItemToMessage(item: CodexItem, turnId: string): NormalizedMessage | 
   switch (itemType) {
     case 'user_message': {
       const content = (item as unknown as UserMessageItem).content
-      const text = extractUserText(content)
-      if (!text) return null
+      const rawText = extractUserText(content)
+      if (!rawText) return null
+      // 提取 context tag（codex 注入的 <environment_context> 等）
+      const { text, blocks } = extractContextTags(rawText, sharedContextTagExtractors)
       return {
         id: itemId,
         role: 'user',
         turnId,
         textBlocks: [{ id: `${itemId}-text`, text, kind: 'text' }],
+        ...(blocks.length > 0 ? { contextBlocks: blocks } : {}),
         createdAt: 0, // codex 不在 item 里返回 createdAt，UI 用 turns 的时间
       }
     }

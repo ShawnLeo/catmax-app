@@ -1,5 +1,6 @@
 import { randomUUID } from '@renderer/lib/utils'
 import type {
+  ContextBlock,
   NormalizedMessage,
   TokenUsage,
   TurnEvent,
@@ -131,13 +132,20 @@ export const useMessageStore = defineStore('message', () => {
     return messages.value.find((m) => m.turnId === turnId && m.id === itemId)
   }
 
-  /** 加一条用户消息（在发 turn 之前） */
-  function pushUserMessage(turnId: string, text: string): void {
+  /** 加一条用户消息（在发 turn 之前）
+   *  contextBlocks 可选——如果传入，UI 会把对应 tag 渲染成专门的卡片
+   *  （IDE selection / opened file / environment_context 等），跟气泡平级展示。 */
+  function pushUserMessage(
+    turnId: string,
+    text: string,
+    contextBlocks?: ContextBlock[],
+  ): void {
     messages.value.push({
       id: randomUUID(),
       role: 'user',
       turnId,
       textBlocks: [{ id: randomUUID(), text, kind: 'text' }],
+      ...(contextBlocks && contextBlocks.length > 0 ? { contextBlocks } : {}),
       createdAt: Date.now(),
     })
   }

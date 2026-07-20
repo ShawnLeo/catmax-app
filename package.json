@@ -26,6 +26,9 @@
     "dist": "pnpm build && cross-env ELECTRON_MIRROR=https://npmmirror.com/mirrors/electron/ ELECTRON_BUILDER_BINARIES_MIRROR=https://npmmirror.com/mirrors/electron-builder-binaries/ electron-builder"
   },
   "dependencies": {
+    "@git-diff-view/file": "^0.1.7",
+    "@git-diff-view/lowlight": "^0.1.7",
+    "@git-diff-view/vue": "^0.1.7",
     "@vueuse/core": "^14.3.0",
     "@xterm/addon-fit": "^0.11.0",
     "@xterm/addon-web-links": "^0.12.0",

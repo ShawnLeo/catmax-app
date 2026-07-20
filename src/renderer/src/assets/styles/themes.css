@@ -66,6 +66,8 @@
   --terminal-background: oklch(10% 0.005 250);
   --tool-call-background: var(--color-gray-200);
   --tool-call-border: var(--border);
+  /* user 消息气泡背景——对齐 Claude Code 风：暗色下精确用 #222222（rgb 34,34,34）。 */
+  --user-bubble-background: #222222;
 }
 
 /* ============ LIGHT 主题（Codex 风格：米白带暖调） ============ */
@@ -126,6 +128,8 @@
   --terminal-background: oklch(95% 0.003 80);
   --tool-call-background: var(--color-gray-100);
   --tool-call-border: var(--border);
+  /* user 消息气泡——亮色下用米白（跟暗色 #222222 对称的"卡片浮起"色） */
+  --user-bubble-background: oklch(99% 0.002 80);
 }
 
 /* ============ 字体（三个独立 token） ============ */

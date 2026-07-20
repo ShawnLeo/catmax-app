@@ -4,6 +4,11 @@
  * 绝不见 codex/claude 协议原文。
  */
 import type { BackendId } from '../constants'
+import type { ContextBlock } from './context-tag-types'
+
+// re-export：renderer/main 已经按惯例从 types.ts 引所有 NormalizedMessage 相关类型，
+// ContextBlock 也走同一入口，避免到处改 import 路径。
+export type { ContextBlock } from './context-tag-types'
 
 /** 权限模式 —— codex 和 claude 语义一致 */
 export type PermissionMode =
@@ -72,7 +77,15 @@ export interface StartTurnArgs {
 
 /** 工具调用描述（归一化） */
 export interface ToolCallInfo {
-  kind: 'shell_command' | 'file_edit' | 'file_read' | 'mcp' | 'other'
+  kind:
+    | 'shell_command'
+    | 'file_edit'
+    | 'file_read'
+    | 'mcp'
+    | 'control'
+    | 'web'
+    | 'task'
+    | 'other'
   title: string
   detail?: string
   /**
@@ -81,6 +94,91 @@ export interface ToolCallInfo {
    * 没有这个字段时前端回退到把 detail 当纯文本展示。
    */
   edit?: ToolEditInfo
+  /**
+   * 控制流工具的结构化数据（EnterPlanMode / ExitPlanMode / TodoWrite / AskUserQuestion）。
+   * 这些工具的 input 不是文件/命令，而是 plan markdown / todos / questions——
+   * 前端按 control.type 分发到专门渲染组件，不走 detail/output 默认渲染。
+   */
+  control?: ToolControlInfo
+  /**
+   * web 工具的结构化数据（WebSearch / WebFetch）。
+   * - WebSearch：query + 可选 allowed_domains/blocked_domains（title + detail 也填了，但 web 优先渲染）
+   * - WebFetch：url + 可选 prompt
+   * output（结果摘要 / 抓取内容）仍走 ToolOutput，前端按 markdown 渲染。
+   */
+  web?: ToolWebInfo
+  /**
+   * Task 工具的结构化数据（子 agent 调用）。
+   * 展示子 agent 的 description + prompt 摘要（不展开子 agent 内部的 tool calls——
+   * 那需要嵌套子会话视图，工作量大；先做摘要版）。
+   */
+  task?: ToolTaskInfo
+}
+
+/**
+ * Web 工具结构化数据。
+ *
+ * 两种 type：
+ * - `search`：WebSearch，query + 域名过滤
+ * - `fetch`：WebFetch，url + prompt 指令
+ */
+export interface ToolWebInfo {
+  type: 'search' | 'fetch'
+  /** search: 搜索关键词；fetch: 抓取的 URL */
+  query: string
+  /** fetch only：给抓取器的 prompt（聚焦抓取内容的指令） */
+  prompt?: string
+  /** search only：只搜这些域名 */
+  allowedDomains?: string[]
+  /** search only：不搜这些域名 */
+  blockedDomains?: string[]
+}
+
+/**
+ * Task 工具结构化数据（子 agent 调用）。
+ */
+export interface ToolTaskInfo {
+  /** 子 agent 类型描述（"general-purpose" / "Explore" / 自定义） */
+  description: string
+  /** 给子 agent 的完整 prompt（可能很长，前端截断展示） */
+  prompt: string
+}
+
+/**
+ * 控制流工具的结构化数据。
+ *
+ * 4 种 type 对应 claude 的 4 个控制流工具：
+ * - enter_plan_mode：进入计划模式（无数据，纯提示）
+ * - exit_plan_mode：退出计划模式 + 携带 markdown 实施方案
+ * - todo_write：更新 todo 列表
+ * - ask_user_question：向用户提问（多选项）
+ */
+export interface ToolControlInfo {
+  type: 'enter_plan_mode' | 'exit_plan_mode' | 'todo_write' | 'ask_user_question'
+  /** exit_plan_mode：markdown 计划内容（用户审批的核心） */
+  plan?: string
+  /** todo_write：todo 列表 */
+  todos?: ToolControlTodo[]
+  /** ask_user_question：问题列表 */
+  questions?: ToolControlQuestion[]
+}
+
+export interface ToolControlTodo {
+  content: string
+  status: 'pending' | 'in_progress' | 'completed'
+  /** 当前进行中的简短描述（claude 给的） */
+  activeForm?: string
+}
+
+export interface ToolControlQuestion {
+  header: string
+  question: string
+  options: ToolControlQuestionOption[]
+}
+
+export interface ToolControlQuestionOption {
+  label: string
+  description: string
 }
 
 /**
@@ -190,6 +288,13 @@ export interface NormalizedMessage {
     approvalState?: 'pending' | 'approved' | 'rejected'
     approvalRequestId?: string
   }[]
+  /**
+   * Context tag 块（IDE selection / opened file / environment_context 等）。
+   * 由 history-mapping 或 messageStore.pushUserMessage 在 user 文本里提取得到。
+   * 跟 textBlocks / toolBlocks 平级，UI 按 tag 类型分发到对应组件渲染。
+   * 不在 user 消息上时省略（向后兼容旧消息）。
+   */
+  contextBlocks?: ContextBlock[]
   createdAt: number
 }
 
