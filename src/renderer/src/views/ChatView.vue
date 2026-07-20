@@ -160,6 +160,9 @@ async function onSend(text: string): Promise<void> {
     const createArgs: Parameters<typeof sessionStore.create>[0] = {
       workspaceId: workspaceStore.currentWorkspace.id,
       cwd: workspaceStore.currentWorkspace.path,
+      // 显式传 backend——避免依赖 main 端默认值（getCurrentId）。
+      // 切 backend 后 ChatView 应该以新 backend 创建会话。
+      backend: backendStore.currentId,
       permissionMode: runtimeConfig.value.permissionMode,
       // 第一条消息作为 initialPrompt——main handler 会 slice(0,50) 写入 db 的 title 字段，
       // 侧边栏立即显示这条消息的开头，不再显示 "(新会话)"。

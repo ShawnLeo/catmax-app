@@ -1,5 +1,5 @@
 import type { EffortLevel, PermissionMode } from '@shared/backend/types'
-import type { BackendId } from '@shared/constants'
+import { BACKEND_IDS, type BackendId } from '@shared/constants'
 import type { SessionView } from '@shared/domain'
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
@@ -11,15 +11,29 @@ export const useSessionStore = defineStore('session', () => {
 
   const currentSession = computed(() => sessions.value.find((s) => s.id === currentSessionId.value))
 
-  /** 按 backend 分组（当前后端 = continuable，其他 = readonly） */
+  /**
+   * 按 backend id 分组——给侧边栏 tab 用。
+   *
+   * 之前用 continuable/readonly 二分有个问题：continuable 是 main 端 fetch 时
+   * 根据"当时的 currentBackend"算出来的，切 backend 后不会自动重算（除非重新 load）。
+   * 直接按 session.backend 字段分组就没这个问题——backend 是会话固有属性，
+   * 不依赖当前 backend。
+   */
   const sessionsByBackend = computed(() => {
-    const continuable: SessionView[] = []
-    const readonly: SessionView[] = []
+    const byId = {} as Record<BackendId, SessionView[]>
+    for (const id of BACKEND_IDS) byId[id] = []
     for (const s of sessions.value) {
-      if (s.continuable) continuable.push(s)
-      else readonly.push(s)
+      const bucket = byId[s.backend]
+      if (bucket) bucket.push(s)
     }
-    return { continuable, readonly }
+    return byId
+  })
+
+  /** 每个 backend 的会话数——给 tab badge 用 */
+  const countByBackend = computed(() => {
+    const counts = {} as Record<BackendId, number>
+    for (const id of BACKEND_IDS) counts[id] = sessionsByBackend.value[id].length
+    return counts
   })
 
   async function load(workspaceId: string): Promise<void> {
@@ -94,6 +108,7 @@ export const useSessionStore = defineStore('session', () => {
     loading,
     currentSession,
     sessionsByBackend,
+    countByBackend,
     load,
     reconcile,
     create,

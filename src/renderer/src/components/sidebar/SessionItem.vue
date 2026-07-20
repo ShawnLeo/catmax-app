@@ -11,17 +11,12 @@
       <div class="text-sm text-foreground truncate">
         {{ session.title || '(新会话)' }}
       </div>
-      <div class="text-xs text-muted-foreground flex items-center gap-1">
-        <span>{{ session.backend }}</span>
-        <span>·</span>
-        <span>{{ formatRelativeTime(session.lastActiveAt) }}</span>
+      <div class="text-xs text-muted-foreground">
+        {{ formatRelativeTime(session.lastActiveAt) }}
       </div>
     </div>
 
-    <!-- 只读标记 -->
-    <LockIcon v-if="readonly" class="w-3 h-3 text-muted-foreground flex-shrink-0" />
-
-    <!-- 删除按钮（hover 显示，只读也允许删） -->
+    <!-- 删除按钮（hover 显示） -->
     <button
       class="opacity-0 group-hover:opacity-100 p-1 hover:text-destructive"
       @click.stop="$emit('remove')"
@@ -34,12 +29,11 @@
 <script setup lang="ts">
 import { formatRelativeTime } from '@renderer/lib/format'
 import type { SessionView } from '@shared/domain'
-import { MessageSquareIcon, Trash2Icon, LockIcon } from 'lucide-vue-next'
+import { MessageSquareIcon, Trash2Icon } from 'lucide-vue-next'
 
 defineProps<{
   session: SessionView
   active: boolean
-  readonly?: boolean
 }>()
 defineEmits<{ click: []; remove: [] }>()
 </script>

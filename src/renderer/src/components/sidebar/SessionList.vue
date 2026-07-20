@@ -1,5 +1,5 @@
 <template>
-  <div class="p-2">
+  <div class="p-2 flex flex-col h-full">
     <!-- 当前工作区不存在时 -->
     <div
       v-if="!workspaceStore.currentWorkspace"
@@ -9,56 +9,67 @@
     </div>
 
     <template v-else>
-      <!-- 可继续区 -->
-      <div v-if="sessionsByBackend.continuable.length > 0" class="mb-4">
-        <div class="text-xs font-medium text-muted-foreground px-2 mb-1 uppercase tracking-wide">
-          {{ backendStore.currentId }} · 可继续
-        </div>
-        <SessionItem
-          v-for="session in sessionsByBackend.continuable"
-          :key="session.id"
-          :session="session"
-          :active="session.id === sessionStore.currentSessionId"
-          @click="selectSession(session.id)"
-          @remove="removeSession(session.id)"
-        />
-      </div>
-
-      <!-- 其他后端只读区 -->
-      <details v-if="sessionsByBackend.readonly.length > 0" class="mb-2">
-        <summary
-          class="text-xs font-medium text-muted-foreground px-2 py-1 cursor-pointer hover:text-foreground"
-        >
-          其他后端 · 只读 ({{ sessionsByBackend.readonly.length }})
-        </summary>
-        <SessionItem
-          v-for="session in sessionsByBackend.readonly"
-          :key="session.id"
-          :session="session"
-          :active="session.id === sessionStore.currentSessionId"
-          readonly
-          @click="selectSession(session.id)"
-          @remove="removeSession(session.id)"
-        />
-      </details>
-
-      <!-- 新建会话按钮 -->
+      <!-- 顶部：新建会话按钮 + backend tab -->
       <button
-        class="w-full mt-2 px-3 py-2 text-sm text-primary hover:bg-muted rounded-md flex items-center gap-2"
+        class="w-full mb-2 px-3 py-2 text-sm text-primary hover:bg-muted rounded-md flex items-center gap-2 border border-sidebar-border"
         @click="newSession"
       >
         <PlusIcon class="w-4 h-4" />
         新建会话
       </button>
+
+      <!-- backend tab —— 切 tab = 筛选该 backend 的会话 + 切换当前后端 -->
+      <div class="flex border-b border-sidebar-border mb-2">
+        <button
+          v-for="id in BACKEND_IDS"
+          :key="id"
+          type="button"
+          :disabled="!isBackendAvailable(id)"
+          :class="[
+            'flex-1 py-1.5 text-xs font-medium border-b-2 -mb-px transition-colors capitalize',
+            backendStore.currentId === id
+              ? 'border-primary text-foreground'
+              : 'border-transparent text-muted-foreground hover:text-foreground',
+            !isBackendAvailable(id) ? 'opacity-40 cursor-not-allowed' : 'cursor-pointer',
+          ]"
+          :title="backendTabTooltip(id)"
+          @click="switchBackendTab(id)"
+        >
+          {{ id }}
+          <span class="ml-1 text-[10px] opacity-60">({{ sessionStore.countByBackend[id] }})</span>
+        </button>
+      </div>
+
+      <!-- 当前 backend 的会话列表 -->
+      <div class="flex-1 overflow-y-auto">
+        <SessionItem
+          v-for="session in currentBackendSessions"
+          :key="session.id"
+          :session="session"
+          :active="session.id === sessionStore.currentSessionId"
+          @click="selectSession(session.id)"
+          @remove="removeSession(session.id)"
+        />
+
+        <!-- 空状态 -->
+        <div
+          v-if="currentBackendSessions.length === 0"
+          class="text-center text-xs text-muted-foreground py-8"
+        >
+          没有 {{ backendStore.currentId }} 会话
+        </div>
+      </div>
     </template>
   </div>
 </template>
 
 <script setup lang="ts">
+import { explainBackendError } from '@renderer/lib/backend-error'
 import { useBackendStore } from '@renderer/stores/backend'
 import { useMessageStore } from '@renderer/stores/message'
 import { useSessionStore } from '@renderer/stores/session'
 import { useWorkspaceStore } from '@renderer/stores/workspace'
+import { BACKEND_IDS, type BackendId } from '@shared/constants'
 import { PlusIcon } from 'lucide-vue-next'
 import { computed, onMounted, watch } from 'vue'
 
@@ -69,7 +80,34 @@ const sessionStore = useSessionStore()
 const backendStore = useBackendStore()
 const messageStore = useMessageStore()
 
-const sessionsByBackend = computed(() => sessionStore.sessionsByBackend)
+/** 当前 backend tab 下的会话——直接按 session.backend 筛选，不依赖 continuable 字段 */
+const currentBackendSessions = computed(
+  () => sessionStore.sessionsByBackend[backendStore.currentId] ?? [],
+)
+
+function backendStatus(id: BackendId) {
+  return backendStore.statuses.find((s) => s.id === id)
+}
+
+function isBackendAvailable(id: BackendId): boolean {
+  return backendStatus(id)?.available ?? false
+}
+
+/**
+ * tab 的 tooltip——可用时显示版本，不可用时显示错误简述+修复指引。
+ * 因为底部 BackendIndicator 已删，这是用户看到 backend 不可用原因的唯一入口。
+ */
+function backendTabTooltip(id: BackendId): string {
+  const status = backendStatus(id)
+  if (!status) return id
+  if (status.available) return `${id} (${status.version ?? 'unknown'})`
+  const info = explainBackendError(status.error)
+  let text = `${id} 不可用：${info.title}\n${info.detail}`
+  if (info.fix && info.fix.length > 0) {
+    text += '\n\n修复步骤：\n' + info.fix.map((s) => `  · ${s}`).join('\n')
+  }
+  return text
+}
 
 onMounted(async () => {
   if (workspaceStore.currentWorkspace) {
@@ -89,7 +127,37 @@ watch(
   },
 )
 
+/**
+ * 切 backend tab——直接切，不弹窗。
+ * 用户点 tab 意图明确（就是想看那个 backend 的会话）。
+ * 弹窗只在底部 BackendIndicator 主动切换时才有——但现在底部切换器删了。
+ */
+async function switchBackendTab(id: BackendId): Promise<void> {
+  if (id === backendStore.currentId) return
+  if (!isBackendAvailable(id)) return
+  // 切 backend 会清掉当前会话上下文（不同 backend 不能混用）
+  await backendStore.switchTo(id)
+  sessionStore.setCurrent('')
+  messageStore.reset()
+}
+
+/**
+ * 点历史会话——切到该会话的 backend（不弹窗），再加载历史。
+ *
+ * 必须切 backend 的原因：startTurn 用当前 backend 的 adapter 调
+ * backendThreadId，如果 session.backend ≠ currentBackend，必然失败
+ * （codex 的 thread id 在 claude 那边不存在，反之亦然）。
+ */
 async function selectSession(id: string): Promise<void> {
+  const session = sessionStore.sessions.find((s) => s.id === id)
+  if (!session) return
+  if (session.backend !== backendStore.currentId) {
+    if (!isBackendAvailable(session.backend)) {
+      // 极端情况：会话所属 backend 不可用——不让选
+      return
+    }
+    await backendStore.switchTo(session.backend)
+  }
   sessionStore.setCurrent(id)
   messageStore.reset()
   await sessionStore.loadHistory(id)
@@ -100,7 +168,7 @@ async function removeSession(id: string): Promise<void> {
   await sessionStore.remove(id)
 }
 
-async function newSession(): Promise<void> {
+function newSession(): void {
   sessionStore.setCurrent('')
   messageStore.reset()
 }
