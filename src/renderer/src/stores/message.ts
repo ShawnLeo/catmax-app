@@ -172,6 +172,10 @@ export const useMessageStore = defineStore('message', () => {
             kind: 'text',
           })
         }
+        // 正文开始 → 同 turn 所有未结束的 reasoning 块视为结束。
+        // reasoning 和 text 通常不同 itemId（落在不同 NormalizedMessage 上），
+        // 所以必须在 turn 维度扫描，不能只看本 message。
+        markReasoningEnded(s, event.turnId, Date.now())
         break
       }
       case 'reasoning_delta': {
@@ -183,11 +187,17 @@ export const useMessageStore = defineStore('message', () => {
         if (lastBlock && lastBlock.id === `${event.itemId}-reasoning`) {
           lastBlock.text += event.text
         } else {
-          msg.textBlocks.push({
+          const now = Date.now()
+          const block: NonNullable<NormalizedMessage['textBlocks']>[number] = {
             id: `${event.itemId}-reasoning`,
             text: event.text,
             kind: 'reasoning',
-          })
+            startedAt: now,
+          }
+          // 兜底：如果 reasoning 开始时正文已经在流（极少见，比如 turn resume
+          // 拉历史带 reasoning），直接认为已结束。避免出现 endedAt < startedAt。
+          if (hasTextStarted(s, event.turnId)) block.endedAt = now
+          msg.textBlocks.push(block)
         }
         break
       }
@@ -234,8 +244,10 @@ export const useMessageStore = defineStore('message', () => {
       }
       case 'error': {
         s.lastError = event.message
+        // 不可恢复错误 → 兜底结束所有未完成的 reasoning（否则 header 卡在 thinking... 永远不结束）
         if (!event.recoverable) {
           s.isRunning = false
+          markReasoningEnded(s, event.turnId, Date.now())
         }
         break
       }
@@ -245,6 +257,9 @@ export const useMessageStore = defineStore('message', () => {
         if (event.usage) {
           s.lastUsage = event.usage
         }
+        // 兜底：纯思考无正文的 turn，reasoning 没机会被 text_delta 标记结束，
+        // 这里统一兜底结束（幂等，已结束的不会被覆盖）。
+        markReasoningEnded(s, event.turnId, Date.now())
         // turn 结束时兜底清空 pending——
         // 正常流程下 dialog 提交/cancel 时 ChatView 已经清了，
         // 这里防止 dialog 卡住（比如 turn 因各种原因提前结束时）。
@@ -253,6 +268,39 @@ export const useMessageStore = defineStore('message', () => {
         break
       }
     }
+  }
+
+  /**
+   * 把同 turn 内所有"还在思考中"（endedAt === undefined）的 reasoning 块标记为结束。
+   *
+   * 幂等：已结束的块（有 endedAt）不动。
+   *
+   * 调用时机：
+   *   - text_delta 首次到达（正文开始 → 思考结束，最常见路径）
+   *   - turn_completed（兜底：纯思考无正文的场景）
+   *   - 不可恢复 error（避免 header 永远停在 thinking...）
+   *
+   * 跨 message 扫描的原因：reasoning 和 text 通常落在不同 itemId → 不同 NormalizedMessage，
+   * 只扫当前 message 会漏掉。
+   */
+  function markReasoningEnded(s: SessionState, turnId: string, now: number): void {
+    for (const m of s.messages) {
+      if (m.turnId !== turnId || !m.textBlocks) continue
+      for (const b of m.textBlocks) {
+        if (b.kind === 'reasoning' && b.endedAt === undefined) {
+          b.endedAt = now
+        }
+      }
+    }
+  }
+
+  /** 同 turn 内是否已经累积过 text_delta（正文已开始）。用于 reasoning 块创建时的兜底。 */
+  function hasTextStarted(s: SessionState, turnId: string): boolean {
+    for (const m of s.messages) {
+      if (m.turnId !== turnId || !m.textBlocks) continue
+      if (m.textBlocks.some((b) => b.kind === 'text' && b.text.length > 0)) return true
+    }
+    return false
   }
 
   function findOrCreateAssistantMessage(

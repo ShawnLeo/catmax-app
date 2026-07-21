@@ -41,9 +41,12 @@
         </span>
       </template>
 
-      <!-- done：静态文案 + 折叠箭头 -->
+      <!-- done：静态文案 + 耗时（如有）+ 折叠箭头 -->
       <template v-else>
         <span>已思考</span>
+        <span v-if="durationLabel" class="text-muted-foreground/70 tabular-nums">{{
+          durationLabel
+        }}</span>
         <ChevronDownIcon
           class="w-3 h-3 flex-shrink-0 transition-transform"
           :class="open ? 'rotate-180' : ''"
@@ -63,19 +66,38 @@
 
 <script setup lang="ts">
 import { BrainIcon, ChevronDownIcon } from 'lucide-vue-next'
-import { ref } from 'vue'
+import { computed, ref } from 'vue'
 
 import MarkdownView from './MarkdownView.vue'
 
-defineProps<{
+const props = defineProps<{
   /** reasoning 文本（可能是部分流式 token，会随时间增长） */
   text: string
   /** 是否处于实时流式状态——true 时 header 显示动画 thinking... */
   streaming: boolean
+  /** 思考耗时（秒）。null = 拿不到（历史消息反推无时间戳）→ 不显示 */
+  durationSec?: number | null
 }>()
 
 /** 折叠态——默认始终折叠（用户主动点开才看） */
 const open = ref(false)
+
+/**
+ * 耗时展示文案：
+ *   - < 1s   → "<1s"（思考极快时避免显示 0s 这种尴尬值）
+ *   - < 60s  → "Ns"
+ *   - ≥ 60s  → "N分Ss"
+ * 拿不到 durationSec 时不显示（返回空串）。
+ */
+const durationLabel = computed(() => {
+  const sec = props.durationSec
+  if (sec === undefined || sec === null) return ''
+  if (sec < 1) return '<1s'
+  if (sec < 60) return `${Math.round(sec)}s`
+  const m = Math.floor(sec / 60)
+  const s = Math.round(sec % 60)
+  return `${m}分${s}s`
+})
 </script>
 
 <style scoped>

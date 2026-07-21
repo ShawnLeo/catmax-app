@@ -80,6 +80,7 @@
           :key="block.id"
           :text="block.text"
           :streaming="isReasoningStreaming(block)"
+          :duration-sec="reasoningDurationSec(block)"
         />
 
         <!-- text 块：贴竖线渲染，无独立色点 -->
@@ -145,20 +146,26 @@ const textBlocks = computed<TextBlock[]>(() =>
 
 /**
  * 判断某条 reasoning 块是否还在实时流式输出。
-
- * 判据：当前 turn 正在跑（isRunning && turnId === currentTurnId），
- * 且这条 reasoning 块是该 turn 的最后一个非空 textBlock——
- * 后面还没有 text 块跟上来，说明模型还在产 reasoning token，没切换到正文。
  *
- * 一旦正文（text_delta）开始累积，reasoning 块不再是"最后一个"，
- * streaming 判定自动转 false，header 切到静态 "已思考 ▾"。
+ * 数据驱动：reasoning 块上的 endedAt 字段就是"思考是否结束"的真相。
+ *   - endedAt === undefined → 还在思考中（thinking... 动画）
+ *   - endedAt !== undefined → 已结束，展示 "已思考 + 时长"
+ *
+ * endedAt 由 messageStore 在以下任一时机写入（见 markReasoningEnded）：
+ *   - 同 turn 首次收到 text_delta（正文开始 → 思考结束，最常见）
+ *   - turn_completed / 不可恢复 error（兜底，避免永久卡在 thinking...）
  */
 function isReasoningStreaming(block: TextBlock): boolean {
-  if (!messageStore.isRunning) return false
-  if (props.message.turnId !== messageStore.currentTurnId) return false
-  const blocks = (props.message.textBlocks ?? []).filter((b) => b.text.trim())
-  const last = blocks[blocks.length - 1]
-  return last !== undefined && last.id === block.id
+  return block.endedAt === undefined
+}
+
+/**
+ * 思考耗时（秒）。取 startedAt → endedAt 的差值。
+ * 任一字段缺失（历史消息反推时可能没有）→ 返回 null，UI 不显示时长。
+ */
+function reasoningDurationSec(block: TextBlock): number | null {
+  if (block.startedAt === undefined || block.endedAt === undefined) return null
+  return Math.max(0, (block.endedAt - block.startedAt) / 1000)
 }
 
 /** user 消息是否至少有一个可见内容。 */

@@ -317,6 +317,24 @@ export interface NormalizedMessage {
     id: string
     text: string
     kind: 'text' | 'reasoning'
+    /**
+     * reasoning 块专属：首次收到 delta 的时间戳。
+     * 用来计算"思考时长"（endedAt - startedAt）。历史消息反推时无此字段。
+     */
+    startedAt?: number
+    /**
+     * reasoning 块专属：流式结束时间戳。
+     *
+     * 触发时机（任一即设置，幂等）：
+     *   - 同 turn 内首次收到 text_delta（正文开始 → 思考结束）
+     *   - turn_completed（兜底，纯思考无正文的场景）
+     *   - 不可恢复的 error
+     *
+     * 关键设计：reasoning 和 text 通常来自不同 itemId（不同 NormalizedMessage），
+     * 所以不能靠"自己是最后一块"判断是否还在流式——必须显式记录结束时间。
+     * 前端用 endedAt === undefined 判断"还在思考中"。
+     */
+    endedAt?: number
   }[]
   toolBlocks?: {
     id: string
