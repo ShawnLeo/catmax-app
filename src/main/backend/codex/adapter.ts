@@ -15,6 +15,9 @@
  * - codex 协议细节（item 类型、approval 流程）在这里全部转译为 TurnEvent
  */
 import { randomUUID } from 'node:crypto'
+import { readdir, unlink } from 'node:fs/promises'
+import { homedir } from 'node:os'
+import { join } from 'node:path'
 
 import { logger } from '@main/service/logger'
 import {
@@ -420,6 +423,36 @@ export class CodexAdapter implements AgentBackend {
       lastActiveAt: (t.updatedAt as number) ?? Date.now(),
       model: (t.modelProvider as string) ?? null,
     }))
+  }
+
+  async deleteSession(backendThreadId: string): Promise<void> {
+    // codex CLI 当前没有暴露 thread 删除 RPC——按文件名扫 rollout 文件删。
+    // 文件路径：~/.codex/sessions/YYYY/MM/DD/rollout-<ts>-<threadId>.jsonl
+    // threadId 是 UUID，跨所有日期目录 glob `**/rollout-*-${threadId}.jsonl`。
+    // 失败仅日志不抛——DB tombstone 兜底。
+    const sessionsDir = join(homedir(), '.codex', 'sessions')
+    try {
+      // recursive: true 需要 Node 18.17+，catmax 要求 Node 22
+      const entries = await readdir(sessionsDir, { recursive: true, withFileTypes: true })
+      const suffix = `-${backendThreadId}.jsonl`
+      const matches = entries.filter(
+        (e) => e.isFile() && e.name.startsWith('rollout-') && e.name.endsWith(suffix),
+      )
+      if (matches.length === 0) {
+        log.warn('no codex rollout file found for thread', backendThreadId)
+        return
+      }
+      for (const ent of matches) {
+        // ent.path 是父目录（Node readdir withFileTypes 提供）
+        const abs = join((ent as { path: string }).path ?? sessionsDir, ent.name)
+        await unlink(abs).catch(() => {})
+        log.info('deleted codex rollout file', abs)
+      }
+    } catch (e) {
+      const code = (e as NodeJS.ErrnoException).code
+      if (code === 'ENOENT') return // sessions 目录不存在，幂等
+      log.warn('failed to delete codex session files', backendThreadId, e)
+    }
   }
 
   async resumeSession(backendThreadId: string): Promise<{ messages: never[] }> {

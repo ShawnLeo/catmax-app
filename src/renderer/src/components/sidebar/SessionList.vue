@@ -168,17 +168,32 @@ async function switchBackendTab(id: BackendId): Promise<void> {
  * loadHistory 的 setMessages 只覆盖当前 session 的 messages。
  */
 async function selectSession(id: string): Promise<void> {
-  const session = sessionStore.sessions.find((s) => s.id === id)
-  if (!session) return
+  let session = sessionStore.sessions.find((s) => s.id === id)
+  if (!session && workspaceStore.currentWorkspace) {
+    // 列表可能过期（load 中、刚切 workspace、reconcile 刚改库），重拉一次再找。
+    // 不静默 return——否则 currentSessionId 留在前一个状态，用户下次发消息时
+    // onSend 会以为"没选 session"偷偷创建新会话（Bug B）。
+    await sessionStore.load(workspaceStore.currentWorkspace.id)
+    session = sessionStore.sessions.find((s) => s.id === id)
+  }
+  if (!session) return // 重拉后还是没有——真没了（被删/被其他端改）
+
+  // ⚠️ 关键：先把 currentSessionId 设上，再 await switchTo / loadHistory。
+  // 否则 await 期间用户发消息，currentSessionId 还是旧值（可能 '' 或别处），
+  // onSend 拿不到 currentSession 就会创建新会话（Bug B 的 race 触发点）。
+  sessionStore.setCurrent(id)
+  messageStore.setCurrentSession(id)
+
   if (session.backend !== backendStore.currentId) {
     if (!isBackendAvailable(session.backend)) {
       // 极端情况：会话所属 backend 不可用——不让选
+      // 回滚 currentSessionId，避免挂在一个不可用 backend 上
+      sessionStore.setCurrent('')
+      messageStore.setCurrentSession(null)
       return
     }
     await backendStore.switchTo(session.backend)
   }
-  sessionStore.setCurrent(id)
-  messageStore.setCurrentSession(id)
   await sessionStore.loadHistory(id)
 }
 

@@ -85,9 +85,18 @@ export const removeSession = async (args: { sessionId: string }): Promise<void> 
   if (!session) {
     throw new SessionError('not-found', `session not found: ${args.sessionId}`)
   }
-  // 删 App 索引（codex 那边的 rollout 文件不动——用户可能想保留）
+
+  // 1. 物理删除后端侧数据（claude .jsonl / codex rollout 文件）
+  //    拿 workspace 路径作 cwd——claude 按 cwd 分目录存 jsonl
+  const ws = ctx.db.findWorkspaceById(session.workspaceId)
+  await ctx.backendManager.deleteSession(session.backend, session.backendThreadId, ws?.path)
+
+  // 2. 写 tombstone——即便物理删除失败（权限/路径错误），reconcile/扫描导入也会跳过
+  ctx.db.insertDeletedSession(session.backend, session.backendThreadId)
+
+  // 3. 删 DB 索引
   ctx.db.deleteSession(args.sessionId)
-  log.info('removed session', args.sessionId)
+  log.info('removed session', args.sessionId, `(${session.backend}/${session.backendThreadId})`)
 }
 
 export const reconcileSessions = async (args: { workspaceId: string }) => {
@@ -115,25 +124,29 @@ export const reconcileSessions = async (args: { workspaceId: string }) => {
   const added: SessionView[] = []
   for (const bs of backendSessions) {
     const exists = appSessions.find((s) => s.backendThreadId === bs.backendThreadId)
-    if (!exists) {
-      const now = Date.now()
-      const sessionId = randomUUID()
-      ctx.db.insertSession({
-        id: sessionId,
-        backend: ctx.backendManager.getCurrentId(),
-        backendThreadId: bs.backendThreadId,
-        workspaceId: args.workspaceId,
-        title: bs.title,
-        model: bs.model,
-        effort: null,
-        permissionMode: null,
-        turnCount: 0,
-        createdAt: now,
-        lastActiveAt: bs.lastActiveAt,
-      })
-      const inserted = ctx.db.findSessionById(sessionId)
-      if (inserted) added.push(toView(inserted))
+    if (exists) continue
+    // tombstone 跳过——用户删过这条，磁盘文件可能还在（物理删除失败/不可达），
+    // 但不允许复活。reconcile 是自动同步，必须尊重用户的删除意图。
+    if (ctx.db.isSessionDeleted(ctx.backendManager.getCurrentId(), bs.backendThreadId)) {
+      continue
     }
+    const now = Date.now()
+    const sessionId = randomUUID()
+    ctx.db.insertSession({
+      id: sessionId,
+      backend: ctx.backendManager.getCurrentId(),
+      backendThreadId: bs.backendThreadId,
+      workspaceId: args.workspaceId,
+      title: bs.title,
+      model: bs.model,
+      effort: null,
+      permissionMode: null,
+      turnCount: 0,
+      createdAt: now,
+      lastActiveAt: bs.lastActiveAt,
+    })
+    const inserted = ctx.db.findSessionById(sessionId)
+    if (inserted) added.push(toView(inserted))
   }
 
   // 找出 App 有、后端没有的（标记 stale，不删）
@@ -261,6 +274,14 @@ export const importSessions = async (args: ImportSessionArgs): Promise<ImportSes
   const skipped: Array<{ backendThreadId: string; reason: string }> = []
 
   for (const item of args.sessions) {
+    // tombstone 跳过——用户删过的不让导入回来
+    if (ctx.db.isSessionDeleted(item.backend, item.backendThreadId)) {
+      skipped.push({
+        backendThreadId: item.backendThreadId,
+        reason: 'user deleted this session',
+      })
+      continue
+    }
     const ws = workspaceById.get(item.workspaceId)
     if (!ws) {
       skipped.push({

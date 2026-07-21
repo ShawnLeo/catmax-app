@@ -183,6 +183,17 @@ async function onSend(text: string, attachments: ContextBlock[]): Promise<void> 
   // 如果还没 session，先创建
   let sessionId = sessionStore.currentSession?.id
   if (!sessionId) {
+    // observability：currentSessionId 被设过但找不到对应 session——这是可疑状态
+    // （可能是 selectSession race / store 不一致），但为了不阻塞用户发消息仍然创建。
+    // 真正的新建场景（点"新建会话"按钮 / 切 backend tab）currentSessionId === null/''。
+    if (sessionStore.currentSessionId !== null && sessionStore.currentSessionId !== '') {
+      console.error(
+        '[onSend] currentSessionId set but session not found, creating new session anyway. currentSessionId=',
+        sessionStore.currentSessionId,
+        'sessions=',
+        sessionStore.sessions.map((s) => s.id),
+      )
+    }
     const createArgs: Parameters<typeof sessionStore.create>[0] = {
       workspaceId: workspaceStore.currentWorkspace.id,
       cwd: workspaceStore.currentWorkspace.path,

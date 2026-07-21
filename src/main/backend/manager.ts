@@ -355,6 +355,23 @@ export class BackendManager {
   }
 
   /**
+   * 物理删除后端侧会话数据（claude jsonl / codex rollout 文件）。
+   *
+   * 按 backendId 路由到对应 adapter 的 deleteSession。
+   * adapter 没实现 / 报错都不抛——上层 removeSession 会同时写 DB tombstone 兜底，
+   * 即便这里删不掉文件，reconcile/扫描导入也不会让会话复活。
+   */
+  async deleteSession(backendId: BackendId, backendThreadId: string, cwd?: string): Promise<void> {
+    const adapter = this.adapters.get(backendId)
+    if (!adapter?.deleteSession) return // backend 没实现就不删
+    try {
+      await adapter.deleteSession(backendThreadId, cwd)
+    } catch (e) {
+      log.warn('backend.deleteSession failed', backendId, backendThreadId, e)
+    }
+  }
+
+  /**
    * 全盘扫描所有 backend 的会话（用于「扫描导入」功能）。
    *
    * 与 `listSessions` 的差异：

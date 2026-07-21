@@ -35,7 +35,11 @@ import { checkCliHealth } from '../health-check'
 import { type ProcessSpawner, RealProcessSpawner } from '../process-spawner'
 
 import { ApprovalBridge, type BridgePermissionRequest } from './approval-bridge'
-import { listClaudeSessionsFromDisk, readHistoryFromJsonl } from './jsonl-reader'
+import {
+  listClaudeSessionsFromDisk,
+  readHistoryFromJsonl,
+  resolveSessionJsonlPath,
+} from './jsonl-reader'
 import {
   StreamEventAggregator,
   assistantToEvents,
@@ -211,6 +215,21 @@ export class ClaudeAdapter implements AgentBackend {
     // - 不传 cwd：扫所有项目目录（「扫描导入」全盘模式用）
     // 之前直接返回 [] 是 MVP 阶段没做，现在能扫了——jsonl 文件就是事实来源。
     return listClaudeSessionsFromDisk(cwd)
+  }
+
+  async deleteSession(backendThreadId: string, cwd?: string): Promise<void> {
+    // 删 ~/.claude/projects/<encoded-cwd>/<sessionId>.jsonl 文件。
+    // 复用 resolveSessionJsonlPath（jsonl-reader 里的路径推算逻辑）。
+    // 失败仅日志不抛——DB tombstone 会兜底，reconcile 不会再把这条登记回来。
+    const filePath = resolveSessionJsonlPath(backendThreadId, cwd)
+    try {
+      await unlink(filePath)
+      log.info('deleted claude session file', filePath)
+    } catch (e) {
+      const code = (e as NodeJS.ErrnoException).code
+      if (code === 'ENOENT') return // 文件已不存在，幂等
+      log.warn('failed to delete claude session file', filePath, e)
+    }
   }
 
   async resumeSession(backendThreadId: string): Promise<{ messages: never[] }> {

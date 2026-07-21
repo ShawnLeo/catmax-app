@@ -391,6 +391,17 @@ export interface AgentBackend {
   interrupt(turnId: string): Promise<void>
   respondApproval(decision: ApprovalDecision): Promise<void>
   steer?(turnId: string, prompt: string): Promise<void>
+
+  /**
+   * 物理删除后端侧的会话数据（用户在 catmax UI 删除会话时调用）。
+   *
+   * - claude：删 ~/.claude/projects/<encoded-cwd>/<sessionId>.jsonl 文件
+   * - codex：扫 ~/.codex/sessions/ 下 rollout-<ts>-<threadId>.jsonl 删除（无 RPC 暴露删除）
+   *
+   * 实现应尽力删除 + 不抛错（失败仅日志），DB 删除不依赖此方法的成功——
+   * removeSession 会同时写 tombstone 兜底，即便这里删不掉，reconcile 也不会让它复活。
+   */
+  deleteSession?(backendThreadId: string, cwd?: string): Promise<void>
 }
 
 /** 会话摘要（跨进程共享） */

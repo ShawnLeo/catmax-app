@@ -39,6 +39,16 @@ CREATE TABLE IF NOT EXISTS sessions (
 CREATE INDEX IF NOT EXISTS idx_sessions_workspace ON sessions(workspace_id, last_active_at DESC);
 CREATE INDEX IF NOT EXISTS idx_sessions_backend ON sessions(workspace_id, backend);
 
+-- 用户删除过的 (backend, backendThreadId) 记录——tombstone。
+-- removeSession 时写入；reconcile/扫描导入查询跳过，防止磁盘文件还在导致"复活"。
+-- 物理删除（删 claude jsonl / codex rollout 文件）失败时也兜底。
+CREATE TABLE IF NOT EXISTS deleted_sessions (
+  backend           TEXT NOT NULL,
+  backend_thread_id TEXT NOT NULL,
+  deleted_at        INTEGER NOT NULL,
+  PRIMARY KEY (backend, backend_thread_id)
+);
+
 CREATE TABLE IF NOT EXISTS messages (
   id              TEXT PRIMARY KEY,
   session_id      TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,

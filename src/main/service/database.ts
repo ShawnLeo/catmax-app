@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
+import type { BackendId } from '@shared/constants'
 import type { MessagePreview, SessionRecord, WorkspaceRecord } from '@shared/domain'
 import Database from 'better-sqlite3'
 import { app } from 'electron'
@@ -231,6 +232,27 @@ export class DatabaseService {
   /** 标记 stale（后端已删除但 App 还有索引）—— MVP 不真删，留着让用户决定 */
   markSessionStale(_id: string): void {
     // 暂时不实现，留给 Plan 3+
+  }
+
+  /**
+   * 记录 tombstone——removeSession 时调用。
+   * 即便物理删除后端文件失败（权限/路径错误），写入 tombstone 也能让
+   * reconcileSessions / importSessions 跳过这条，防止会话"复活"。
+   */
+  insertDeletedSession(backend: BackendId, backendThreadId: string): void {
+    this.db
+      .prepare(
+        `INSERT OR REPLACE INTO deleted_sessions (backend, backend_thread_id, deleted_at) VALUES (?, ?, ?)`,
+      )
+      .run(backend, backendThreadId, Date.now())
+  }
+
+  /** 查 (backend, backendThreadId) 是否被用户删除过——reconcile/import 用 */
+  isSessionDeleted(backend: BackendId, backendThreadId: string): boolean {
+    const row = this.db
+      .prepare('SELECT 1 FROM deleted_sessions WHERE backend = ? AND backend_thread_id = ?')
+      .get(backend, backendThreadId)
+    return row !== undefined
   }
 
   // ===== Message =====
