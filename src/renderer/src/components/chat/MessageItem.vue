@@ -67,14 +67,29 @@
           <ToolCallCard v-else :tool="tool" />
         </div>
 
-        <!-- textBlocks：贴竖线渲染，无独立色点 -->
-        <!-- showThinking=false 时折叠 reasoning 块（kind==='reasoning'）-->
+        <!--
+          textBlocks 分两路渲染：
+
+          1. reasoning 块 → ThinkingBlock（可折叠披露，对齐 Claude Code）
+             实时流式时 header 显示 "thinking..." 动画，完成态显示 "已思考 ▾"。
+             showThinking=false 时整个跳过（用户已通过 effort=none 关闭思考）。
+          2. text 块 → 原本内联渲染（保留 text-[15px] 文本样式）
+        -->
+        <ThinkingBlock
+          v-for="block in reasoningBlocks"
+          :key="block.id"
+          :text="block.text"
+          :streaming="isReasoningStreaming(block)"
+        />
+
+        <!-- text 块：贴竖线渲染，无独立色点 -->
         <div
-          v-for="(block, i) in visibleTextBlocks"
+          v-for="(block, i) in textBlocks"
           :key="block.id"
           :class="[
-            (message.toolBlocks?.length ?? 0) > 0 || i > 0 ? 'mt-2' : '',
-            block.kind === 'reasoning' ? 'text-muted-foreground italic' : '',
+            reasoningBlocks.length > 0 || (message.toolBlocks?.length ?? 0) > 0 || i > 0
+              ? 'mt-2'
+              : '',
           ]"
         >
           <MarkdownView
@@ -90,12 +105,18 @@
 
 <script setup lang="ts">
 import { contextTagRegistry } from '@renderer/lib/context-tag-registry'
+import { useMessageStore } from '@renderer/stores/message'
 import type { NormalizedMessage } from '@shared/backend/types'
 import { computed } from 'vue'
 
 import MarkdownView from './MarkdownView.vue'
+import ThinkingBlock from './ThinkingBlock.vue'
 import ToolCallCard from './ToolCallCard.vue'
 import ToolCallInline from './ToolCallInline.vue'
+
+type TextBlock = NonNullable<NormalizedMessage['textBlocks']>[number]
+
+const messageStore = useMessageStore()
 
 const props = defineProps<{
   message: NormalizedMessage
@@ -109,13 +130,36 @@ function resolveContextComponent(tag: string) {
 }
 
 /**
- * 实际渲染的 textBlocks--showThinking=false 时折叠 reasoning 块。
- * assistant 消息专用（user 消息的 textBlocks 走上面的气泡分支，不过滤）。
+ * reasoning 块（kind==='reasoning'）。
+ * showThinking=false 时返回空数组（effort=none 已关闭思考，UI 完全不显示）。
  */
-const visibleTextBlocks = computed(() => {
-  const blocks = props.message.textBlocks ?? []
-  return props.showThinking === false ? blocks.filter((b) => b.kind !== 'reasoning') : blocks
+const reasoningBlocks = computed<TextBlock[]>(() => {
+  if (props.showThinking === false) return []
+  return (props.message.textBlocks ?? []).filter((b) => b.kind === 'reasoning' && b.text.trim())
 })
+
+/** text 块（kind==='text'）——普通正文 */
+const textBlocks = computed<TextBlock[]>(() =>
+  (props.message.textBlocks ?? []).filter((b) => b.kind === 'text'),
+)
+
+/**
+ * 判断某条 reasoning 块是否还在实时流式输出。
+
+ * 判据：当前 turn 正在跑（isRunning && turnId === currentTurnId），
+ * 且这条 reasoning 块是该 turn 的最后一个非空 textBlock——
+ * 后面还没有 text 块跟上来，说明模型还在产 reasoning token，没切换到正文。
+ *
+ * 一旦正文（text_delta）开始累积，reasoning 块不再是"最后一个"，
+ * streaming 判定自动转 false，header 切到静态 "已思考 ▾"。
+ */
+function isReasoningStreaming(block: TextBlock): boolean {
+  if (!messageStore.isRunning) return false
+  if (props.message.turnId !== messageStore.currentTurnId) return false
+  const blocks = (props.message.textBlocks ?? []).filter((b) => b.text.trim())
+  const last = blocks[blocks.length - 1]
+  return last !== undefined && last.id === block.id
+}
 
 /** user 消息是否至少有一个可见内容。 */
 const hasAnyUserContent = computed(() => {
