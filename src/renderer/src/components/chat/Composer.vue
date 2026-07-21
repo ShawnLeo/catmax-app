@@ -48,6 +48,7 @@
                 label: m.displayName,
               })),
             ]"
+            placement="top"
             title="模型"
             @update:model-value="onModelSelect"
           />
@@ -80,6 +81,7 @@
                 label: permissionLabel(m),
               }))
             "
+            placement="top"
             title="权限模式"
             @update:model-value="onPermissionModeSelect"
           />

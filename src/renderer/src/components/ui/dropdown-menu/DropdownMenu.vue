@@ -9,6 +9,7 @@
     - 选中项显示 CheckIcon
     - clickOutside 自动收起（capture 阶段，避免 trigger 自身 click 打架）
     - align='right' 时弹层右对齐（给 trigger 靠右的场景用）
+    - placement='top' 时弹层向上展开（给 trigger 贴近窗口底部的场景用，如 Composer）
     - triggerLabel：未传时显示当前选中项的 label；都没有时显示 placeholder
   -->
   <div ref="rootEl" class="relative inline-block">
@@ -29,7 +30,8 @@
     <div
       v-if="open"
       :class="[
-        'absolute z-50 mt-1 min-w-[8rem] max-w-[16rem] rounded-md border border-border bg-popover p-1 shadow-lg',
+        'absolute z-50 min-w-[8rem] max-w-[16rem] rounded-md border border-border bg-popover p-1 shadow-lg',
+        placement === 'top' ? 'bottom-full mb-1' : 'mt-1',
         align === 'right' ? 'right-0' : 'left-0',
       ]"
     >
@@ -73,6 +75,8 @@ const props = withDefaults(
     placeholder?: string
     /** 弹层对齐方向 */
     align?: 'left' | 'right'
+    /** 弹层展开方向：bottom（默认，向下）或 top（向上，给 trigger 贴近窗口底部用） */
+    placement?: 'top' | 'bottom'
     /** trigger 按钮 tooltip——显式允许 undefined（exactOptionalPropertyTypes） */
     title?: string | undefined
     /** 禁用整个下拉 */
@@ -80,6 +84,7 @@ const props = withDefaults(
   }>(),
   {
     align: 'left',
+    placement: 'bottom',
     disabled: false,
   },
 )
