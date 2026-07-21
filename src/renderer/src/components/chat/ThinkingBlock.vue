@@ -3,7 +3,7 @@
     思考（reasoning）块——可折叠披露组件，替换原本内联的斜体灰文。
 
     两态：
-      - streaming（实时）：header 显示动态 "thinking..."（紫色脉冲 + 三个错峰动画点），
+      - streaming（实时）：header 显示动态 "thinking..."（灰白呼吸 + 三个错峰动画点），
         内容默认折叠。用户可点击展开看实时输出的推理过程。
       - done（完成）：header 显示 "已思考 ▾"，默认折叠，点击展开看完整推理。
 
@@ -16,27 +16,23 @@
     <button
       type="button"
       class="inline-flex items-center gap-1.5 px-2 py-1 rounded-md text-[12px] transition-colors hover:bg-accent/50 text-muted-foreground"
-      :class="streaming ? 'text-brain/90' : ''"
       :title="streaming ? '正在思考...' : '点击展开/收起推理'"
       @click="open = !open"
     >
-      <BrainIcon
-        class="w-3.5 h-3.5 flex-shrink-0"
-        :class="streaming ? 'text-brain animate-pulse' : ''"
-      />
+      <BrainIcon class="w-3.5 h-3.5 flex-shrink-0 text-muted-foreground" />
 
-      <!-- streaming：动态 thinking... 文字 + 三个错峰闪动的点 -->
+      <!-- streaming：动态 thinking... 文字 + 三个错峰呼吸的灰点 -->
       <template v-if="streaming">
         <span>thinking</span>
         <span class="inline-flex items-center gap-[2px] ml-0.5">
           <span
-            class="block w-[3px] h-[3px] rounded-full bg-brain animate-[thinkdot_1.2s_ease-in-out_infinite]"
+            class="block w-[3px] h-[3px] rounded-full bg-muted-foreground animate-[thinkdot_1.2s_ease-in-out_infinite]"
           />
           <span
-            class="block w-[3px] h-[3px] rounded-full bg-brain animate-[thinkdot_1.2s_ease-in-out_infinite_0.2s]"
+            class="block w-[3px] h-[3px] rounded-full bg-muted-foreground animate-[thinkdot_1.2s_ease-in-out_infinite_0.2s]"
           />
           <span
-            class="block w-[3px] h-[3px] rounded-full bg-brain animate-[thinkdot_1.2s_ease-in-out_infinite_0.4s]"
+            class="block w-[3px] h-[3px] rounded-full bg-muted-foreground animate-[thinkdot_1.2s_ease-in-out_infinite_0.4s]"
           />
         </span>
       </template>
