@@ -8,57 +8,51 @@
  * 切换主题 = 改 <html data-theme="...">，CSS 变量自动重算
  */
 
-/* ============ DARK 主题（Codex 风格：冷调深灰） ============ */
+/* ============ DARK 主题（中性灰阶，无品牌色） ============ */
 [data-theme='dark'] {
-  /* Layer 1: 原始色板 */
+  /* Layer 1: 原始色板（纯中性，chroma=0） */
   --color-gray-0: oklch(99% 0 0);
-  --color-gray-50: oklch(20% 0.005 250);
-  --color-gray-100: oklch(18% 0.006 250);
-  --color-gray-200: oklch(16% 0.006 250);
-  --color-gray-300: oklch(24% 0.006 250);
-  --color-gray-400: oklch(32% 0.006 250);
-  --color-gray-500: oklch(45% 0.005 250);
-  --color-gray-600: oklch(60% 0.005 250);
-  --color-gray-700: oklch(70% 0.005 250);
-  --color-gray-800: oklch(85% 0.003 250);
-  --color-gray-900: oklch(95% 0.003 250);
+  --color-gray-50: oklch(20% 0 0);
+  --color-gray-100: oklch(18% 0 0);
+  --color-gray-200: oklch(16% 0 0);
+  --color-gray-300: oklch(24% 0 0);
+  --color-gray-400: oklch(32% 0 0);
+  --color-gray-500: oklch(45% 0 0);
+  --color-gray-600: oklch(60% 0 0);
+  --color-gray-700: oklch(70% 0 0);
+  --color-gray-800: oklch(85% 0 0);
+  --color-gray-900: oklch(95% 0 0);
   --color-gray-950: oklch(98% 0 0);
-
-  --color-brand-50: oklch(96% 0.02 250);
-  --color-brand-100: oklch(93% 0.04 250);
-  --color-brand-500: oklch(70% 0.15 250);
-  --color-brand-600: oklch(65% 0.16 250);
-  --color-brand-700: oklch(60% 0.17 250);
 
   --color-success: oklch(70% 0.15 145);
   --color-warning: oklch(75% 0.15 85);
   --color-danger: oklch(65% 0.2 25);
-  /* 紫色——给 max effort 档（"极致性能"视觉强调）专用，区别于蓝色主色 */
+  /* 紫色——给 max effort 档（"极致性能"视觉强调）专用，是项目唯一的彩色点睛 */
   --color-brain: oklch(65% 0.25 300);
   --color-brain-foreground: oklch(98% 0.02 300);
 
-  /* Layer 2: 语义 token */
+  /* Layer 2: 语义 token（中性灰，primary/accent/ring 都指向 gray 阶） */
   --background: var(--color-gray-100);
   --foreground: var(--color-gray-900);
   --card: var(--color-gray-50);
   --card-foreground: var(--color-gray-900);
   --popover: var(--color-gray-50);
   --popover-foreground: var(--color-gray-900);
-  --primary: var(--color-brand-500);
+  --primary: var(--color-gray-600);
   --primary-foreground: var(--color-gray-0);
   --secondary: var(--color-gray-200);
   --secondary-foreground: var(--color-gray-900);
   --muted: var(--color-gray-200);
   --muted-foreground: var(--color-gray-600);
-  --accent: var(--color-brand-500);
-  --accent-foreground: var(--color-gray-0);
+  --accent: var(--color-gray-300);
+  --accent-foreground: var(--color-gray-900);
   --destructive: var(--color-danger);
   --destructive-foreground: var(--color-gray-0);
   --brain: var(--color-brain);
   --brain-foreground: var(--color-brain-foreground);
-  --border: oklch(28% 0.005 250 / 0.7);
-  --input: oklch(28% 0.005 250);
-  --ring: var(--color-brand-500);
+  --border: oklch(28% 0 0 / 0.7);
+  --input: oklch(28% 0 0);
+  --ring: var(--color-gray-400);
   --radius: 8px;
 
   /* Layer 3: 组件 token */
@@ -75,27 +69,23 @@
   --user-bubble-background: #222222;
 }
 
-/* ============ LIGHT 主题（Codex 风格：米白带暖调） ============ */
+/* ============ LIGHT 主题（米白暖调底，中性灰组件色） ============ */
 [data-theme='light'] {
   /* Layer 1 */
+  /* 浅色调（gray-0..300）保留 hue 80 米白暖调——是 light theme 故意的"纸张"感 */
   --color-gray-0: oklch(99.5% 0.001 80);
   --color-gray-50: oklch(99% 0.001 80);
   --color-gray-100: oklch(97% 0.002 80);
   --color-gray-200: oklch(94% 0.002 80);
   --color-gray-300: oklch(90% 0.002 80);
-  --color-gray-400: oklch(80% 0.003 80);
-  --color-gray-500: oklch(60% 0.005 250);
-  --color-gray-600: oklch(50% 0.005 250);
-  --color-gray-700: oklch(40% 0.005 250);
-  --color-gray-800: oklch(26% 0.005 250);
-  --color-gray-900: oklch(20% 0.005 250);
-  --color-gray-950: oklch(12% 0.005 250);
-
-  --color-brand-50: oklch(97% 0.02 250);
-  --color-brand-100: oklch(94% 0.04 250);
-  --color-brand-500: oklch(55% 0.18 250);
-  --color-brand-600: oklch(48% 0.18 250);
-  --color-brand-700: oklch(42% 0.18 250);
+  /* 中深色调改纯中性——避免冷蓝染色跟米白底冲突 */
+  --color-gray-400: oklch(80% 0 0);
+  --color-gray-500: oklch(60% 0 0);
+  --color-gray-600: oklch(50% 0 0);
+  --color-gray-700: oklch(40% 0 0);
+  --color-gray-800: oklch(26% 0 0);
+  --color-gray-900: oklch(20% 0 0);
+  --color-gray-950: oklch(12% 0 0);
 
   --color-success: oklch(55% 0.16 145);
   --color-warning: oklch(70% 0.16 85);
@@ -111,21 +101,21 @@
   --card-foreground: var(--color-gray-900);
   --popover: var(--color-gray-0);
   --popover-foreground: var(--color-gray-900);
-  --primary: var(--color-brand-500);
+  --primary: var(--color-gray-700);
   --primary-foreground: var(--color-gray-0);
   --secondary: var(--color-gray-200);
   --secondary-foreground: var(--color-gray-900);
   --muted: var(--color-gray-200);
   --muted-foreground: var(--color-gray-600);
-  --accent: var(--color-brand-500);
-  --accent-foreground: var(--color-gray-0);
+  --accent: var(--color-gray-200);
+  --accent-foreground: var(--color-gray-900);
   --destructive: var(--color-danger);
   --destructive-foreground: var(--color-gray-0);
   --brain: var(--color-brain);
   --brain-foreground: var(--color-brain-foreground);
   --border: oklch(90% 0.003 80);
   --input: oklch(90% 0.003 80);
-  --ring: var(--color-brand-500);
+  --ring: var(--color-gray-500);
   --radius: 8px;
 
   /* Layer 3 */

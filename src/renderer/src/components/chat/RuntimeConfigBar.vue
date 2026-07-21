@@ -6,9 +6,16 @@
   -->
   <div class="border-b border-border px-4 py-2 flex items-center gap-2 bg-background">
     <!-- Backend -->
-    <select
+    <DropdownMenu
       v-model="backendId"
-      class="bg-secondary text-secondary-foreground text-xs px-2 py-1 rounded border-0 focus:outline-none"
+      :options="
+        backendStore.statuses.map((s) => ({
+          value: s.id,
+          label: s.id + (s.available ? '' : ` (${explainBackendError(s.error).title})`),
+          disabled: !s.available,
+          title: s.available ? (s.version ?? undefined) : explainBackendError(s.error).title,
+        }))
+      "
       :title="
         backendStore.current && !backendStore.current.available
           ? explainBackendError(backendStore.current.error).title +
@@ -16,20 +23,7 @@
             explainBackendError(backendStore.current.error).detail
           : undefined
       "
-      @change="onBackendChange"
-    >
-      <option
-        v-for="status in backendStore.statuses"
-        :key="status.id"
-        :value="status.id"
-        :disabled="!status.available"
-        :title="
-          status.available ? (status.version ?? undefined) : explainBackendError(status.error).title
-        "
-      >
-        {{ status.id }}{{ status.available ? '' : ` (${explainBackendError(status.error).title})` }}
-      </option>
-    </select>
+    />
 
     <div class="flex-1" />
 
@@ -48,6 +42,7 @@
 </template>
 
 <script setup lang="ts">
+import { DropdownMenu } from '@renderer/components/ui/dropdown-menu'
 import { explainBackendError } from '@renderer/lib/backend-error'
 import { useBackendStore } from '@renderer/stores/backend'
 import type { BackendId } from '@shared/constants'
@@ -61,8 +56,4 @@ const backendId = computed<BackendId>({
     void backendStore.switchTo(v)
   },
 })
-
-function onBackendChange(): void {
-  // backendId 的 setter 已经触发 switchTo
-}
 </script>

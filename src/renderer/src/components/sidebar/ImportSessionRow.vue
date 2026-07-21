@@ -52,22 +52,29 @@
       </div>
     </div>
 
-    <!-- workspace 选择器 -->
-    <select
-      :value="selectedWorkspaceId ?? ''"
-      class="text-xs border border-border rounded px-2 py-1 bg-background max-w-[200px] flex-shrink-0"
-      :class="{ 'border-amber-500/50': !selectedWorkspaceId && session.cwd }"
-      @change="onSelectChange(($event.target as HTMLSelectElement).value)"
+    <!-- workspace 选择器（amber 警告边框靠外层 wrapper 表达） -->
+    <div
+      class="flex-shrink-0 rounded"
+      :class="{ 'border border-amber-500/50': !selectedWorkspaceId && session.cwd }"
     >
-      <option value="" disabled>选择工作区...</option>
-      <option v-for="ws in workspaces" :key="ws.id" :value="ws.id">
-        {{ ws.name }}
-      </option>
-    </select>
+      <DropdownMenu
+        :model-value="selectedWorkspaceId"
+        :options="
+          workspaces.map((ws) => ({
+            value: ws.id,
+            label: ws.name,
+          }))
+        "
+        :placeholder="'选择工作区...'"
+        align="right"
+        @update:model-value="(v) => v && emit('selectWorkspace', v)"
+      />
+    </div>
   </div>
 </template>
 
 <script setup lang="ts">
+import { DropdownMenu } from '@renderer/components/ui/dropdown-menu'
 import type { WorkspaceRecord } from '@shared/domain'
 import type { ImportableSession } from '@shared/ipc/session'
 import { computed } from 'vue'
@@ -85,10 +92,6 @@ const emit = defineEmits<{
 }>()
 
 const shortThreadId = computed(() => props.session.backendThreadId.slice(0, 8))
-
-function onSelectChange(v: string): void {
-  if (v) emit('selectWorkspace', v)
-}
 
 function formatRelativeTime(ts: number): string {
   const diff = Date.now() - ts

@@ -39,17 +39,18 @@
         <!-- 底部配置行：Model / Effort / PermissionMode + 发送按钮 -->
         <div class="flex items-center gap-2 px-3 py-2">
           <!-- Model -->
-          <select
-            :value="modelValue.model"
-            class="bg-secondary text-secondary-foreground text-xs px-2 py-1 rounded border-0 focus:outline-none max-w-[160px]"
+          <DropdownMenu
+            :model-value="modelValue.model"
+            :options="[
+              { value: null as string | null, label: '(default)' },
+              ...backendStore.models.map((m) => ({
+                value: m.id as string | null,
+                label: m.displayName,
+              })),
+            ]"
             title="模型"
-            @change="onModelChange"
-          >
-            <option :value="null">(default)</option>
-            <option v-for="m in backendStore.models" :key="m.id" :value="m.id">
-              {{ m.displayName }}
-            </option>
-          </select>
+            @update:model-value="onModelSelect"
+          />
 
           <!-- 刷新模型列表--清 main 端 cachedModelsPromise，重新拉一次 model/list -->
           <button
@@ -71,16 +72,17 @@
           />
 
           <!-- Permission Mode -->
-          <select
-            :value="modelValue.permissionMode"
-            class="bg-secondary text-secondary-foreground text-xs px-2 py-1 rounded border-0 focus:outline-none"
+          <DropdownMenu
+            :model-value="modelValue.permissionMode"
+            :options="
+              supportedPermissionModes.map((m) => ({
+                value: m,
+                label: permissionLabel(m),
+              }))
+            "
             title="权限模式"
-            @change="onPermissionModeChange"
-          >
-            <option v-for="m in supportedPermissionModes" :key="m" :value="m">
-              {{ permissionLabel(m) }}
-            </option>
-          </select>
+            @update:model-value="onPermissionModeSelect"
+          />
 
           <div class="flex-1" />
 
@@ -119,6 +121,7 @@
 import AttachmentBar from '@renderer/components/chat/AttachmentBar.vue'
 import ThinkingSlider from '@renderer/components/chat/ThinkingSlider.vue'
 import { Button } from '@renderer/components/ui/button'
+import { DropdownMenu } from '@renderer/components/ui/dropdown-menu'
 import { useBackendStore } from '@renderer/stores/backend'
 import { useChatInputStore } from '@renderer/stores/chat-input'
 import { useMessageStore } from '@renderer/stores/message'
@@ -258,9 +261,7 @@ async function onInterrupt(): Promise<void> {
   }
 }
 
-function onModelChange(e: Event): void {
-  const target = e.target as HTMLSelectElement
-  const value = target.value === 'null' ? null : target.value
+function onModelSelect(value: string | null): void {
   emit('update:modelValue', { ...props.modelValue, model: value })
 }
 
@@ -268,9 +269,7 @@ function onEffortSelect(value: EffortLevel): void {
   emit('update:modelValue', { ...props.modelValue, effort: value })
 }
 
-function onPermissionModeChange(e: Event): void {
-  const target = e.target as HTMLSelectElement
-  const value = target.value as PermissionMode
+function onPermissionModeSelect(value: PermissionMode): void {
   emit('update:modelValue', { ...props.modelValue, permissionMode: value })
 }
 </script>
