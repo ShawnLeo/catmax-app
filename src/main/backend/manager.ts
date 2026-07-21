@@ -192,6 +192,7 @@ export class BackendManager {
           supportsModelSelection: false,
           supportsEffort: false,
           supportsPermissionMode: false,
+          supportsThinking: false,
           supportedPermissionModes: [],
           supportedEfforts: [],
         },

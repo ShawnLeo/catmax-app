@@ -13,6 +13,8 @@ export interface CreateSessionArgs {
   effort?: EffortLevel
   permissionMode?: PermissionMode
   initialPrompt?: string
+  /** thinking 开关（per-turn 透传，不持久化到 db）--见 StartSessionArgs.thinking */
+  thinking?: boolean
 }
 
 /** 「扫描导入」扫到的单条 importable session */

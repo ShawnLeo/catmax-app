@@ -27,6 +27,13 @@ export interface BackendCapabilities {
   supportsModelSelection: boolean
   supportsEffort: boolean
   supportsPermissionMode: boolean
+  /**
+   * 是否支持 thinking 开关（控制模型是否进行 reasoning）。
+   * - codex：true，OFF 时 turn/start 传 effort='none'（零 reasoning token）
+   * - claude：true，但 claude CLI 无真正的 off flag，OFF 时只能 --effort low（压低，非关闭）
+   *   -- claude --help 实测无 --thinking / --max-thinking-tokens，这些是 Agent SDK 的参数
+   */
+  supportsThinking: boolean
   supportedPermissionModes: PermissionMode[]
   supportedEfforts: EffortLevel[]
 }
@@ -57,6 +64,12 @@ export interface StartSessionArgs {
   effort?: EffortLevel
   permissionMode?: PermissionMode
   initialPrompt?: string
+  /**
+   * thinking 开关--false 时尽量让模型不进行 reasoning。
+   * claude：--effort low（CLI 无真 off flag）；codex：turn/start effort='none'。
+   * undefined / true：不干预，用各后端默认行为。
+   */
+  thinking?: boolean
 }
 
 /** 启动 turn 参数 */
@@ -89,6 +102,11 @@ export interface StartTurnArgs {
   model?: string
   effort?: EffortLevel
   permissionMode?: PermissionMode
+  /**
+   * thinking 开关--false 时尽量让模型不进行 reasoning（覆盖 effort）。
+   * 详见 StartSessionArgs.thinking 的说明。
+   */
+  thinking?: boolean
 }
 
 /** 工具调用描述（归一化） */

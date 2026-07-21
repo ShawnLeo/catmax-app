@@ -118,6 +118,7 @@ export class CodexAdapter implements AgentBackend {
     supportsModelSelection: true,
     supportsEffort: true,
     supportsPermissionMode: true,
+    supportsThinking: true,
     supportedPermissionModes: [
       'default',
       'acceptEdits',
@@ -477,11 +478,16 @@ export class CodexAdapter implements AgentBackend {
       // 不改的话 codex 报 "Invalid request: invalid type: string ..., expected a sequence"。
       // 同时 model 也是必需的（同 thread/start），用户没选时用 listModels 返回的默认。
       const model = args.model ?? (await this.resolveDefaultModel())
+      // thinking=false：尽量关闭 reasoning--codex 的 effort='none' 会产生零 reasoning token，
+      // 是两端里唯一能真正"关闭思考"的手段。覆盖用户选的 effort（OFF 优先级最高）。
+      // effort 字段 schema 已是 z.string().optional()，'none' 合法。
+      const effort =
+        args.thinking === false ? 'none' : args.effort !== undefined ? args.effort : undefined
       const turnResponse = await this.sendRequest('turn/start', {
         threadId: args.sessionId,
         input: [{ type: 'text', text: args.prompt }],
         model,
-        ...(args.effort !== undefined ? { effort: args.effort } : {}),
+        ...(effort !== undefined ? { effort } : {}),
         approvalPolicy: permissionToApproval(args.permissionMode),
       })
       const codexTurnId = (turnResponse as { turn?: { id?: string } }).turn?.id

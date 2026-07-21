@@ -75,6 +75,24 @@
             </option>
           </select>
 
+          <!-- Thinking 开关--OFF 时压低模型 reasoning（codex effort='none'，claude --effort low）
+               并隐藏对话里的思考块。用脑图标按钮，激活态高亮。 -->
+          <button
+            v-if="supportsThinking"
+            type="button"
+            class="flex items-center gap-1 px-2 py-1 rounded transition-colors"
+            :class="
+              modelValue.thinking
+                ? 'bg-primary/15 text-primary'
+                : 'bg-secondary text-secondary-foreground/50 hover:text-secondary-foreground'
+            "
+            :title="modelValue.thinking ? '思考：开（点击关闭）' : '思考：关（点击开启）'"
+            @click="onThinkingToggle"
+          >
+            <BrainIcon class="w-3 h-3" />
+            <span class="text-[11px]">思考</span>
+          </button>
+
           <!-- Permission Mode -->
           <select
             :value="modelValue.permissionMode"
@@ -128,13 +146,14 @@ import { useChatInputStore } from '@renderer/stores/chat-input'
 import { useMessageStore } from '@renderer/stores/message'
 import { useSettingsStore } from '@renderer/stores/settings'
 import type { ContextBlock, EffortLevel, PermissionMode } from '@shared/backend/types'
-import { ArrowUpIcon, RefreshCwIcon, SquareIcon } from 'lucide-vue-next'
+import { ArrowUpIcon, BrainIcon, RefreshCwIcon, SquareIcon } from 'lucide-vue-next'
 import { ref, computed } from 'vue'
 
 interface RuntimeConfigValue {
   model: string | null
   effort: EffortLevel | null
   permissionMode: PermissionMode
+  thinking: boolean
 }
 
 const props = defineProps<{
@@ -170,6 +189,10 @@ const canSend = computed(
 
 const supportedEfforts = computed<EffortLevel[]>(() => {
   return backendStore.current?.capabilities.supportedEfforts ?? ['low', 'medium', 'high']
+})
+
+const supportsThinking = computed<boolean>(() => {
+  return backendStore.current?.capabilities.supportsThinking ?? false
 })
 
 const supportedPermissionModes = computed<PermissionMode[]>(() => {
@@ -278,5 +301,9 @@ function onPermissionModeChange(e: Event): void {
   const target = e.target as HTMLSelectElement
   const value = target.value as PermissionMode
   emit('update:modelValue', { ...props.modelValue, permissionMode: value })
+}
+
+function onThinkingToggle(): void {
+  emit('update:modelValue', { ...props.modelValue, thinking: !props.modelValue.thinking })
 }
 </script>

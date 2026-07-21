@@ -106,6 +106,7 @@ export class ClaudeAdapter implements AgentBackend {
     supportsModelSelection: true,
     supportsEffort: true,
     supportsPermissionMode: true,
+    supportsThinking: true,
     supportedPermissionModes: [
       'default',
       'acceptEdits',
@@ -284,7 +285,12 @@ export class ClaudeAdapter implements AgentBackend {
     if (args.model) {
       procArgs.push('--model', args.model)
     }
-    if (args.effort) {
+    // thinking=false：claude CLI 没有 --thinking off（--help 实测无此 flag，
+    // --thinking adaptive / --max-thinking-tokens 是 Agent SDK 参数，不是 CLI 的），
+    // 只能用 --effort low 把 reasoning 压到最低档（非真正关闭）。覆盖用户选的 effort。
+    if (args.thinking === false) {
+      procArgs.push('--effort', 'low')
+    } else if (args.effort) {
       procArgs.push('--effort', args.effort)
     }
     if (args.permissionMode) {

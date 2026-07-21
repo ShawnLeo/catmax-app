@@ -68,8 +68,9 @@
         </div>
 
         <!-- textBlocks：贴竖线渲染，无独立色点 -->
+        <!-- showThinking=false 时折叠 reasoning 块（kind==='reasoning'）-->
         <div
-          v-for="(block, i) in message.textBlocks ?? []"
+          v-for="(block, i) in visibleTextBlocks"
           :key="block.id"
           :class="[
             (message.toolBlocks?.length ?? 0) > 0 || i > 0 ? 'mt-2' : '',
@@ -96,12 +97,25 @@ import MarkdownView from './MarkdownView.vue'
 import ToolCallCard from './ToolCallCard.vue'
 import ToolCallInline from './ToolCallInline.vue'
 
-const props = defineProps<{ message: NormalizedMessage }>()
+const props = defineProps<{
+  message: NormalizedMessage
+  /** 是否显示思考块（reasoning）。false 时过滤掉 kind='reasoning' 的 textBlocks。 */
+  showThinking?: boolean
+}>()
 
 /** 按 tag 名从注册表查 component。加新 tag 不用改这里。 */
 function resolveContextComponent(tag: string) {
   return contextTagRegistry.get(tag)?.component
 }
+
+/**
+ * 实际渲染的 textBlocks--showThinking=false 时折叠 reasoning 块。
+ * assistant 消息专用（user 消息的 textBlocks 走上面的气泡分支，不过滤）。
+ */
+const visibleTextBlocks = computed(() => {
+  const blocks = props.message.textBlocks ?? []
+  return props.showThinking === false ? blocks.filter((b) => b.kind !== 'reasoning') : blocks
+})
 
 /** user 消息是否至少有一个可见内容。 */
 const hasAnyUserContent = computed(() => {

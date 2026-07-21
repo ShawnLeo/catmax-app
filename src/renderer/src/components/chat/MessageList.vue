@@ -21,7 +21,12 @@
       v-else
       class="mx-auto px-6 py-4 flex flex-col gap-6 max-w-3xl lg:max-w-screen-lg xl:max-w-[1280px] 2xl:max-w-[1440px]"
     >
-      <MessageItem v-for="message in messageStore.messages" :key="message.id" :message="message" />
+      <MessageItem
+        v-for="message in messageStore.messages"
+        :key="message.id"
+        :message="message"
+        :show-thinking="showThinking"
+      />
 
       <!-- 错误提示（codex/claude 调 API 失败时 messageStore.lastError 会被设置） -->
       <div
@@ -43,9 +48,15 @@
 <script setup lang="ts">
 import { useMessageStore } from '@renderer/stores/message'
 import { AlertCircleIcon } from 'lucide-vue-next'
-import { ref, watch, nextTick } from 'vue'
+import { ref, watch, nextTick, computed } from 'vue'
 
 import MessageItem from './MessageItem.vue'
+
+const props = defineProps<{
+  /** 是否显示思考块（reasoning）。OFF 时 MessageItem 折叠 kind='reasoning' 的 textBlocks。 */
+  showThinking?: boolean
+}>()
+const showThinking = computed(() => props.showThinking ?? true)
 
 const messageStore = useMessageStore()
 const container = ref<HTMLElement | null>(null)
