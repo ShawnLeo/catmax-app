@@ -18,6 +18,8 @@ coverage/
 
 .zcode/
 .agent/
+.claude/
+.agents/
 
 # shadcn-vue
 components.json-cache
