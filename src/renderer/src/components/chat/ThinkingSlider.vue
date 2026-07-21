@@ -24,11 +24,11 @@
     <button
       type="button"
       :title="triggerTitle"
-      class="flex items-center gap-1 px-2 py-1 rounded text-xs transition-colors bg-secondary text-secondary-foreground hover:bg-accent hover:text-accent-foreground focus:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+      class="flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-[13px] transition-colors bg-secondary text-secondary-foreground hover:bg-accent hover:text-accent-foreground focus:outline-none focus-visible:ring-1 focus-visible:ring-ring"
       @click="open = !open"
     >
       <BrainIcon
-        class="w-3 h-3 flex-shrink-0"
+        class="w-3.5 h-3.5 flex-shrink-0"
         :class="
           modelValue === 'none'
             ? 'text-muted-foreground/50'
@@ -39,7 +39,7 @@
       />
       <span class="truncate">{{ tierLabel(modelValue) }}</span>
       <ChevronDownIcon
-        class="w-2.5 h-2.5 flex-shrink-0 transition-transform"
+        class="w-3 h-3 flex-shrink-0 transition-transform"
         :class="open ? 'rotate-180' : ''"
       />
     </button>
