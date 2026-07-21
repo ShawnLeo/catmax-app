@@ -60,7 +60,12 @@ const workspaceStore = useWorkspaceStore()
 const chatInput = useChatInputStore()
 const preview = computed(() => filesStore.currentPreview!)
 const highlighted = ref('')
-const selectionInfo = ref<{ startLine: number; endLine: number; text: string; lineCount: number } | null>(null)
+const selectionInfo = ref<{
+  startLine: number
+  endLine: number
+  text: string
+  lineCount: number
+} | null>(null)
 
 watch(
   () => filesStore.currentPreview,

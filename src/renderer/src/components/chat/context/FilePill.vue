@@ -21,8 +21,8 @@
 </template>
 
 <script setup lang="ts">
-import type { IdeOpenedFileData } from '@shared/backend/context-tag-types'
 import { basename } from '@renderer/lib/path'
+import type { IdeOpenedFileData } from '@shared/backend/context-tag-types'
 import { FileIcon } from 'lucide-vue-next'
 import { computed, ref } from 'vue'
 

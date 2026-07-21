@@ -5,10 +5,7 @@
     当前支持 ide_selection 类型——按 tag 分发展示（跟 MessageItem 的 contextBlocks 渲染对齐）。
     加新附件类型在 AttachmentItem.vue（或本文件内的 v-if 分支）扩展。
   -->
-  <div
-    v-if="attachments.length > 0"
-    class="flex flex-wrap gap-1.5 px-4 pt-3"
-  >
+  <div v-if="attachments.length > 0" class="flex flex-wrap gap-1.5 px-4 pt-3">
     <div
       v-for="(att, i) in attachments"
       :key="i"
@@ -30,8 +27,8 @@
 </template>
 
 <script setup lang="ts">
-import type { ContextBlock } from '@shared/backend/types'
 import type { IdeSelectionData } from '@shared/backend/context-tag-types'
+import type { ContextBlock } from '@shared/backend/types'
 import { TextSelectIcon, XIcon } from 'lucide-vue-next'
 
 defineProps<{ attachments: ContextBlock[] }>()

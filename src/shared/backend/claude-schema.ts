@@ -140,12 +140,27 @@ export const resultMessageSchema = z.object({
 //     - delta.type = 'text_delta' / 'thinking_delta' / 'input_json_delta'
 //     - delta.text / delta.thinking / delta.partial_json 是实际内容
 
-/** content_block_delta 的 delta 子类型（passthrough 容错未知类型） */
+/**
+ * stream_event 的 delta 子结构。
+ *
+ * 三种已知子类型（带具体内容字段）：
+ *   - text_delta: { type: 'text_delta', text: '...' }
+ *   - thinking_delta: { type: 'thinking_delta', thinking: '...' }
+ *   - input_json_delta: { type: 'input_json_delta', partial_json: '...' }
+ *
+ * 其他兜底：
+ *   - message_delta 系列的 delta 没 type 字段（{ stop_reason, stop_sequence }），
+ *     必须允许"无 type"的情况，否则整条 stream_event 被 union 拒绝
+ *   - signature_delta 等未知 type 用 passthrough 容错
+ */
 export const streamDeltaSchema = z.union([
   z.object({ type: z.literal('text_delta'), text: z.string() }),
   z.object({ type: z.literal('thinking_delta'), thinking: z.string() }),
   z.object({ type: z.literal('input_json_delta'), partial_json: z.string() }),
+  // 带 type 但未知的 delta——passthrough 容错（signature_delta 等）
   z.object({ type: z.string() }).passthrough(),
+  // 完全没 type 字段的 delta（message_delta 的 stop_reason/stop_sequence 走这条）
+  z.record(z.unknown()),
 ])
 export type StreamDelta = z.infer<typeof streamDeltaSchema>
 

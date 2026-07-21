@@ -1,14 +1,23 @@
 <template>
   <!--
-    AskUserQuestion 工具——claude 向用户提问。
-    input.questions 是 [{header, question, options:[{label, description}]}]
-    渲染每个问题 + 选项卡片网格。
+    AskUserQuestion 工具——claude 向用户提问的卡片（历史回放 / 概览用）。
 
-    历史回放时用户当时选了哪个不在 input 里（在后续 user message），
-    所以这里只展示问题和选项，不展示选择结果。
+    纯展示：渲染问题和选项列表，不响应点击。
+    实时交互走 AskUserQuestionDialog 弹窗（ChatView 顶层挂载，由 messageStore.pendingQuestion 驱动）。
+
+    input.questions 结构（mapping 保留）：
+      [{ header, question, multiSelect?, options: [{label, description}] }]
   -->
   <div class="space-y-3 py-1">
     <div v-for="(q, i) in control.questions ?? []" :key="i">
+      <div class="flex items-center gap-2 mb-1.5">
+        <span
+          class="text-[10px] font-mono uppercase tracking-wide text-muted-foreground bg-muted px-1.5 py-0.5 rounded"
+        >
+          {{ q.header || `Q${i + 1}` }}
+        </span>
+        <span v-if="q.multiSelect" class="text-[10px] text-muted-foreground">可多选</span>
+      </div>
       <div class="text-[13px] font-medium text-foreground mb-1.5">{{ q.question }}</div>
       <div class="flex flex-col gap-1">
         <div

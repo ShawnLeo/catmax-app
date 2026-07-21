@@ -151,10 +151,10 @@ watch(
 async function switchBackendTab(id: BackendId): Promise<void> {
   if (id === backendStore.currentId) return
   if (!isBackendAvailable(id)) return
-  // 切 backend 会清掉当前会话上下文（不同 backend 不能混用）
+  // 切 backend 会清掉所有会话上下文（不同 backend 的 session 状态不混用）
   await backendStore.switchTo(id)
   sessionStore.setCurrent('')
-  messageStore.reset()
+  messageStore.resetAll()
 }
 
 /**
@@ -163,6 +163,9 @@ async function switchBackendTab(id: BackendId): Promise<void> {
  * 必须切 backend 的原因：startTurn 用当前 backend 的 adapter 调
  * backendThreadId，如果 session.backend ≠ currentBackend，必然失败
  * （codex 的 thread id 在 claude 那边不存在，反之亦然）。
+ *
+ * 不调 reset——切 session 保留各 session 的状态（多 turn 并发隔离）。
+ * loadHistory 的 setMessages 只覆盖当前 session 的 messages。
  */
 async function selectSession(id: string): Promise<void> {
   const session = sessionStore.sessions.find((s) => s.id === id)
@@ -175,18 +178,20 @@ async function selectSession(id: string): Promise<void> {
     await backendStore.switchTo(session.backend)
   }
   sessionStore.setCurrent(id)
-  messageStore.reset()
+  messageStore.setCurrentSession(id)
   await sessionStore.loadHistory(id)
 }
 
 async function removeSession(id: string): Promise<void> {
   if (!window.confirm('删除此会话？')) return
+  // 清理被删 session 的状态（防止内存泄漏）
+  messageStore.clearSession(id)
   await sessionStore.remove(id)
 }
 
 function newSession(): void {
   sessionStore.setCurrent('')
-  messageStore.reset()
+  messageStore.setCurrentSession(null)
 }
 
 /**

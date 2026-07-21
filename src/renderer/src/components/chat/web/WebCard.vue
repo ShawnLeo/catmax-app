@@ -12,7 +12,9 @@
   <div class="space-y-1.5 py-0.5">
     <!-- query / url -->
     <div class="flex items-start gap-1.5 text-[13px]">
-      <span class="text-muted-foreground flex-shrink-0 mt-0.5">{{ info.type === 'search' ? '🔍' : '🔗' }}</span>
+      <span class="text-muted-foreground flex-shrink-0 mt-0.5">{{
+        info.type === 'search' ? '🔍' : '🔗'
+      }}</span>
       <span class="font-mono text-foreground break-all">{{ info.query }}</span>
     </div>
 

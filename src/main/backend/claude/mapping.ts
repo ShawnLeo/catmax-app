@@ -26,7 +26,9 @@ import type {
   ToolResultContent,
   ToolUseContent,
 } from '@shared/backend/claude-schema'
-import type { ToolCallInfo, ToolOutput, TurnEvent } from '@shared/backend/types'
+import type { ToolCallInfo, ToolOutput, TurnEvent, ApprovalRequest } from '@shared/backend/types'
+
+import { assessRisk } from '../shared/assess-risk'
 
 /** 把 claude 的 tool_use 映射到 ToolCallInfo */
 export function toolUseToInfo(block: ToolUseContent): ToolCallInfo {
@@ -232,7 +234,7 @@ export function toolUseToInfo(block: ToolUseContent): ToolCallInfo {
       }
     }
     case 'AskUserQuestion': {
-      // 向用户提问：input.questions 是 [{header, question, options:[{label,description}]}]
+      // 向用户提问：input.questions 是 [{header, question, multiSelect?, options:[{label,description}]}]
       const rawQs = Array.isArray(input?.questions) ? input.questions : []
       const questions = rawQs
         .filter((q: unknown): q is Record<string, unknown> => typeof q === 'object' && q !== null)
@@ -250,6 +252,7 @@ export function toolUseToInfo(block: ToolUseContent): ToolCallInfo {
             header: typeof q.header === 'string' ? q.header : '',
             question: typeof q.question === 'string' ? q.question : '',
             options,
+            multiSelect: q.multiSelect === true,
           }
         })
       return {
@@ -315,8 +318,25 @@ export function* assistantToEvents(msg: AssistantMessage, turnId: string): Itera
         break
       }
       case 'tool_use': {
-        const tool = toolUseToInfo(block as ToolUseContent)
-        yield { type: 'tool_call_started', turnId, itemId, tool }
+        const toolUseBlock = block as ToolUseContent
+        const tool = toolUseToInfo(toolUseBlock)
+        // AskUserQuestion 特殊：携带 questions 字段，让 adapter 推 ask_user_question 事件
+        if (
+          toolUseBlock.name === 'AskUserQuestion' &&
+          tool.control?.type === 'ask_user_question' &&
+          tool.control.questions &&
+          tool.control.questions.length > 0
+        ) {
+          yield {
+            type: 'tool_call_started',
+            turnId,
+            itemId,
+            tool,
+            askUserQuestion: { questions: tool.control.questions },
+          }
+        } else {
+          yield { type: 'tool_call_started', turnId, itemId, tool }
+        }
         break
       }
       // tool_result 在 user 消息里，不在这里处理
@@ -526,11 +546,87 @@ export class StreamEventAggregator {
       name: block.toolName ?? 'unknown',
       input,
     })
+
+    // AskUserQuestion 特殊处理：额外携带 questions，让 adapter 推 ask_user_question 事件
+    // 给 UI 弹 dialog。其他工具不带 askUserQuestion 字段。
+    if (
+      block.toolName === 'AskUserQuestion' &&
+      info.control?.type === 'ask_user_question' &&
+      info.control.questions &&
+      info.control.questions.length > 0
+    ) {
+      return {
+        type: 'tool_call_started',
+        turnId: this.turnId,
+        itemId: block.itemId,
+        tool: info,
+        askUserQuestion: { questions: info.control.questions },
+      }
+    }
+
     return {
       type: 'tool_call_started',
       turnId: this.turnId,
       itemId: block.itemId,
       tool: info,
     }
+  }
+}
+
+// ============ Claude 权限请求 → ApprovalRequest ============
+
+/**
+ * 把 claude permission-prompt-tool 的 input 映射到 catmax 的 ApprovalRequest。
+ *
+ * claude 调我们的 approve MCP tool 时传：
+ *   { tool_name: "Bash" / "Write" / "Edit" / "mcp__xxx__yyy" / ...
+ *     input:     工具的原始入参 }
+ *
+ * 映射规则：
+ * - Bash → kind:'shell_command'，detail 显示 `$ <command>`
+ * - Write / Edit / MultiEdit / NotebookEdit → kind:'file_edit'，detail 显示 JSON
+ * - mcp__* 或其他 → kind:'mcp'，detail 显示 JSON
+ * - 风险等级走共享的 assessRisk
+ */
+export function claudePermissionToApprovalRequest(
+  toolName: string,
+  input: Record<string, unknown>,
+): ApprovalRequest {
+  if (toolName === 'Bash') {
+    const cmd = typeof input.command === 'string' ? input.command : JSON.stringify(input)
+    const description = typeof input.description === 'string' ? input.description : undefined
+    const detail = description ? `$ ${cmd}\n\n${description}` : `$ ${cmd}`
+    return {
+      kind: 'shell_command',
+      title: cmd.slice(0, 100),
+      detail,
+      riskLevel: assessRisk('shell_command', cmd),
+    }
+  }
+
+  if (
+    toolName === 'Write' ||
+    toolName === 'Edit' ||
+    toolName === 'MultiEdit' ||
+    toolName === 'NotebookEdit'
+  ) {
+    const filePath =
+      (typeof input.file_path === 'string' && input.file_path) ||
+      (typeof input.notebook_path === 'string' && input.notebook_path) ||
+      '<unknown>'
+    return {
+      kind: 'file_edit',
+      title: `${toolName}: ${filePath}`,
+      detail: JSON.stringify(input, null, 2),
+      riskLevel: assessRisk('file_edit', filePath),
+    }
+  }
+
+  // mcp__* 或其他未知工具
+  return {
+    kind: 'mcp',
+    title: toolName,
+    detail: JSON.stringify(input, null, 2),
+    riskLevel: 'medium',
   }
 }

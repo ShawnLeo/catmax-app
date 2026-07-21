@@ -7,11 +7,8 @@
 import { describe, expect, test } from 'vitest'
 
 import { sharedContextTagExtractors } from '../../src/shared/backend/context-tag-handlers'
-import {
-  extractContextTags,
-  serializeContextTags,
-} from '../../src/shared/backend/context-tags'
 import type { ContextBlock } from '../../src/shared/backend/context-tag-types'
+import { extractContextTags, serializeContextTags } from '../../src/shared/backend/context-tags'
 
 const IDE_SELECTION_EXAMPLE = `<ide_selection>The user selected the lines 76 to 82 from /Users/shawn/code/app/src/lib/foo.ts:
 const x = 1
@@ -28,7 +25,10 @@ const ENVIRONMENT_CONTEXT_EXAMPLE = `<environment_context>
 
 describe('extractContextTags', () => {
   test('提取 ide_selection', () => {
-    const { text, blocks } = extractContextTags(`看一下这段代码\n${IDE_SELECTION_EXAMPLE}`, sharedContextTagExtractors)
+    const { text, blocks } = extractContextTags(
+      `看一下这段代码\n${IDE_SELECTION_EXAMPLE}`,
+      sharedContextTagExtractors,
+    )
     expect(blocks).toHaveLength(1)
     expect(blocks[0]!.tag).toBe('ide_selection')
     const data = blocks[0]!.data as {
@@ -133,7 +133,12 @@ describe('serializeContextTags（往返一致性）', () => {
     expect(text).toBe(prompt)
     expect(extracted).toHaveLength(1)
     expect(extracted[0]!.tag).toBe('ide_selection')
-    const d = extracted[0]!.data as { filePath: string; startLine: number; endLine: number; code: string }
+    const d = extracted[0]!.data as {
+      filePath: string
+      startLine: number
+      endLine: number
+      code: string
+    }
     expect(d.filePath).toBe('/app/foo.ts')
     expect(d.startLine).toBe(10)
     expect(d.endLine).toBe(12)
@@ -142,9 +147,7 @@ describe('serializeContextTags（往返一致性）', () => {
 
   test('serialize ide_opened_file 后能被 extract 还原', () => {
     const prompt = '这个文件怎么用'
-    const blocks: ContextBlock[] = [
-      { tag: 'ide_opened_file', data: { filePath: '/app/bar.vue' } },
-    ]
+    const blocks: ContextBlock[] = [{ tag: 'ide_opened_file', data: { filePath: '/app/bar.vue' } }]
     const serialized = serializeContextTags(prompt, blocks)
     const { text, blocks: extracted } = extractContextTags(serialized, sharedContextTagExtractors)
     expect(text).toBe(prompt)

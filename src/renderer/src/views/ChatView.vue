@@ -20,11 +20,26 @@
 
       <ApprovalDialog v-if="messageStore.pendingApproval" />
 
-      <Composer
-        :disabled="!backendStore.isAvailable"
-        v-model="runtimeConfig"
-        @send="onSend"
+      <!--
+        Claude 权限请求 dialog——claude 通过内置 MCP server 的权限请求触发
+        （--permission-prompt-tool = mcp__catmax__approve）。
+        跟 codex 的 ApprovalDialog 互斥显示（同一时刻只一个 backend 在跑 turn）。
+      -->
+      <ClaudePermissionDialog v-if="messageStore.pendingClaudePermission" />
+
+      <!--
+        AskUserQuestion 弹窗——claude 调 AskUserQuestion 时弹出。
+        pendingQuestion 由 backend 推 ask_user_question TurnEvent 设置。
+        提交时把答案拼成自然语言，复用 onSend 当新用户消息发下一轮 turn
+        （claude -p 模式不接受外部 tool_result 回写，只能走新 turn --resume）。
+      -->
+      <AskUserQuestionDialog
+        v-if="messageStore.pendingQuestion"
+        @submit="onAskUserQuestionSubmit"
+        @cancel="onAskUserQuestionCancel"
       />
+
+      <Composer :disabled="!backendStore.isAvailable" v-model="runtimeConfig" @send="onSend" />
     </div>
 
     <!-- 右栏切换按钮（floating） -->
@@ -43,6 +58,8 @@
 
 <script setup lang="ts">
 import ApprovalDialog from '@renderer/components/chat/ApprovalDialog.vue'
+import AskUserQuestionDialog from '@renderer/components/chat/AskUserQuestionDialog.vue'
+import ClaudePermissionDialog from '@renderer/components/chat/ClaudePermissionDialog.vue'
 import Composer from '@renderer/components/chat/Composer.vue'
 import MessageList from '@renderer/components/chat/MessageList.vue'
 import RuntimeConfigBar from '@renderer/components/chat/RuntimeConfigBar.vue'
@@ -56,8 +73,8 @@ import { useMessageStore } from '@renderer/stores/message'
 import { useSessionStore } from '@renderer/stores/session'
 import { useUiStore } from '@renderer/stores/ui'
 import { useWorkspaceStore } from '@renderer/stores/workspace'
-import type { ContextBlock, EffortLevel, PermissionMode } from '@shared/backend/types'
 import { serializeContextTags } from '@shared/backend/context-tags'
+import type { ContextBlock, EffortLevel, PermissionMode } from '@shared/backend/types'
 import { PanelRightIcon } from 'lucide-vue-next'
 import { onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
@@ -177,6 +194,9 @@ async function onSend(text: string, attachments: ContextBlock[]): Promise<void> 
     if (effort !== null) createArgs.effort = effort
     sessionId = await sessionStore.create(createArgs)
     sessionStore.setCurrent(sessionId)
+    // messageStore 的 currentSessionId 跟 sessionStore 是两套 ref——
+    // 必须同时设，否则后续 pushUserMessage / 流式 events 都路由不到正确 session。
+    messageStore.setCurrentSession(sessionId)
   }
 
   // 找 backendThreadId（session.detail 已经能拿到；MVP 简化：直接用 backendThreadId 字段）
@@ -193,8 +213,13 @@ async function onSend(text: string, attachments: ContextBlock[]): Promise<void> 
 
   // 启动 turn（sessionId 字段实际传 backendThreadId 给 backend）
   // cwd 必须传——claude adapter 用它作为 spawn cwd（per-turn process 模型）。
+  // clientSessionId 传 catmax 的 session.id——manager.ts 用它做 envelope 路由
+  // （renderer 的 messageStore 按 clientSessionId 把流式 events 累积到对应 session）。
+  // 不能复用 sessionId：backendThreadId 跟 catmax session.id 不是同一个 key，
+  // applyEvent 会路由到不存在的 session 导致流式输出看不到。
   const startArgs: Parameters<typeof window.api.backend.startTurn>[0] = {
     sessionId: session.backendThreadId,
+    clientSessionId: sessionId,
     prompt: fullPrompt,
     permissionMode: runtimeConfig.value.permissionMode,
     cwd: workspaceStore.currentWorkspace.path,
@@ -202,5 +227,20 @@ async function onSend(text: string, attachments: ContextBlock[]): Promise<void> 
   if (model !== null) startArgs.model = model
   if (effort !== null) startArgs.effort = effort
   await window.api.backend.startTurn(startArgs)
+}
+
+/**
+ * AskUserQuestion 弹窗提交——把答案拼成的自然语言当作新用户消息发下一轮 turn。
+ * claude -p 模式硬编码拒绝外部对 AskUserQuestion 的 tool_result 回应（实测过），
+ * 没法在同一 turn 进程内回写答案，所以走新一轮 turn + --resume 继续。
+ */
+async function onAskUserQuestionSubmit(text: string): Promise<void> {
+  messageStore.pendingQuestion = null
+  await onSend(text, [])
+}
+
+/** AskUserQuestion 弹窗取消——清 pendingQuestion，不发任何消息。 */
+function onAskUserQuestionCancel(): void {
+  messageStore.pendingQuestion = null
 }
 </script>

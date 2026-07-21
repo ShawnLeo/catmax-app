@@ -4,6 +4,7 @@
  * 绝不见 codex/claude 协议原文。
  */
 import type { BackendId } from '../constants'
+
 import type { ContextBlock } from './context-tag-types'
 
 // re-export：renderer/main 已经按惯例从 types.ts 引所有 NormalizedMessage 相关类型，
@@ -60,7 +61,22 @@ export interface StartSessionArgs {
 
 /** 启动 turn 参数 */
 export interface StartTurnArgs {
+  /**
+   * backend 内部线程 id——claude 用它作 `--resume <id>`，codex 用它 thread/send。
+   * 跟 catmax 自己的 session.id（db 主键）不是一回事：claude 第一次 startSession 时
+   * 这里只是占位 UUID，等 claude 返回真实 session_id 后 db 的 backend_thread_id
+   * 才会被回写。
+   */
   sessionId: string
+  /**
+   * catmax 自己的 session.id（db 主键），仅用于 envelope 路由——
+   * renderer 的 messageStore 按 clientSessionId 把流式 events 累积到对应 session 状态。
+   * 不传时 fallback 到 sessionId（保持向后兼容）。
+   *
+   * 不能直接复用 sessionId：renderer 的 currentSessionId 是 catmax session.id，
+   * 而 sessionId 是 backendThreadId，两者 key 不同会导致 applyEvent 路由到错误的 session。
+   */
+  clientSessionId?: string
   prompt: string
   /**
    * 工作区目录（claude 用作 spawn 的 cwd；codex 在 thread/start 时已传，这里冗余但无害）。
@@ -77,15 +93,7 @@ export interface StartTurnArgs {
 
 /** 工具调用描述（归一化） */
 export interface ToolCallInfo {
-  kind:
-    | 'shell_command'
-    | 'file_edit'
-    | 'file_read'
-    | 'mcp'
-    | 'control'
-    | 'web'
-    | 'task'
-    | 'other'
+  kind: 'shell_command' | 'file_edit' | 'file_read' | 'mcp' | 'control' | 'web' | 'task' | 'other'
   title: string
   detail?: string
   /**
@@ -174,6 +182,8 @@ export interface ToolControlQuestion {
   header: string
   question: string
   options: ToolControlQuestionOption[]
+  /** 多选允许（default false）——claude AskUserQuestion 的 multiSelect 字段 */
+  multiSelect?: boolean
 }
 
 export interface ToolControlQuestionOption {
@@ -249,6 +259,12 @@ export type TurnEvent =
       turnId: string
       itemId: string
       tool: ToolCallInfo
+      /**
+       * AskUserQuestion 专属标记——adapter 检测到这个字段时，会额外推一条
+       * `ask_user_question` 事件给 UI 弹 dialog。mapping 层在 buildToolCallStarted 时塞入。
+       * 不带这个字段的 tool_call_started 都是普通工具，UI 不弹 dialog。
+       */
+      askUserQuestion?: { questions: ToolControlQuestion[] }
     }
   | {
       type: 'tool_call_completed'
@@ -261,6 +277,22 @@ export type TurnEvent =
       turnId: string
       requestId: string
       request: ApprovalRequest
+      /**
+       * 标识来源 backend——renderer 用来决定弹哪个 dialog。
+       * - undefined / 'codex'：走 ApprovalDialog（codex approval）
+       * - 'claude'：走 ClaudePermissionDialog（claude 通过 MCP server 的权限请求）
+       */
+      source?: 'claude' | 'codex'
+    }
+  | {
+      /** AskUserQuestion——claude 想问用户问题，UI 弹 AskUserQuestionDialog */
+      type: 'ask_user_question'
+      turnId: string
+      /** 唯一标识——用 tool_use_id（和 itemId 一致），dialog 提交/cancel 时用它清 pendingQuestion */
+      requestId: string
+      /** AskUserQuestion tool_use 的 id（同 itemId），保留语义 */
+      toolUseId: string
+      questions: ToolControlQuestion[]
     }
   | { type: 'error'; turnId: string; message: string; recoverable: boolean }
   | {

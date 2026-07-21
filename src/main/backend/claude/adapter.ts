@@ -8,6 +8,8 @@
  * - 中断 = kill 进程
  */
 import { randomUUID } from 'node:crypto'
+import { writeFile, unlink } from 'node:fs/promises'
+import { join } from 'node:path'
 
 import { logger } from '@main/service/logger'
 import {
@@ -27,20 +29,56 @@ import {
   type StartTurnArgs,
   type TurnEvent,
 } from '@shared/backend/types'
+import { app } from 'electron'
 
 import { checkCliHealth } from '../health-check'
 import { type ProcessSpawner, RealProcessSpawner } from '../process-spawner'
 
+import { ApprovalBridge, type BridgePermissionRequest } from './approval-bridge'
 import { listClaudeSessionsFromDisk, readHistoryFromJsonl } from './jsonl-reader'
 import {
   StreamEventAggregator,
   assistantToEvents,
+  claudePermissionToApprovalRequest,
   resultToEvent,
   userToolResultToEvents,
 } from './mapping'
+// MCP server 脚本路径——electron-vite 编译时把 `?modulePath` 后缀替换成打包后的绝对路径
+// （dev: out/main/mcp-server.js，packaged: app.asar 内的对应路径）。
+// 注意：server.ts 是独立入口（在 electron.vite.config.ts 的 rollupOptions.input 配置），
+// 不能 import 这个文件的内容（会拉到 main bundle），只能拿路径字符串。
+import mcpServerScriptPath from './mcp/server?modulePath'
 import { encodeUserMessage, LineBuffer, parseClaudeLine } from './protocol'
 
 const log = logger.domain('claude-adapter')
+
+/**
+ * per-turn 上下文——支持多 turn 并发隔离。
+ *
+ * 每个字段都属于"当前 turn"独立状态，多个并发 turn 各持一份，互不串台。
+ * 由 startTurn 创建、generator finally 块（或 interrupt / dispose）清理。
+ */
+interface TurnContext {
+  /** claude 子进程 */
+  proc: ReturnType<ProcessSpawner['spawn']>
+  /** ApprovalBridge——MCP server 子进程通过 socket 连进来 */
+  bridge: ApprovalBridge
+  /** 临时 mcp-config JSON 文件路径——turn 结束时删 */
+  mcpConfigPath: string
+  /** 事件队列——stdout data 回调和 handlePermissionRequest 都 push 进来 */
+  queue: TurnEvent[]
+  /** generator 主循环的 resolve——push 事件后调它唤醒等待 */
+  resolveWait: (() => void) | null
+  /** per-turn 的审批 Map——key 是 `${turnId}:${bridgeRequestId}` */
+  pendingApprovals: Map<
+    string,
+    {
+      resolve: (action: ApprovalDecision['action']) => void
+      bridgeRequestId: number
+      originalInput: Record<string, unknown>
+    }
+  >
+}
 
 export interface ClaudeAdapterOptions {
   binaryPath?: string
@@ -59,7 +97,10 @@ export class ClaudeAdapter implements AgentBackend {
 
   readonly capabilities: BackendCapabilities = {
     supportsInterrupt: true,
-    supportsApproval: false, // claude MVP 不支持 approval UI
+    // 通过内置 MCP server + --permission-prompt-tool 实现：
+    // claude spawn 时把权限决策委托给 mcp__catmax__approve 工具，
+    // MCP server 子进程 → Unix socket → main → IPC → renderer 弹 ClaudePermissionDialog。
+    supportsApproval: true,
     supportsSteer: false,
     supportsThreadFork: false,
     supportsModelSelection: true,
@@ -79,8 +120,20 @@ export class ClaudeAdapter implements AgentBackend {
   private opts: ClaudeAdapterOptions
   private spawner: ProcessSpawner
 
-  /** 当前 turn 的子进程（用于 interrupt） */
-  private currentProc: ReturnType<ProcessSpawner['spawn']> | null = null
+  /**
+   * per-turn 上下文——支持多 turn 并发（用户切到 session B 时 A 的 turn 还在跑）。
+   *
+   * 每个 turn 有自己独立的：
+   * - proc（claude 子进程）
+   * - bridge（ApprovalBridge，独立的 socket + token）
+   * - mcpConfigPath（临时 mcp-config JSON 文件）
+   * - queue / resolveWait（事件队列 + generator 唤醒）
+   * - pendingApprovals（per-turn 的审批 Map）
+   *
+   * interrupt / respondApproval 用 turnId 精确定位 context，不会误伤其他 turn。
+   */
+  private turnContexts = new Map<string, TurnContext>()
+
   /** internal session id → claude session id 反向映射 */
   private sessionIdMap = new Map<string, string>()
   /**
@@ -119,11 +172,10 @@ export class ClaudeAdapter implements AgentBackend {
   }
 
   async dispose(): Promise<void> {
-    if (this.currentProc) {
-      this.currentProc.kill('SIGTERM')
-      this.currentProc = null
-    }
-    log.info('disposed')
+    // 清理所有还在跑的 turn——app 退出 / backend 切换时调
+    const turnIds = Array.from(this.turnContexts.keys())
+    await Promise.all(turnIds.map((id) => this.interrupt(id)))
+    log.info('disposed,', turnIds.length, 'turns cleaned')
   }
 
   getCapabilities(): BackendCapabilities {
@@ -239,25 +291,91 @@ export class ClaudeAdapter implements AgentBackend {
       procArgs.push('--permission-mode', args.permissionMode)
     }
 
+    // ============ 启动 ApprovalBridge + 配置 mcp-config + 加 permission-prompt-tool flags ============
+    // 这一块是 claude 权限交互的核心机制：
+    // - ApprovalBridge：一个 Unix socket server，等 MCP server 子进程连进来
+    // - mcp-config：告诉 claude spawn 哪个 MCP server（我们内置的 catmax MCP）
+    // - --permission-prompt-tool：claude 把权限决策委托给 mcp__catmax__approve
+    //
+    // 注意：MCP server 子进程由 claude 自己 spawn（不是我们 spawn），生命周期跟 claude 进程绑定。
+    // 我们只负责起 socket server + 写 mcp-config + 加 flags，剩下交给 claude。
+    const userData = app.getPath('userData')
+    const socketPath = join(userData, `catmax-claude-${internalTurnId}.sock`)
+    const bridgeToken = randomUUID()
+
+    // 创建 per-turn 上下文（在 bridge 创建前就放到 map，让 handlePermissionRequest 能找到）
+    const ctx: TurnContext = {
+      proc: undefined as unknown as TurnContext['proc'], // 先占位，spawn 后填
+      bridge: undefined as unknown as ApprovalBridge, // 先占位，下面立即填
+      mcpConfigPath: '', // 下面填
+      queue: [],
+      resolveWait: null,
+      pendingApprovals: new Map(),
+    }
+    this.turnContexts.set(internalTurnId, ctx)
+
+    ctx.bridge = new ApprovalBridge({
+      socketPath,
+      token: bridgeToken,
+      turnId: internalTurnId,
+      onRequest: (req) => this.handlePermissionRequest(req, internalTurnId),
+      onDisconnect: () => {
+        // bridge 断开意味着 MCP server 退出 → claude 进程也快退了
+        // 把当前 turn 的 pendingApprovals 全部 reject，让 promise 不会永远 hang
+        for (const [id, pending] of ctx.pendingApprovals) {
+          log.info('bridge disconnected, rejecting pending approval', id)
+          pending.resolve('reject')
+          ctx.pendingApprovals.delete(id)
+        }
+      },
+    })
+    await ctx.bridge.start()
+
+    const mcpConfig = {
+      mcpServers: {
+        catmax: {
+          type: 'stdio',
+          // Electron 当 Node 用（ELECTRON_RUN_AS_NODE=1）——避免启动整个 Electron
+          command: process.execPath,
+          args: [mcpServerScriptPath],
+          env: {
+            ELECTRON_RUN_AS_NODE: '1',
+            ELECTRON_DISABLE_SECURITY_WARNINGS: 'true',
+            CATMAX_APPROVAL_SOCKET: socketPath,
+            CATMAX_APPROVAL_TOKEN: bridgeToken,
+          },
+        },
+      },
+    }
+    const mcpConfigPath = join(userData, `catmax-mcp-${internalTurnId}.json`)
+    ctx.mcpConfigPath = mcpConfigPath
+    await writeFile(mcpConfigPath, JSON.stringify(mcpConfig), 'utf8')
+
+    procArgs.push('--strict-mcp-config', '--mcp-config', mcpConfigPath)
+    procArgs.push('--permission-prompt-tool', 'mcp__catmax__approve')
+
     // spawn cwd 优先级：调用方传入（args.cwd）> adapter opts > undefined（继承 main 进程 cwd）
     // Bug E-1：claude 是 per-turn process 模型，每次 turn 都要 spawn 新进程——
     // cwd 必须正确，否则文件工具和历史文件都会落到错误目录。
     const spawnCwd = args.cwd ?? this.opts.cwd
-    this.currentProc = this.spawner.spawn({
+    const proc = this.spawner.spawn({
       command: binary,
       args: procArgs,
       // 注入代理 env（claude 调 Anthropic API 时用得到）
       env: { ...this.extraEnv },
       ...(spawnCwd !== undefined ? { cwd: spawnCwd } : {}),
     })
+    ctx.proc = proc
 
     // 写用户消息到 stdin 并 close（claude 一次只处理一条 user 消息）
-    this.currentProc.write(encodeUserMessage(args.prompt) + '\n')
-    this.currentProc.endInput()
+    proc.write(encodeUserMessage(args.prompt) + '\n')
+    proc.endInput()
 
-    // 读 stdout 流，转 TurnEvent
-    const queue: TurnEvent[] = []
+    // 读 stdout 流，转 TurnEvent。
+    // queue / resolveWait 用 ctx（per-turn context）——多 turn 并发时各自独立。
+    const queue: TurnEvent[] = ctx.queue
     let resolveWait: (() => void) | null = null
+    ctx.resolveWait = null
     let done = false
     const lineBuffer = new LineBuffer()
     // 流式事件聚合器：处理 --include-partial-messages 模式下的 stream_event
@@ -265,6 +383,13 @@ export class ClaudeAdapter implements AgentBackend {
     // 跟踪是否见过 stream_event —— 如果见过，最终的完整 assistant 消息就忽略
     // （因为 aggregator 已经把每个 token 推给 UI 了，再处理完整块会重复显示）
     let sawStreamEvents = false
+
+    /** helper：push 一个事件到队列，并唤醒 generator 主循环 */
+    const pushEvent = (event: TurnEvent): void => {
+      queue.push(event)
+      ctx.resolveWait?.()
+      resolveWait?.()
+    }
 
     const onChunk = (chunk: Buffer): void => {
       const lines = lineBuffer.push(chunk)
@@ -290,8 +415,19 @@ export class ClaudeAdapter implements AgentBackend {
           // 真正的逐 token 流式 —— Bug G
           sawStreamEvents = true
           for (const event of aggregator.push(msg as StreamEventMessage)) {
-            queue.push(event)
-            resolveWait?.()
+            pushEvent(event)
+            // AskUserQuestion 特殊：tool_call_started 带 askUserQuestion 字段时，
+            // 额外推一条 ask_user_question 事件给 UI 弹 dialog。
+            // 不在 mapping 里直接推是为了保持 mapping 纯粹（一进一出）。
+            if (event.type === 'tool_call_started' && event.askUserQuestion) {
+              pushEvent({
+                type: 'ask_user_question',
+                turnId: internalTurnId,
+                requestId: event.itemId, // 用 tool_use_id 作 requestId（一对一）
+                toolUseId: event.itemId,
+                questions: event.askUserQuestion.questions,
+              })
+            }
           }
           continue
         }
@@ -300,15 +436,23 @@ export class ClaudeAdapter implements AgentBackend {
           // 避免重复。否则（没开 --include-partial-messages 时）才用完整块。
           if (sawStreamEvents) continue
           for (const event of assistantToEvents(msg as AssistantMessage, internalTurnId)) {
-            queue.push(event)
-            resolveWait?.()
+            pushEvent(event)
+            // 同 stream_event 路径——AskUserQuestion tool_use 额外推 ask_user_question
+            if (event.type === 'tool_call_started' && event.askUserQuestion) {
+              pushEvent({
+                type: 'ask_user_question',
+                turnId: internalTurnId,
+                requestId: event.itemId,
+                toolUseId: event.itemId,
+                questions: event.askUserQuestion.questions,
+              })
+            }
           }
           continue
         }
         if (msg.type === 'user') {
           for (const event of userToolResultToEvents(msg, internalTurnId)) {
-            queue.push(event)
-            resolveWait?.()
+            pushEvent(event)
           }
           continue
         }
@@ -317,8 +461,7 @@ export class ClaudeAdapter implements AgentBackend {
           // 收尾：把还没收到 content_block_stop 的 tool_use 兜底发出
           if (sawStreamEvents) {
             for (const event of aggregator.flushPendingToolUse()) {
-              queue.push(event)
-              resolveWait?.()
+              pushEvent(event)
             }
           }
           // Bug D-2：is_error 的 result 必须先推 error event，把 claude 报的错暴露给 UI。
@@ -328,24 +471,24 @@ export class ClaudeAdapter implements AgentBackend {
               (Array.isArray(resultMsg.errors) && resultMsg.errors.length > 0
                 ? resultMsg.errors.join('; ')
                 : undefined) ?? 'claude turn ended with error (no detail)'
-            queue.push({
+            pushEvent({
               type: 'error',
               turnId: internalTurnId,
               message: errText,
               recoverable: false,
             })
           }
-          queue.push(resultToEvent(resultMsg, internalTurnId))
-          resolveWait?.()
+          pushEvent(resultToEvent(resultMsg, internalTurnId))
           done = true
         }
       }
     }
 
-    this.currentProc.child.stdout?.on('data', onChunk)
-    this.currentProc.child.on('exit', () => {
+    proc.child.stdout?.on('data', onChunk)
+    proc.child.on('exit', () => {
       done = true
       resolveWait?.()
+      ctx.resolveWait?.()
     })
 
     try {
@@ -353,8 +496,10 @@ export class ClaudeAdapter implements AgentBackend {
         if (queue.length === 0) {
           await new Promise<void>((resolve) => {
             resolveWait = resolve
+            ctx.resolveWait = resolve
           })
           resolveWait = null
+          ctx.resolveWait = null
         }
         while (queue.length > 0) {
           const event = queue.shift()!
@@ -362,28 +507,151 @@ export class ClaudeAdapter implements AgentBackend {
           // 只有 turn_completed 终结 generator——error 事件后我们仍想 yield 跟在
           // 后面的 turn_completed（Bug D-2：error event 先 yield，紧接 turn_completed）。
           if (event.type === 'turn_completed') {
-            this.currentProc = null
             return
           }
         }
       }
     } finally {
-      this.currentProc = null
+      // 清理当前 turn 的 context——多 turn 并发时只清自己的，不影响其他 turn
+      await this.cleanupTurnContext(internalTurnId)
     }
   }
 
+  /**
+   * 清理单个 turn 的 context：
+   * - stop bridge（关 socket server，删 socket 文件）
+   * - unlink mcp-config 临时文件
+   * - reject 所有 pendingApprovals（防止 promise 永远 hang）
+   * - 从 turnContexts 里 delete
+   *
+   * 由 generator finally 块（turn 正常结束 / interrupt / generator 抛错）调用。
+   * interrupt 也单独调用，会先 delete turnContexts 让 finally 块的 cleanup 变 no-op。
+   */
+  private async cleanupTurnContext(turnId: string): Promise<void> {
+    const ctx = this.turnContexts.get(turnId)
+    if (!ctx) return // 已经被 interrupt 清理过，no-op
+    this.turnContexts.delete(turnId)
+    // reject 所有未完成的 pendingApprovals
+    for (const [, pending] of ctx.pendingApprovals) {
+      pending.resolve('reject')
+    }
+    ctx.pendingApprovals.clear()
+    try {
+      await ctx.bridge.stop()
+    } catch (e) {
+      log.warn('bridge stop failed:', e)
+    }
+    if (ctx.mcpConfigPath) {
+      try {
+        await unlink(ctx.mcpConfigPath)
+      } catch {
+        // 文件可能不存在（turn 启动失败时），忽略
+      }
+    }
+  }
+
+  /**
+   * ApprovalBridge 收到 MCP server 转发上来的权限请求时触发。
+   *
+   * 流程：
+   * 1. 把请求转成 ApprovalRequest（复用 mapping 层的 claudePermissionToApprovalRequest）
+   * 2. push approval_requested TurnEvent 到当前 turn 的队列
+   * 3. 挂一个 promise，等 respondApproval 调用
+   * 4. promise 完成后把决策写回 bridge → MCP server → claude
+   *
+   * requestId 用 `${turnId}:${bridgeRequestId}` 复合形式——确保多 turn 并发时
+   * 各自从 1 开始递增的 bridgeRequestId 不会撞。
+   */
+  private handlePermissionRequest(req: BridgePermissionRequest, turnId: string): void {
+    const ctx = this.turnContexts.get(turnId)
+    if (!ctx) {
+      log.warn('handlePermissionRequest: no context for turn', turnId)
+      return
+    }
+    const request = claudePermissionToApprovalRequest(req.toolName, req.input)
+    // 复合 requestId：`${turnId}:${bridgeRequestId}`——多 turn 并发隔离
+    const requestId = `${turnId}:${req.requestId}`
+
+    const promise = new Promise<ApprovalDecision['action']>((resolve) => {
+      ctx.pendingApprovals.set(requestId, {
+        resolve,
+        bridgeRequestId: req.requestId,
+        originalInput: req.input,
+      })
+    })
+
+    // 推 approval_requested 事件到当前 turn 的队列（source='claude' 让 renderer 区分）
+    ctx.queue.push({
+      type: 'approval_requested',
+      turnId,
+      requestId,
+      request,
+      source: 'claude',
+    })
+    ctx.resolveWait?.()
+
+    // 用户决策后写回 bridge → MCP server → claude
+    void promise.then((action) => {
+      const behavior: 'allow' | 'deny' = action === 'reject' ? 'deny' : 'allow'
+      const message = action === 'reject' ? '用户拒绝' : undefined
+      ctx.bridge.respond(req.requestId, behavior, req.input, message)
+      ctx.pendingApprovals.delete(requestId)
+    })
+  }
+
   async interrupt(turnId: string): Promise<void> {
-    void turnId
-    if (this.currentProc) {
-      log.info('interrupting claude process')
-      this.currentProc.kill('SIGTERM')
-      this.currentProc = null
+    const ctx = this.turnContexts.get(turnId)
+    if (!ctx) {
+      log.warn('interrupt: no context for turn', turnId)
+      return
+    }
+    log.info('interrupting claude process, turn=', turnId)
+    // 先 delete turnContexts，让 generator finally 块的 cleanupTurnContext 变 no-op（避免竞争）
+    this.turnContexts.delete(turnId)
+    try {
+      ctx.proc.kill('SIGTERM')
+    } catch (e) {
+      log.warn('interrupt kill failed:', e)
+    }
+    // reject 所有 pendingApprovals（让 promise 完成，避免内存泄漏）
+    for (const [, pending] of ctx.pendingApprovals) {
+      pending.resolve('reject')
+    }
+    ctx.pendingApprovals.clear()
+    // stop bridge + 删 mcp-config
+    try {
+      await ctx.bridge.stop()
+    } catch (e) {
+      log.warn('interrupt bridge stop failed:', e)
+    }
+    if (ctx.mcpConfigPath) {
+      try {
+        await unlink(ctx.mcpConfigPath)
+      } catch {
+        // 忽略
+      }
     }
   }
 
   async respondApproval(decision: ApprovalDecision): Promise<void> {
-    // claude MVP 不支持 approval
-    void decision
-    log.warn('respondApproval called but claude does not support approval')
+    // requestId 是复合形式 `${turnId}:${bridgeRequestId}`——拆出 turnId 找 context
+    const colonIdx = decision.requestId.lastIndexOf(':')
+    if (colonIdx < 0) {
+      log.warn('respondApproval: invalid requestId format', decision.requestId)
+      return
+    }
+    const turnId = decision.requestId.slice(0, colonIdx)
+    const ctx = this.turnContexts.get(turnId)
+    if (!ctx) {
+      log.warn('respondApproval: no context for turn', turnId)
+      return
+    }
+    const pending = ctx.pendingApprovals.get(decision.requestId)
+    if (!pending) {
+      log.warn('respondApproval: no pending approval for', decision.requestId)
+      return
+    }
+    ctx.pendingApprovals.delete(decision.requestId)
+    pending.resolve(decision.action)
   }
 }

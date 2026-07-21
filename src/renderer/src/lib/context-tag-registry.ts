@@ -7,9 +7,8 @@
  * main 进程的 history-mapping 不用本注册表（它直接用 sharedContextTagExtractors），
  * renderer 的 MessageItem.vue 用本注册表查 component 渲染。
  */
-import type { Component } from 'vue'
-
 import type { ContextTagExtractor } from '@shared/backend/context-tag-types'
+import type { Component } from 'vue'
 
 export interface ContextTagHandler extends ContextTagExtractor {
   /** 渲染组件——MessageItem.vue 通过 <component :is="..."> 挂上 */

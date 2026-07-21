@@ -28,7 +28,13 @@ export function parseClaudeLine(line: string): ClaudeStreamMessage | null {
 
   const result = claudeStreamMessageSchema.safeParse(parsed)
   if (!result.success) {
-    log.warn('claude message failed schema:', result.error.issues.slice(0, 2))
+    // 5 个 unionErrors 对应 5 个分支都失败——基本意味着是新消息类型。
+    // 把 raw line 完整打出来方便排查。
+    log.warn(
+      'claude message failed schema (all branches):',
+      result.error.issues.slice(0, 2),
+    )
+    log.warn('claude message failed schema, raw line:', trimmed.slice(0, 1500))
     return null
   }
   return result.data

@@ -233,17 +233,23 @@ export class BackendManager {
   /**
    * 启动 turn —— 异步驱动 AsyncIterable，把事件经 IPC 推送。
    * 立即返回 turnId（App 内部生成），不等 turn 完成。
+   *
+   * envelope 带 sessionId——多 turn 并发时 renderer 用它把事件路由到对应 session 状态。
    */
   async startTurn(args: StartTurnArgs): Promise<{ turnId: string }> {
     const turnId = randomUUID()
     const adapter = this.getCurrent()
     const backendId = this.currentBackendId
+    // envelope 的 sessionId 用 clientSessionId（catmax session.id）——renderer 的
+    // messageStore 按 clientSessionId 路由 events 到对应 session 状态。
+    // clientSessionId 不传时 fallback 到 args.sessionId（向后兼容）。
+    const routeSessionId = args.clientSessionId ?? args.sessionId
 
     // 后台驱动事件流
     void (async () => {
       try {
         for await (const event of adapter.startTurn(args)) {
-          ctx.broadcast('backend:turnEvent', { turnId, event })
+          ctx.broadcast('backend:turnEvent', { turnId, sessionId: routeSessionId, event })
         }
         // turn 正常结束后，触发 aiTitle 刷新（claude 在 jsonl 里写了 ai-title 行）
         // 失败不阻塞——title 刷新失败不影响主流程
@@ -259,7 +265,7 @@ export class BackendManager {
           message: e instanceof Error ? e.message : String(e),
           recoverable: false,
         }
-        ctx.broadcast('backend:turnEvent', { turnId, event: errorEvent })
+        ctx.broadcast('backend:turnEvent', { turnId, sessionId: routeSessionId, event: errorEvent })
       }
     })()
 

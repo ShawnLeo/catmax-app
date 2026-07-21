@@ -27,16 +27,15 @@
   <pre
     v-else
     class="font-mono text-[12px] bg-terminal text-foreground/80 p-3 overflow-x-auto whitespace-pre-wrap"
-    >{{ fallbackText }}</pre
-  >
+    >{{ fallbackText }}</pre>
 </template>
 
 <script setup lang="ts">
-import type { ToolEditInfo } from '@shared/backend/types'
-import { DiffModeEnum, DiffView } from '@git-diff-view/vue'
 import { DiffFile, generateDiffFile } from '@git-diff-view/file'
 // lowlight 包自带已注册的 highlighter 实例——直接 import 用，不用自己 init
 import { highlighter as lowlightHighlighter } from '@git-diff-view/lowlight'
+import { DiffModeEnum, DiffView } from '@git-diff-view/vue'
+import type { ToolEditInfo } from '@shared/backend/types'
 import '@git-diff-view/vue/styles/diff-view.css'
 import { computed, onMounted, onUnmounted, ref, shallowRef, watch } from 'vue'
 

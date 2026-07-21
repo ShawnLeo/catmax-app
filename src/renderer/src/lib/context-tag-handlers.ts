@@ -10,11 +10,11 @@
  *   3. 在本文件 register（绑 component）
  * 完全不用动 history-mapping / MessageItem。
  */
+import FilePill from '@renderer/components/chat/context/FilePill.vue'
+import IdeSelectionTag from '@renderer/components/chat/context/IdeSelectionTag.vue'
 import { sharedContextTagExtractors } from '@shared/backend/context-tag-handlers'
 import { defineComponent } from 'vue'
 
-import FilePill from '@renderer/components/chat/context/FilePill.vue'
-import IdeSelectionTag from '@renderer/components/chat/context/IdeSelectionTag.vue'
 import { contextTagRegistry } from './context-tag-registry'
 
 // environment_context 完全隐藏——直接 render null

@@ -112,8 +112,8 @@
 <script setup lang="ts">
 import AttachmentBar from '@renderer/components/chat/AttachmentBar.vue'
 import { Button } from '@renderer/components/ui/button'
-import { useChatInputStore } from '@renderer/stores/chat-input'
 import { useBackendStore } from '@renderer/stores/backend'
+import { useChatInputStore } from '@renderer/stores/chat-input'
 import { useMessageStore } from '@renderer/stores/message'
 import { useSettingsStore } from '@renderer/stores/settings'
 import type { ContextBlock, EffortLevel, PermissionMode } from '@shared/backend/types'
@@ -143,8 +143,7 @@ const prompt = ref('')
 
 const canSend = computed(
   () =>
-    (prompt.value.trim().length > 0 || chatInput.pendingAttachments.length > 0) &&
-    !props.disabled,
+    (prompt.value.trim().length > 0 || chatInput.pendingAttachments.length > 0) && !props.disabled,
 )
 
 const supportedEfforts = computed<EffortLevel[]>(() => {

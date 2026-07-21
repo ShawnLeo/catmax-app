@@ -4,38 +4,16 @@
  * 职责：
  * - 把 codex 的 commandExecution / fileChange / agentMessage / reasoning 等 item
  *   转成 TurnEvent（tool_call_started / text_delta 等）
- * - 评估 approval 的 riskLevel
+ * - 评估 approval 的 riskLevel（assessRisk 提到 shared，跟 claude 复用）
  * - 不接触字节流（那是 protocol.ts 的事）
  */
 import type { CodexItem } from '@shared/backend/schema'
 import type { ApprovalRequest, ToolCallInfo, ToolOutput } from '@shared/backend/types'
 
-/** 评估命令的风险等级（用于 approval UI 默认按钮焦点） */
-export function assessRisk(
-  kind: ApprovalRequest['kind'],
-  detail: string,
-): 'low' | 'medium' | 'high' {
-  if (kind === 'shell_command') {
-    if (
-      /^(git status|git log|git diff|git branch|ls|ll|cat|pwd|echo|grep|find|rg|fd|head|tail|wc|which)\b/.test(
-        detail,
-      )
-    ) {
-      return 'low'
-    }
-    if (
-      /\b(rm|git push --force|git push -f|git reset --hard|npm publish|sudo|chmod|chown|dd|mkfs|curl|wget)\b/.test(
-        detail,
-      )
-    ) {
-      return 'high'
-    }
-    return 'medium'
-  }
-  if (kind === 'file_edit') return 'medium'
-  if (kind === 'mcp') return 'medium'
-  return 'medium'
-}
+import { assessRisk } from '../shared/assess-risk'
+
+// 重新导出——codex adapter 其他文件可能 import from './mapping'
+export { assessRisk }
 
 type CommandExecutionItem = Extract<CodexItem, { type: 'command_execution' }>
 type FileChangeItem = Extract<CodexItem, { type: 'file_change' }>

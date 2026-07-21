@@ -26,8 +26,8 @@ import type {
   ToolUseContent,
   UserMessage,
 } from '@shared/backend/claude-schema'
-import { extractContextTags } from '@shared/backend/context-tags'
 import { sharedContextTagExtractors } from '@shared/backend/context-tag-handlers'
+import { extractContextTags } from '@shared/backend/context-tags'
 import type { NormalizedMessage, ToolCallInfo } from '@shared/backend/types'
 
 import { toolResultToOutput, toolUseToInfo } from './mapping'

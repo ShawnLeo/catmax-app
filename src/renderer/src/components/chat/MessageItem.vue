@@ -48,10 +48,7 @@
           - 绿色脉冲 = 运行中（有工具 running 或流式输出）
           - 红色 = 有工具失败
       -->
-      <div
-        v-else
-        class="relative pl-6 border-l border-border/40"
-      >
+      <div v-else class="relative pl-6 border-l border-border/40">
         <!-- 唯一的起始色点 -->
         <span
           :class="['absolute w-2 h-2 rounded-full -left-[5px] top-1.5', assistantStatusClass]"
@@ -118,9 +115,7 @@ const hasAnyUserContent = computed(() => {
  * 当前规则：只有 claude Read 工具（kind=file_read + title "Read: ..."）走内联。
  * Glob / Grep 虽然也是 file_read，但 title 是 "Glob: ..."/"Grep: ..."，仍走卡片。
  */
-function isInlineTool(
-  tool: NonNullable<NormalizedMessage['toolBlocks']>[number],
-): boolean {
+function isInlineTool(tool: NonNullable<NormalizedMessage['toolBlocks']>[number]): boolean {
   return tool.info.kind === 'file_read' && /^Read:/.test(tool.info.title)
 }
 

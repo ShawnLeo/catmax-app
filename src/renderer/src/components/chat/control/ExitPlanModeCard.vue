@@ -8,11 +8,7 @@
       <ClipboardCheckIcon class="w-3 h-3" />
       <span>已退出计划模式，方案如下：</span>
     </div>
-    <MarkdownView
-      v-if="control.plan"
-      :text="control.plan"
-      class="text-[14px] text-foreground"
-    />
+    <MarkdownView v-if="control.plan" :text="control.plan" class="text-[14px] text-foreground" />
     <div v-else class="text-[13px] text-muted-foreground italic">（无方案内容）</div>
   </div>
 </template>

@@ -11,10 +11,7 @@
     用于 Read 工具——输出本来就是文件内容，没必要展开看。
     Glob / Grep 仍走 ToolCallCard（它们是搜索类，展开能看到匹配结果）。
   -->
-  <div
-    class="flex items-center gap-2 py-1 text-[12px]"
-    :title="fullPath"
-  >
+  <div class="flex items-center gap-2 py-1 text-[12px]" :title="fullPath">
     <component
       :is="iconForKind(tool.info.kind)"
       class="w-3 h-3 text-muted-foreground flex-shrink-0"
@@ -25,8 +22,8 @@
 </template>
 
 <script setup lang="ts">
-import type { NormalizedMessage } from '@shared/backend/types'
 import { basename } from '@renderer/lib/path'
+import type { NormalizedMessage } from '@shared/backend/types'
 import { FileSearchIcon } from 'lucide-vue-next'
 import { computed } from 'vue'
 

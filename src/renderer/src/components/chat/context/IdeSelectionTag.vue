@@ -16,9 +16,9 @@
       <TextSelectIcon class="w-3.5 h-3.5 flex-shrink-0" />
       <span class="leading-tight">
         Selected {{ lineCount }} {{ lineCount === 1 ? 'line' : 'lines' }} from
-        <span class="font-mono text-[12px]">{{ shortPath }}:{{ data.startLine }}-{{
-          data.endLine
-        }}</span>
+        <span class="font-mono text-[12px]"
+          >{{ shortPath }}:{{ data.startLine }}-{{ data.endLine }}</span
+        >
       </span>
       <ChevronDownIcon
         :class="['w-3 h-3 flex-shrink-0 transition-transform', expanded ? 'rotate-180' : '']"
@@ -38,9 +38,9 @@
 </template>
 
 <script setup lang="ts">
-import type { IdeSelectionData } from '@shared/backend/context-tag-types'
 import { renderMarkdown } from '@renderer/lib/markdown'
 import { basename } from '@renderer/lib/path'
+import type { IdeSelectionData } from '@shared/backend/context-tag-types'
 import { ChevronDownIcon, TextSelectIcon } from 'lucide-vue-next'
 import { computed, ref, watch } from 'vue'
 

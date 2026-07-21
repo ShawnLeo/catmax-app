@@ -24,7 +24,11 @@ export type BackendHandlers = {
 
 /** 主→渲染推送事件类型 */
 export type BackendPushEvents = {
-  'backend:turnEvent': { turnId: string; event: TurnEvent }
+  /**
+   * turn 事件——envelope 带 sessionId 让 renderer 把事件路由到对应 session 状态
+   * （多 turn 并发时各个 session 的事件互不串台）。
+   */
+  'backend:turnEvent': { turnId: string; sessionId: string; event: TurnEvent }
   'backend:switched': { id: BackendId }
   'backend:statusChanged': { status: BackendStatus }
 }

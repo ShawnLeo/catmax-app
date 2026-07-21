@@ -113,8 +113,8 @@
 </template>
 
 <script setup lang="ts">
-import type { NormalizedMessage } from '@shared/backend/types'
 import { basename } from '@renderer/lib/path'
+import type { NormalizedMessage } from '@shared/backend/types'
 import {
   BotIcon,
   ChevronDownIcon,
@@ -130,11 +130,11 @@ import { computed, ref, type Component } from 'vue'
 import AskUserQuestionCard from './control/AskUserQuestionCard.vue'
 import EnterPlanModeCard from './control/EnterPlanModeCard.vue'
 import ExitPlanModeCard from './control/ExitPlanModeCard.vue'
-import TaskCard from './task/TaskCard.vue'
 import TodoWriteCard from './control/TodoWriteCard.vue'
-import WebCard from './web/WebCard.vue'
 import DiffView from './DiffView.vue'
 import MarkdownView from './MarkdownView.vue'
+import TaskCard from './task/TaskCard.vue'
+import WebCard from './web/WebCard.vue'
 
 const props = defineProps<{
   tool: NonNullable<NormalizedMessage['toolBlocks']>[number]

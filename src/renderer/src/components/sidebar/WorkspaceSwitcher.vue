@@ -65,7 +65,11 @@ async function selectWorkspace(id: string): Promise<void> {
   // 重新加载该工作区的 sessions
   if (workspaceStore.currentWorkspace) {
     const { useSessionStore } = await import('@renderer/stores/session')
+    const { useMessageStore } = await import('@renderer/stores/message')
     const sessionStore = useSessionStore()
+    const messageStore = useMessageStore()
+    // 切工作区彻底清空——不同工作区的 session 状态不混用
+    messageStore.resetAll()
     await sessionStore.load(workspaceStore.currentWorkspace.id)
   }
 }

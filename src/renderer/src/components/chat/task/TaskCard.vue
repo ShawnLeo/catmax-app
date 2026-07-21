@@ -19,8 +19,7 @@
       <pre
         class="font-mono text-[12px] text-muted-foreground whitespace-pre-wrap break-words leading-relaxed"
         :class="expanded ? '' : 'line-clamp-3'"
-        >{{ task.prompt }}</pre
-      >
+        >{{ task.prompt }}</pre>
       <button
         v-if="task.prompt.split('\n').length > 3 || task.prompt.length > 200"
         class="text-[11px] text-primary hover:underline mt-1"
