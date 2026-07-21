@@ -62,36 +62,13 @@
             <RefreshCwIcon class="w-3 h-3" :class="refreshing ? 'animate-spin' : ''" />
           </button>
 
-          <!-- Effort -->
-          <select
-            :value="modelValue.effort"
-            class="bg-secondary text-secondary-foreground text-xs px-2 py-1 rounded border-0 focus:outline-none"
-            title="推理强度"
-            @change="onEffortChange"
-          >
-            <option :value="null">(default)</option>
-            <option v-for="e in supportedEfforts" :key="e" :value="e">
-              {{ e }}
-            </option>
-          </select>
-
-          <!-- Thinking 开关--OFF 时压低模型 reasoning（codex effort='none'，claude --effort low）
-               并隐藏对话里的思考块。用脑图标按钮，激活态高亮。 -->
-          <button
-            v-if="supportsThinking"
-            type="button"
-            class="flex items-center gap-1 px-2 py-1 rounded transition-colors"
-            :class="
-              modelValue.thinking
-                ? 'bg-primary/15 text-primary'
-                : 'bg-secondary text-secondary-foreground/50 hover:text-secondary-foreground'
-            "
-            :title="modelValue.thinking ? '思考：开（点击关闭）' : '思考：关（点击开启）'"
-            @click="onThinkingToggle"
-          >
-            <BrainIcon class="w-3 h-3" />
-            <span class="text-[11px]">思考</span>
-          </button>
+          <!-- 思考强度（合并了旧 effort select + thinking 开关到同一数轴）
+               点击展开横向档位滑块；max 档启用紫色脉冲动画。 -->
+          <ThinkingSlider
+            :model-value="modelValue.effort ?? 'medium'"
+            :supported="supportedEfforts"
+            @update:model-value="onEffortSelect"
+          />
 
           <!-- Permission Mode -->
           <select
@@ -140,20 +117,20 @@
 
 <script setup lang="ts">
 import AttachmentBar from '@renderer/components/chat/AttachmentBar.vue'
+import ThinkingSlider from '@renderer/components/chat/ThinkingSlider.vue'
 import { Button } from '@renderer/components/ui/button'
 import { useBackendStore } from '@renderer/stores/backend'
 import { useChatInputStore } from '@renderer/stores/chat-input'
 import { useMessageStore } from '@renderer/stores/message'
 import { useSettingsStore } from '@renderer/stores/settings'
 import type { ContextBlock, EffortLevel, PermissionMode } from '@shared/backend/types'
-import { ArrowUpIcon, BrainIcon, RefreshCwIcon, SquareIcon } from 'lucide-vue-next'
+import { ArrowUpIcon, RefreshCwIcon, SquareIcon } from 'lucide-vue-next'
 import { ref, computed } from 'vue'
 
 interface RuntimeConfigValue {
   model: string | null
   effort: EffortLevel | null
   permissionMode: PermissionMode
-  thinking: boolean
 }
 
 const props = defineProps<{
@@ -189,10 +166,6 @@ const canSend = computed(
 
 const supportedEfforts = computed<EffortLevel[]>(() => {
   return backendStore.current?.capabilities.supportedEfforts ?? ['low', 'medium', 'high']
-})
-
-const supportsThinking = computed<boolean>(() => {
-  return backendStore.current?.capabilities.supportsThinking ?? false
 })
 
 const supportedPermissionModes = computed<PermissionMode[]>(() => {
@@ -291,9 +264,7 @@ function onModelChange(e: Event): void {
   emit('update:modelValue', { ...props.modelValue, model: value })
 }
 
-function onEffortChange(e: Event): void {
-  const target = e.target as HTMLSelectElement
-  const value = (target.value === 'null' ? null : target.value) as EffortLevel | null
+function onEffortSelect(value: EffortLevel): void {
   emit('update:modelValue', { ...props.modelValue, effort: value })
 }
 
@@ -301,9 +272,5 @@ function onPermissionModeChange(e: Event): void {
   const target = e.target as HTMLSelectElement
   const value = target.value as PermissionMode
   emit('update:modelValue', { ...props.modelValue, permissionMode: value })
-}
-
-function onThinkingToggle(): void {
-  emit('update:modelValue', { ...props.modelValue, thinking: !props.modelValue.thinking })
 }
 </script>

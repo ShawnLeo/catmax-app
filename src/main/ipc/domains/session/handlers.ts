@@ -57,7 +57,6 @@ export const createSession = async (args: CreateSessionArgs): Promise<{ sessionI
   if (args.effort !== undefined) startArgs.effort = args.effort
   if (args.permissionMode !== undefined) startArgs.permissionMode = args.permissionMode
   if (args.initialPrompt !== undefined) startArgs.initialPrompt = args.initialPrompt
-  if (args.thinking !== undefined) startArgs.thinking = args.thinking
   const { backendThreadId } = await ctx.backendManager.startSession(startArgs)
 
   // 写入 db

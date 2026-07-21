@@ -33,6 +33,9 @@
   --color-success: oklch(70% 0.15 145);
   --color-warning: oklch(75% 0.15 85);
   --color-danger: oklch(65% 0.2 25);
+  /* 紫色——给 max effort 档（"极致性能"视觉强调）专用，区别于蓝色主色 */
+  --color-brain: oklch(65% 0.25 300);
+  --color-brain-foreground: oklch(98% 0.02 300);
 
   /* Layer 2: 语义 token */
   --background: var(--color-gray-100);
@@ -51,6 +54,8 @@
   --accent-foreground: var(--color-gray-0);
   --destructive: var(--color-danger);
   --destructive-foreground: var(--color-gray-0);
+  --brain: var(--color-brain);
+  --brain-foreground: var(--color-brain-foreground);
   --border: oklch(28% 0.005 250 / 0.7);
   --input: oklch(28% 0.005 250);
   --ring: var(--color-brand-500);
@@ -95,6 +100,9 @@
   --color-success: oklch(55% 0.16 145);
   --color-warning: oklch(70% 0.16 85);
   --color-danger: oklch(55% 0.22 25);
+  /* 紫色——dark 端饱和度高一些以便白底可见 */
+  --color-brain: oklch(55% 0.28 300);
+  --color-brain-foreground: oklch(98% 0.02 300);
 
   /* Layer 2 */
   --background: var(--color-gray-50);
@@ -113,6 +121,8 @@
   --accent-foreground: var(--color-gray-0);
   --destructive: var(--color-danger);
   --destructive-foreground: var(--color-gray-0);
+  --brain: var(--color-brain);
+  --brain-foreground: var(--color-brain-foreground);
   --border: oklch(90% 0.003 80);
   --input: oklch(90% 0.003 80);
   --ring: var(--color-brand-500);

@@ -61,8 +61,6 @@ export const useSessionStore = defineStore('session', () => {
     effort?: EffortLevel
     permissionMode?: PermissionMode
     initialPrompt?: string
-    /** per-turn 透传，不持久化到 db——见 CreateSessionArgs.thinking */
-    thinking?: boolean
   }): Promise<string> {
     const { sessionId } = await window.api.session.create(args)
     await load(args.workspaceId)

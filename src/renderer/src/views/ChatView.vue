@@ -10,7 +10,7 @@
       <MessageList
         v-if="messageStore.messages.length > 0"
         class="flex-1"
-        :show-thinking="runtimeConfig.thinking"
+        :show-thinking="runtimeConfig.effort !== 'none'"
       />
       <div v-else class="flex-1 flex items-center justify-center text-muted-foreground">
         <div class="text-center">
@@ -119,14 +119,12 @@ interface RuntimeConfig {
   model: string | null
   effort: EffortLevel | null
   permissionMode: PermissionMode
-  thinking: boolean
 }
 
 const runtimeConfig = ref<RuntimeConfig>({
   model: null,
   effort: 'medium',
   permissionMode: 'default',
-  thinking: true,
 })
 
 onMounted(async () => {
@@ -181,9 +179,6 @@ async function onSend(text: string, attachments: ContextBlock[]): Promise<void> 
 
   const model = runtimeConfig.value.model
   const effort = runtimeConfig.value.effort
-  // thinking=false 时压低/关闭 reasoning（claude --effort low，codex effort='none'）。
-  // 必须 per-turn 显式传——db 不持久化，下一轮 turn 不传就丢失。
-  const thinking = runtimeConfig.value.thinking
 
   // 如果还没 session，先创建
   let sessionId = sessionStore.currentSession?.id
@@ -201,7 +196,6 @@ async function onSend(text: string, attachments: ContextBlock[]): Promise<void> 
     }
     if (model !== null) createArgs.model = model
     if (effort !== null) createArgs.effort = effort
-    if (thinking === false) createArgs.thinking = false
     sessionId = await sessionStore.create(createArgs)
     sessionStore.setCurrent(sessionId)
     // messageStore 的 currentSessionId 跟 sessionStore 是两套 ref——
@@ -236,8 +230,6 @@ async function onSend(text: string, attachments: ContextBlock[]): Promise<void> 
   }
   if (model !== null) startArgs.model = model
   if (effort !== null) startArgs.effort = effort
-  // thinking=false 时覆盖 effort（OFF 优先级最高，见 adapter 注释）
-  if (thinking === false) startArgs.thinking = false
   await window.api.backend.startTurn(startArgs)
 }
 

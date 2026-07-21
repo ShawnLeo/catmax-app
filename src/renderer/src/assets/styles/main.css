@@ -20,6 +20,8 @@
   --color-accent-foreground: var(--accent-foreground);
   --color-destructive: var(--destructive);
   --color-destructive-foreground: var(--destructive-foreground);
+  --color-brain: var(--brain);
+  --color-brain-foreground: var(--brain-foreground);
   --color-border: var(--border);
   --color-input: var(--input);
   --color-ring: var(--ring);

@@ -192,7 +192,6 @@ export class BackendManager {
           supportsModelSelection: false,
           supportsEffort: false,
           supportsPermissionMode: false,
-          supportsThinking: false,
           supportedPermissionModes: [],
           supportedEfforts: [],
         },
@@ -252,6 +251,18 @@ export class BackendManager {
         for await (const event of adapter.startTurn(args)) {
           ctx.broadcast('backend:turnEvent', { turnId, sessionId: routeSessionId, event })
         }
+        // turn 成功完成——回写会话配置到 db。
+        // routeSessionId 是 catmax session.id（db PK），用它而非 args.sessionId
+        // （claude 第一次 turn 时 args.sessionId 是占位 UUID）。
+        // thinking 已合并进 effort（'none' 档），无需单独字段。
+        // COALESCE 保证 undefined 不覆盖已有值（model/effort/permissionMode 都 optional）。
+        ctx.db.bumpSessionTurn(
+          routeSessionId,
+          Date.now(),
+          args.model,
+          args.effort,
+          args.permissionMode,
+        )
         // turn 正常结束后，触发 aiTitle 刷新（claude 在 jsonl 里写了 ai-title 行）
         // 失败不阻塞——title 刷新失败不影响主流程
         if (backendId === 'claude') {
