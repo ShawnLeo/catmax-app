@@ -14,9 +14,13 @@
   -->
   <div>
     <div class="mx-auto max-w-3xl lg:max-w-screen-lg xl:max-w-[1280px] 2xl:max-w-[1440px] p-3">
-      <!-- 圆角输入容器 -->
+      <!-- 圆角输入容器
+           注意：不加 overflow-hidden——否则 DropdownMenu/ThinkingSlider 的弹层
+           会被容器裁切（弹层在按钮上方时超出容器上边界）。内部子元素的圆角
+           由各自的 rounded-* 控制，textarea/AttachmentBar 没有溢出元素，
+           容器自身圆角不会露出直角。-->
       <div
-        class="rounded-2xl border border-border bg-background overflow-hidden focus-within:border-primary/50 transition-colors"
+        class="rounded-2xl border border-border bg-background focus-within:border-primary/50 transition-colors"
       >
         <!-- 附件区 -->
         <AttachmentBar
