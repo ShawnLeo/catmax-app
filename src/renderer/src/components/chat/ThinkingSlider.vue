@@ -28,7 +28,7 @@
       @click="open = !open"
     >
       <BrainIcon
-        class="w-3.5 h-3.5 flex-shrink-0"
+        class="w-4 h-4 flex-shrink-0"
         :class="
           modelValue === 'none'
             ? 'text-muted-foreground/50'
@@ -150,7 +150,7 @@ function tierLabel(level: EffortLevel): string {
     case 'xhigh':
       return 'xhigh'
     case 'max':
-      return 'MAX'
+      return 'max'
   }
 }
 
