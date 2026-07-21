@@ -51,6 +51,17 @@
             </option>
           </select>
 
+          <!-- 刷新模型列表--清 main 端 cachedModelsPromise，重新拉一次 model/list -->
+          <button
+            type="button"
+            class="text-secondary-foreground/60 hover:text-secondary-foreground transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+            :disabled="refreshing"
+            title="刷新模型列表"
+            @click="onRefreshModels"
+          >
+            <RefreshCwIcon class="w-3 h-3" :class="refreshing ? 'animate-spin' : ''" />
+          </button>
+
           <!-- Effort -->
           <select
             :value="modelValue.effort"
@@ -117,7 +128,7 @@ import { useChatInputStore } from '@renderer/stores/chat-input'
 import { useMessageStore } from '@renderer/stores/message'
 import { useSettingsStore } from '@renderer/stores/settings'
 import type { ContextBlock, EffortLevel, PermissionMode } from '@shared/backend/types'
-import { ArrowUpIcon, SquareIcon } from 'lucide-vue-next'
+import { ArrowUpIcon, RefreshCwIcon, SquareIcon } from 'lucide-vue-next'
 import { ref, computed } from 'vue'
 
 interface RuntimeConfigValue {
@@ -140,6 +151,17 @@ const settingsStore = useSettingsStore()
 const backendStore = useBackendStore()
 const chatInput = useChatInputStore()
 const prompt = ref('')
+
+const refreshing = ref(false)
+async function onRefreshModels(): Promise<void> {
+  if (refreshing.value) return
+  refreshing.value = true
+  try {
+    await backendStore.refreshModels()
+  } finally {
+    refreshing.value = false
+  }
+}
 
 const canSend = computed(
   () =>

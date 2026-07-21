@@ -1,7 +1,8 @@
 <template>
   <!--
-    顶部配置条——只保留 backend 切换 + 模型刷新 + 连接状态。
+    顶部配置条--只保留 backend 切换 + 连接状态。
     Model / Effort / PermissionMode 已下沉到 Composer 底部（跟发送按钮平齐）。
+    刷新模型列表按钮也已随 Model 下沉到 Composer。
   -->
   <div class="border-b border-border px-4 py-2 flex items-center gap-2 bg-background">
     <!-- Backend -->
@@ -30,17 +31,6 @@
       </option>
     </select>
 
-    <!-- 刷新模型列表——清 main 端 cachedModelsPromise，重新拉一次 model/list -->
-    <button
-      type="button"
-      class="text-secondary-foreground/60 hover:text-secondary-foreground transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
-      :disabled="refreshing"
-      title="刷新模型列表"
-      @click="onRefreshModels"
-    >
-      <RefreshCwIcon class="w-3 h-3" :class="refreshing ? 'animate-spin' : ''" />
-    </button>
-
     <div class="flex-1" />
 
     <!-- Backend status -->
@@ -61,8 +51,7 @@
 import { explainBackendError } from '@renderer/lib/backend-error'
 import { useBackendStore } from '@renderer/stores/backend'
 import type { BackendId } from '@shared/constants'
-import { RefreshCwIcon } from 'lucide-vue-next'
-import { computed, ref } from 'vue'
+import { computed } from 'vue'
 
 const backendStore = useBackendStore()
 
@@ -75,16 +64,5 @@ const backendId = computed<BackendId>({
 
 function onBackendChange(): void {
   // backendId 的 setter 已经触发 switchTo
-}
-
-const refreshing = ref(false)
-async function onRefreshModels(): Promise<void> {
-  if (refreshing.value) return
-  refreshing.value = true
-  try {
-    await backendStore.refreshModels()
-  } finally {
-    refreshing.value = false
-  }
 }
 </script>
