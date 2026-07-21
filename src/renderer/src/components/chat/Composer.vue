@@ -35,7 +35,7 @@
           :placeholder="disabled ? '后端未连接...' : '发送消息...（Shift+Enter 换行）'"
           :disabled="disabled"
           rows="3"
-          class="w-full bg-transparent font-chat text-[15px] text-foreground px-4 py-3 resize-none focus:outline-none disabled:opacity-50"
+          class="w-full bg-transparent font-chat text-[15px] text-foreground px-4 py-3 resize-none focus:outline-none placeholder:text-muted-foreground/60 disabled:opacity-50"
           @keydown="onKeyDown"
           @paste="onPaste"
         />
