@@ -153,9 +153,11 @@ const textBlocks = computed<TextBlock[]>(() =>
  *      光看 endedAt === undefined 会把所有历史消息误判成"还在思考"。
  *      必须叠加 turn 在跑的判据把历史排除掉。
  *   2. 该 reasoning 块没有 endedAt（turn 还没写结束标记）——
- *      isRunning 是必要的但不够（极端 race：turn_completed 已清 isRunning，
- *      但 messageStore 还在批量处理 events，这帧 endedAt 可能还没写），
- *      叠加 endedAt === undefined 才精确。
+ *      endedAt 在以下任一事件触发时被写入（见 markReasoningEnded）：
+ *        - text_delta（正文开始）
+ *        - tool_call_started（开始调工具 = 这轮想清楚了）
+ *        - turn_completed / error（兜底）
+ *      没写就说明这三类后续事件都还没到，思考确实还在进行。
  */
 function isReasoningStreaming(block: TextBlock): boolean {
   if (!messageStore.isRunning) return false

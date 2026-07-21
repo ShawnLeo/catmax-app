@@ -209,6 +209,11 @@ export const useMessageStore = defineStore('message', () => {
           info: event.tool,
           status: 'running',
         })
+        // 模型决定调工具 = "这轮想清楚了"，等工具返回再继续。
+        // 工具调用开始即结束 thinking（跟 text_delta 同样的处理）。
+        // 否则像 thinking → tool → tool_result → text 这种序列，
+        // 整个工具执行期间会错误地卡在 "thinking..." 动画。
+        markReasoningEnded(s, event.turnId, Date.now())
         break
       }
       case 'tool_call_completed': {
@@ -276,12 +281,13 @@ export const useMessageStore = defineStore('message', () => {
    * 幂等：已结束的块（有 endedAt）不动。
    *
    * 调用时机：
-   *   - text_delta 首次到达（正文开始 → 思考结束，最常见路径）
-   *   - turn_completed（兜底：纯思考无正文的场景）
+   *   - text_delta 首次到达（正文开始 → 思考结束）
+   *   - tool_call_started 首次到达（模型决定调工具 = 想清楚了，等结果再继续思考）
+   *   - turn_completed（兜底：纯思考无正文/工具）
    *   - 不可恢复 error（避免 header 永远停在 thinking...）
    *
-   * 跨 message 扫描的原因：reasoning 和 text 通常落在不同 itemId → 不同 NormalizedMessage，
-   * 只扫当前 message 会漏掉。
+   * 跨 message 扫描的原因：reasoning 和 text/tool 通常落在不同 itemId → 不同
+   * NormalizedMessage，只扫当前 message 会漏掉。
    */
   function markReasoningEnded(s: SessionState, turnId: string, now: number): void {
     for (const m of s.messages) {
