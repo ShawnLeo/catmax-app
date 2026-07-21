@@ -147,15 +147,19 @@ const textBlocks = computed<TextBlock[]>(() =>
 /**
  * 判断某条 reasoning 块是否还在实时流式输出。
  *
- * 数据驱动：reasoning 块上的 endedAt 字段就是"思考是否结束"的真相。
- *   - endedAt === undefined → 还在思考中（thinking... 动画）
- *   - endedAt !== undefined → 已结束，展示 "已思考 + 时长"
- *
- * endedAt 由 messageStore 在以下任一时机写入（见 markReasoningEnded）：
- *   - 同 turn 首次收到 text_delta（正文开始 → 思考结束，最常见）
- *   - turn_completed / 不可恢复 error（兜底，避免永久卡在 thinking...）
+ * 两个必要条件都满足才认为还在思考：
+ *   1. 当前 turn 正在跑（isRunning && turnId === currentTurnId）——
+ *      历史消息反推的 reasoning 块没有 endedAt（磁盘 jsonl 不带这个字段），
+ *      光看 endedAt === undefined 会把所有历史消息误判成"还在思考"。
+ *      必须叠加 turn 在跑的判据把历史排除掉。
+ *   2. 该 reasoning 块没有 endedAt（turn 还没写结束标记）——
+ *      isRunning 是必要的但不够（极端 race：turn_completed 已清 isRunning，
+ *      但 messageStore 还在批量处理 events，这帧 endedAt 可能还没写），
+ *      叠加 endedAt === undefined 才精确。
  */
 function isReasoningStreaming(block: TextBlock): boolean {
+  if (!messageStore.isRunning) return false
+  if (props.message.turnId !== messageStore.currentTurnId) return false
   return block.endedAt === undefined
 }
 
