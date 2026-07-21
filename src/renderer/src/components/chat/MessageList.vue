@@ -8,7 +8,19 @@
         <div class="animate-pulse text-sm">加载历史中...</div>
       </div>
     </div>
-    <div v-else class="max-w-3xl mx-auto px-6 py-4 flex flex-col gap-6">
+    <!--
+      响应式宽度（两段式）：
+        小窗 <640px   → 跟随窗口（仅 px-6 边距）
+        sm ≥640px     → 768px (max-w-3xl)
+        lg ≥1024px    → 1024px (max-w-screen-lg)
+        xl ≥1280px    → 1280px
+        2xl ≥1536px   → 1440px（终极上限，超宽屏不会再变宽）
+      mx-auto 居中。Composer 用同样的 class 保持对齐。
+    -->
+    <div
+      v-else
+      class="mx-auto px-6 py-4 flex flex-col gap-6 max-w-3xl lg:max-w-screen-lg xl:max-w-[1280px] 2xl:max-w-[1440px]"
+    >
       <MessageItem v-for="message in messageStore.messages" :key="message.id" :message="message" />
 
       <!-- 错误提示（codex/claude 调 API 失败时 messageStore.lastError 会被设置） -->

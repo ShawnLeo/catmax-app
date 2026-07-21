@@ -5,7 +5,7 @@
 
     <!-- 主聊天区 -->
     <div class="flex-1 flex flex-col min-w-0">
-      <RuntimeConfigBar :model-value="runtimeConfig" @update:model-value="runtimeConfig = $event" />
+      <RuntimeConfigBar />
 
       <MessageList v-if="messageStore.messages.length > 0" class="flex-1" />
       <div v-else class="flex-1 flex items-center justify-center text-muted-foreground">
@@ -20,7 +20,11 @@
 
       <ApprovalDialog v-if="messageStore.pendingApproval" />
 
-      <Composer :disabled="!backendStore.isAvailable" @send="onSend" />
+      <Composer
+        :disabled="!backendStore.isAvailable"
+        v-model="runtimeConfig"
+        @send="onSend"
+      />
     </div>
 
     <!-- 右栏切换按钮（floating） -->

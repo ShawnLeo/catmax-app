@@ -158,7 +158,9 @@ function onClick(e: MouseEvent): void {
  * 这里用 ::-webkit-scrollbar 强制常驻细滚动条，跟 VS Code 行为一致。
  */
 .markdown-body :deep(.code-block-wrapper pre) {
-  @apply my-0 p-3 rounded-none border-0;
+  /* 字号对齐工具卡片（ToolCallCard 的 pre 也是 text-[12px]）——
+     默认继承外层正文 15px 会让代码块看着比工具框代码大很多，不协调。 */
+  @apply my-0 p-3 rounded-none border-0 text-[12px];
   overflow-x: auto;
 }
 .markdown-body :deep(.code-block-wrapper pre code) {
