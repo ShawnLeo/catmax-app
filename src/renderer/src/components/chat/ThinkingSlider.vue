@@ -1,57 +1,79 @@
 <template>
   <!--
-    思考强度控件——圆点轨道（对齐 Claude Code）。
+    思考强度控件——trigger 按钮 + 弹出圆点轨道。
 
-    N 个小圆点排成横线，当前档位的圆点实心填充（亮色），其他档位灰阶递减：
-      - 当前选中档：实心 foreground 色（dark 下亮白、light 下深灰）
-      - 左侧已"经过"档：中灰（muted-foreground/70）
-      - 右侧未到达档：暗灰（muted-foreground/30）
+    跟 DropdownMenu 视觉/交互模式对齐（placement=top 向上展开），
+    但弹层内容是圆点轨道而非选项列表。
 
-    max 档激活时：该圆点变紫色填充 + 脉冲动画 + 稍大尺寸，表示极致性能。
+    折叠态：脑图标 + 当前档位 label + chevron。点击展开弹层。
+    弹层：横向 N 个圆点（'none' 永远在最前），当前档位实心填充：
+      - 选中档：实心 foreground 色
+      - 左侧已"经过"档：中灰
+      - 右侧未到达档：暗灰
+      - max 选中：紫色填充 + 脉冲 + 稍大
 
-    'none' 永远在最前（虚拟档，表示关闭思考）。
-    点击任意圆点即切到该档；hover 显示 tooltip 文案。
+    两种交互（跟原生 slider 一致）：
+      - 单击圆点：切到该档
+      - 按住鼠标拖拽：跟随光标所在圆点实时切档（pointer events，
+        兼容鼠标和触摸屏）
+
+    'none' = 关闭思考（codex 零 reasoning token；claude 压到 low）。
   -->
-  <div
-    ref="rootEl"
-    class="relative flex items-center gap-1.5 px-2 py-1.5 rounded transition-colors hover:bg-accent/50"
-    :title="triggerTitle"
-  >
-    <BrainIcon
-      class="w-3 h-3 flex-shrink-0"
-      :class="
-        modelValue === 'none'
-          ? 'text-muted-foreground/50'
-          : isMax
-            ? 'text-brain'
-            : 'text-foreground'
-      "
-    />
+  <div ref="rootEl" class="relative inline-block">
+    <!-- 折叠态触发按钮（跟 DropdownMenu trigger 同款样式） -->
+    <button
+      type="button"
+      :title="triggerTitle"
+      class="flex items-center gap-1 px-2 py-1 rounded text-xs transition-colors bg-secondary text-secondary-foreground hover:bg-accent hover:text-accent-foreground focus:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+      @click="open = !open"
+    >
+      <BrainIcon
+        class="w-3 h-3 flex-shrink-0"
+        :class="
+          modelValue === 'none'
+            ? 'text-muted-foreground/50'
+            : isMax
+              ? 'text-brain'
+              : 'text-foreground'
+        "
+      />
+      <span class="truncate">{{ tierLabel(modelValue) }}</span>
+      <ChevronDownIcon
+        class="w-2.5 h-2.5 flex-shrink-0 transition-transform"
+        :class="open ? 'rotate-180' : ''"
+      />
+    </button>
 
-    <!-- 圆点轨道 -->
-    <div class="flex items-center gap-1.5">
-      <button
-        v-for="level in levels"
-        :key="level"
-        type="button"
-        class="p-0.5 transition-all duration-150 cursor-pointer"
-        :class="level === 'max' && isMax ? 'animate-pulse' : ''"
-        :title="tierTitle(level)"
-        @click="onSelect(level)"
-      >
-        <span
-          class="block rounded-full transition-all duration-150"
-          :class="[level === 'max' && isMax ? 'w-2 h-2' : 'w-1.5 h-1.5', dotFillClass(level)]"
-        />
-      </button>
+    <!-- 弹出圆点轨道（placement=top 向上展开，避开窗口底部遮挡） -->
+    <div
+      v-if="open"
+      class="absolute bottom-full mb-1 left-0 z-50 rounded-md border border-border bg-popover p-2 shadow-lg"
+    >
+      <div ref="trackEl" class="flex items-center gap-2 select-none" @pointerdown="onPointerDown">
+        <button
+          v-for="level in levels"
+          :key="level"
+          ref="dotRefs"
+          type="button"
+          class="p-1 transition-all duration-150 cursor-pointer"
+          :class="level === 'max' && isMax ? 'animate-pulse' : ''"
+          :title="tierTitle(level)"
+          @click="onDotClick(level)"
+        >
+          <span
+            class="block rounded-full transition-all duration-150"
+            :class="[level === 'max' && isMax ? 'w-2.5 h-2.5' : 'w-2 h-2', dotFillClass(level)]"
+          />
+        </button>
+      </div>
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
 import type { EffortLevel } from '@shared/backend/types'
-import { BrainIcon } from 'lucide-vue-next'
-import { computed } from 'vue'
+import { BrainIcon, ChevronDownIcon } from 'lucide-vue-next'
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 
 const props = defineProps<{
   /** 当前 effort 值（双向绑定，v-model） */
@@ -62,6 +84,15 @@ const props = defineProps<{
 const emit = defineEmits<{
   'update:modelValue': [value: EffortLevel]
 }>()
+
+const open = ref(false)
+const rootEl = ref<HTMLElement | null>(null)
+const trackEl = ref<HTMLElement | null>(null)
+/** 圆点 button 数组——拖拽时用 elementFromPoint 反查光标下的圆点 */
+const dotRefs = ref<HTMLElement[]>([])
+
+/** 是否处于拖拽中——拖拽中不响应 click（避免 pointerup 后又触发 click 重复切档） */
+const dragging = ref(false)
 
 const isMax = computed(() => props.modelValue === 'max')
 
@@ -76,9 +107,9 @@ const levels = computed<EffortLevel[]>(() => {
 })
 
 const triggerTitle = computed(() => {
-  if (props.modelValue === 'none') return '思考：关（点击圆点调节）'
-  if (isMax.value) return '思考：极致性能（点击圆点调节）'
-  return `思考：${tierLabel(props.modelValue)}（点击圆点调节）`
+  if (props.modelValue === 'none') return '思考：关（点击调节）'
+  if (isMax.value) return '思考：极致性能（点击调节）'
+  return `思考：${tierLabel(props.modelValue)}（点击调节）`
 })
 
 /**
@@ -105,7 +136,7 @@ function dotFillClass(level: EffortLevel): string {
   return 'bg-muted-foreground/30'
 }
 
-/** 档位 → UI 文案（用于 tooltip 和 triggerTitle 拼接） */
+/** 档位 → UI 文案（用于 trigger 按钮显示和 tooltip） */
 function tierLabel(level: EffortLevel): string {
   switch (level) {
     case 'none':
@@ -141,7 +172,86 @@ function tierTitle(level: EffortLevel): string {
   }
 }
 
-function onSelect(level: EffortLevel): void {
-  emit('update:modelValue', level)
+function select(level: EffortLevel): void {
+  if (level !== props.modelValue) {
+    emit('update:modelValue', level)
+  }
 }
+
+/** 单击圆点切档——拖拽中不响应（pointerup 后浏览器会补发一次 click） */
+function onDotClick(level: EffortLevel): void {
+  if (dragging.value) return
+  select(level)
+}
+
+/**
+ * clickOutside 收起弹层——点弹层外任意位置时关闭。
+ * 跟 DropdownMenu 的实现一致（capture 阶段抓事件）。
+ */
+function handleOutsideClick(e: MouseEvent): void {
+  if (!open.value) return
+  if (rootEl.value && !rootEl.value.contains(e.target as Node)) {
+    open.value = false
+  }
+}
+
+/**
+ * 拖拽起点：pointerdown 时立刻选中当前光标下的圆点，并挂上全局 pointermove/up 监听。
+ * 用 Pointer Events 而非 Mouse Events——同时覆盖鼠标、触摸屏、触控笔。
+ *
+ * 实现思路（跟 input[type=range] 一致）：
+ *   1. pointerdown → 立刻 select 光标下的圆点 + 标记 dragging
+ *   2. pointermove（document 级）→ 用 elementFromPoint 找光标下的圆点，select
+ *   3. pointerup（document 级）→ 清 dragging + 移除监听 + 防止后续 click
+ */
+function onPointerDown(e: PointerEvent): void {
+  if (!trackEl.value) return
+  // 阻止默认的 drag/选区行为（虽然 button 本身不会拖拽，但保险起见）
+  e.preventDefault()
+
+  dragging.value = true
+  selectDotAtPoint(e.clientX, e.clientY)
+
+  document.addEventListener('pointermove', onPointerMove)
+  document.addEventListener('pointerup', onPointerUp)
+}
+
+function onPointerMove(e: PointerEvent): void {
+  if (!dragging.value) return
+  selectDotAtPoint(e.clientX, e.clientY)
+}
+
+function onPointerUp(): void {
+  dragging.value = false
+  document.removeEventListener('pointermove', onPointerMove)
+  document.removeEventListener('pointerup', onPointerUp)
+}
+
+/**
+ * 用 elementFromPoint 反查光标位置对应的圆点 button，找到就 select 对应档位。
+ * 圆点本身较小（2×2），pointermove 时光标可能落在 button 的 padding 区域——
+ * elementFromPoint 会返回最顶层的元素，可能是 button 本身、里面的 span、或 button 间的 gap。
+ * 用 closest('button') 兜底找最近的可点 button。
+ */
+function selectDotAtPoint(x: number, y: number): void {
+  const el = document.elementFromPoint(x, y) as Element | null
+  if (!el) return
+  // 落在 button 上（或里面的 span）——closest 一直往上找直到 button
+  const button = el.closest('button')
+  if (!button) return
+  const idx = dotRefs.value.indexOf(button as HTMLElement)
+  if (idx === -1) return
+  select(levels.value[idx]!)
+}
+
+onMounted(() => {
+  document.addEventListener('click', handleOutsideClick, true)
+})
+
+onBeforeUnmount(() => {
+  // 组件卸载时若还挂着拖拽监听，要清理掉防止 leak
+  document.removeEventListener('pointermove', onPointerMove)
+  document.removeEventListener('pointerup', onPointerUp)
+  document.removeEventListener('click', handleOutsideClick, true)
+})
 </script>
