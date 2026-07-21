@@ -17,12 +17,12 @@
       type="button"
       :title="title"
       :disabled="disabled"
-      class="flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-[13px] transition-colors bg-secondary text-secondary-foreground hover:bg-accent hover:text-accent-foreground disabled:opacity-50 disabled:cursor-not-allowed focus:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+      class="flex items-center gap-2 px-3 py-2 rounded-md text-sm transition-colors bg-secondary text-secondary-foreground hover:bg-accent hover:text-accent-foreground disabled:opacity-50 disabled:cursor-not-allowed focus:outline-none focus-visible:ring-1 focus-visible:ring-ring"
       @click="onTriggerClick"
     >
-      <span class="truncate max-w-[160px]">{{ triggerLabel }}</span>
+      <span class="truncate max-w-[180px]">{{ triggerLabel }}</span>
       <ChevronDownIcon
-        class="w-3 h-3 flex-shrink-0 transition-transform"
+        class="w-3.5 h-3.5 flex-shrink-0 transition-transform"
         :class="open ? 'rotate-180' : ''"
       />
     </button>
@@ -30,7 +30,7 @@
     <div
       v-if="open"
       :class="[
-        'absolute z-50 min-w-[10rem] max-w-[18rem] rounded-md border border-border bg-popover p-1 shadow-lg',
+        'absolute z-50 min-w-[12rem] max-w-[20rem] rounded-md border border-border bg-popover p-1 shadow-lg',
         placement === 'top' ? 'bottom-full mb-1' : 'mt-1',
         align === 'right' ? 'right-0' : 'left-0',
       ]"
@@ -41,15 +41,12 @@
         type="button"
         :disabled="opt.disabled"
         :title="opt.title"
-        class="w-full flex items-center gap-2 px-2.5 py-1.5 rounded text-[13px] text-left transition-colors text-popover-foreground hover:bg-accent hover:text-accent-foreground disabled:opacity-40 disabled:cursor-not-allowed"
+        class="w-full flex items-center gap-2.5 px-3 py-2 rounded text-sm text-left transition-colors text-popover-foreground hover:bg-accent hover:text-accent-foreground disabled:opacity-40 disabled:cursor-not-allowed"
         :class="opt.value === modelValue ? 'bg-accent/60 text-accent-foreground' : ''"
         @click="onSelect(opt.value)"
       >
-        <CheckIcon
-          v-if="opt.value === modelValue"
-          class="w-3.5 h-3.5 flex-shrink-0 text-foreground"
-        />
-        <span v-else class="w-3.5 h-3.5 flex-shrink-0" />
+        <CheckIcon v-if="opt.value === modelValue" class="w-4 h-4 flex-shrink-0 text-foreground" />
+        <span v-else class="w-4 h-4 flex-shrink-0" />
         <span class="truncate flex-1">{{ opt.label }}</span>
       </button>
     </div>
