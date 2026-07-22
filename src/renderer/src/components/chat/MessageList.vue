@@ -128,18 +128,26 @@ function snapToBottom(): void {
   showScrollToBottom.value = false
 }
 
-// 自动滚到底部，三种触发：
+// 自动滚到底部，四种触发：
 //   1. 流式输出时：messages 数组 push 新内容（length 增加）
 //   2. 切换 session：setMessages 替换数组引用 + currentSessionId 变化
 //      光靠 length 会被"新旧 session 消息数相同"场景漏掉（5 → 5 不触发），
 //      所以同时 watch currentSessionId 强制滚一次。
 //   3. lastError 变化：错误提示出现/消失时也对齐底部
-//
-// 时序：selectSession 先 setCurrentSession（触发 watch），再 await loadHistory
-// （setMessages 触发第二次 watch）。第二次 watch 时新消息已渲染，滚动才有效。
+//   4. loading 变化：loadHistory 时 setLoading(true) 会盖住消息列表（v-if loading），
+//      setMessages 在 loading=true 期间跑——此时消息 div 是 v-else 没渲染，
+//      滚动无效。setLoading(false) 后消息才挂到 DOM，这时才需要滚。
+//      必须在 loading=false 时滚，否则容器里没内容。
 watch(
-  () => [messageStore.messages.length, messageStore.currentSessionId, messageStore.lastError],
+  () => [
+    messageStore.messages.length,
+    messageStore.currentSessionId,
+    messageStore.lastError,
+    messageStore.loading,
+  ],
   async () => {
+    // loading 中不滚——消息列表被 loading overlay 盖住，滚了也看不到
+    if (messageStore.loading) return
     await nextTick()
     snapToBottom()
   },
