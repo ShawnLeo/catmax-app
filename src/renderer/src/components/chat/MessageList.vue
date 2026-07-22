@@ -1,24 +1,23 @@
 <template>
   <!--
-    外层 relative 容器——悬浮按钮锚定到这里（而不是滚动容器内部，
-    否则 absolute bottom-4 会跟着内容滚走，只有滚到最顶/最底才看得到）。
-    滚动容器是内层 div，按钮跟它是兄弟节点，永远贴在可视区域底部。
+    根滚动容器——同时是 absolute / sticky 按钮的定位上下文。
 
-    ⚠️ 这里不能加 h-full：ChatView 给 MessageList 传了 class=\"flex-1\"，
-    会合并到这个根 div 上。flex-1 在 flex-col 父容器里让它占满剩余高度，
-    但 h-full 强制 100% 父高度会撑爆把 Composer 挤掉。relative 单独够用
-    （flex item 的高度由 flex-1 决定，relative 只负责给 absolute 按钮做锚点）。
+    ChatView 给 MessageList 传 class=\"flex-1\"，合并到这个根 div 上。
+    flex-1 在 flex-col 父容器里占满剩余高度；min-h-0 让它能正确 shrink
+    （flex item 默认 min-height: auto 会撑爆，必须加 min-h-0 才能触发 overflow）。
+
+    悬浮按钮用 sticky 而不是 absolute——sticky 在滚动容器里会贴视口底部，
+    不会随内容滚走（absolute 会，fixed 会脱离容器跑到窗口级别）。
   -->
-  <div class="relative">
-    <div ref="container" class="h-full overflow-y-auto" @scroll="onScroll">
-      <div
-        v-if="messageStore.loading"
-        class="flex items-center justify-center h-full text-muted-foreground"
-      >
-        <div class="text-center">
-          <div class="animate-pulse text-sm">加载历史中...</div>
-        </div>
+  <div ref="container" class="h-full overflow-y-auto relative min-h-0" @scroll="onScroll">
+    <div
+      v-if="messageStore.loading"
+      class="flex items-center justify-center h-full text-muted-foreground"
+    >
+      <div class="text-center">
+        <div class="animate-pulse text-sm">加载历史中...</div>
       </div>
+    </div>
     <!--
       响应式宽度（两段式）：
         小窗 <640px   → 跟随窗口（仅 px-6 边距）
@@ -62,16 +61,15 @@
         </div>
       </div>
     </div>
-    </div>
 
     <!--
       悬浮"回到底部"箭头：用户向上滚离底部超过阈值（120px）时显示，
       点击平滑滚到最新消息。
 
-      位置：水平居中（left-1/2 -translate-x-1/2），贴底部、在 Composer 输入框上方
-      （bottom-4 在容器底部内边距里，避免被输入框遮挡）。
+      用 sticky bottom-4——在滚动容器里贴视口底部，不会随内容滚走。
+      水平居中（mx-auto + max-w-fit + 左右 margin auto）。
       半透明悬浮效果：bg-background/80 + backdrop-blur + shadow-lg + border，
-      hover 时背景更实（bg-background）+ 轻微上浮（-translate-y-0.5）。
+      hover 时背景更实（bg-background）+ 轻微上浮。
     -->
     <Transition
       enter-active-class="transition-all duration-200 ease-out"
@@ -82,7 +80,7 @@
       <button
         v-if="showScrollToBottom"
         type="button"
-        class="absolute bottom-4 left-1/2 -translate-x-1/2 z-10 w-10 h-10 flex items-center justify-center rounded-full border border-border bg-background/80 backdrop-blur-md shadow-lg text-muted-foreground hover:text-foreground hover:bg-background hover:-translate-y-0.5 hover:shadow-xl transition-all"
+        class="sticky bottom-4 mx-auto flex items-center justify-center w-10 h-10 rounded-full border border-border bg-background/80 backdrop-blur-md shadow-lg text-muted-foreground hover:text-foreground hover:bg-background hover:-translate-y-0.5 hover:shadow-xl transition-all"
         title="回到底部"
         @click="scrollToBottom"
       >
