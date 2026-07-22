@@ -54,19 +54,23 @@
 
     <!--
       悬浮"回到底部"箭头：用户向上滚离底部超过阈值（120px）时显示，
-      点击平滑滚到最新消息。贴容器右下角，半透明背景 + 圆形按钮，
-      跟 Composer 输入框留出间距（bottom-20 避免被遮挡）。
+      点击平滑滚到最新消息。
+
+      位置：水平居中（left-1/2 -translate-x-1/2），贴底部、在 Composer 输入框上方
+      （bottom-4 在容器底部内边距里，避免被输入框遮挡）。
+      半透明悬浮效果：bg-background/80 + backdrop-blur + shadow-lg + border，
+      hover 时背景更实（bg-background）+ 轻微上浮（-translate-y-0.5）。
     -->
     <Transition
-      enter-active-class="transition-opacity duration-150"
-      leave-active-class="transition-opacity duration-150"
-      enter-from-class="opacity-0"
-      leave-to-class="opacity-0"
+      enter-active-class="transition-all duration-200 ease-out"
+      leave-active-class="transition-all duration-150 ease-in"
+      enter-from-class="opacity-0 translate-y-2"
+      leave-to-class="opacity-0 translate-y-2"
     >
       <button
         v-if="showScrollToBottom"
         type="button"
-        class="absolute bottom-20 right-6 z-10 w-9 h-9 flex items-center justify-center rounded-full border border-border bg-background/90 backdrop-blur shadow-md text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
+        class="absolute bottom-4 left-1/2 -translate-x-1/2 z-10 w-10 h-10 flex items-center justify-center rounded-full border border-border bg-background/80 backdrop-blur-md shadow-lg text-muted-foreground hover:text-foreground hover:bg-background hover:-translate-y-0.5 hover:shadow-xl transition-all"
         title="回到底部"
         @click="scrollToBottom"
       >
@@ -79,7 +83,7 @@
 <script setup lang="ts">
 import { useMessageStore } from '@renderer/stores/message'
 import { AlertCircleIcon, ArrowDownIcon } from 'lucide-vue-next'
-import { ref, watch, nextTick, computed } from 'vue'
+import { onMounted, ref, watch, nextTick, computed } from 'vue'
 
 import CompactDivider from './CompactDivider.vue'
 import MessageItem from './MessageItem.vue'
@@ -109,7 +113,7 @@ function onScroll(): void {
   showScrollToBottom.value = distanceFromBottom > SCROLL_THRESHOLD
 }
 
-/** 平滑滚到底部 */
+/** 平滑滚到底部（用户点击箭头用） */
 function scrollToBottom(): void {
   if (!container.value) return
   container.value.scrollTo({
@@ -121,23 +125,42 @@ function scrollToBottom(): void {
 /**
  * 程式化滚到底部（无动画，给自动滚动用）。
  * 滚完后同步更新 showScrollToBottom（贴底了 → 隐藏箭头）。
+ *
+ * 多次滚策略：MarkdownView 的 renderMarkdown 是异步的（懒加载 markdown-it + Shiki），
+ * setMessages 后 messages div 挂载但内容还是空字符串，scrollHeight 不准。
+ * 等内容渲染撑开后才有效——分几次滚：
+ *   - 立即：messages div 已挂载，布局发生（容器有基础高度）
+ *   - rAF：下一帧，Vue patch 完成
+ *   - 60ms：markdown 渲染通常 1-2 帧内完成
+ *   - 200ms：兜底首次懒加载（markdown-it 模块加载 + Shiki 语法注册）
  */
 function snapToBottom(): void {
   if (!container.value) return
-  container.value.scrollTop = container.value.scrollHeight
+  const doScroll = (): void => {
+    if (container.value) {
+      container.value.scrollTop = container.value.scrollHeight
+    }
+  }
+  doScroll()
   showScrollToBottom.value = false
+  requestAnimationFrame(doScroll)
+  setTimeout(doScroll, 60)
+  setTimeout(doScroll, 200)
 }
 
-// 自动滚到底部，四种触发：
-//   1. 流式输出时：messages 数组 push 新内容（length 增加）
-//   2. 切换 session：setMessages 替换数组引用 + currentSessionId 变化
-//      光靠 length 会被"新旧 session 消息数相同"场景漏掉（5 → 5 不触发），
-//      所以同时 watch currentSessionId 强制滚一次。
-//   3. lastError 变化：错误提示出现/消失时也对齐底部
-//   4. loading 变化：loadHistory 时 setLoading(true) 会盖住消息列表（v-if loading），
-//      setMessages 在 loading=true 期间跑——此时消息 div 是 v-else 没渲染，
-//      滚动无效。setLoading(false) 后消息才挂到 DOM，这时才需要滚。
-//      必须在 loading=false 时滚，否则容器里没内容。
+// 自动滚到底部。
+//
+// 触发场景：
+//   1. 流式输出：messages push 新内容（length 增加）
+//   2. 切换 session：currentSessionId 变化 + setMessages 替换数组
+//   3. lastError 出现/消失
+//   4. loading 变化：loadHistory 时 setLoading(true) 盖住消息列表（v-if loading），
+//      setMessages 在 loading=true 期间跑——消息 div 是 v-else 没渲染。
+//      setLoading(false) 后消息才挂到 DOM，这时才滚。
+//
+// ⚠️ ChatView 用 v-if="messages.length > 0" 控制 MessageList 挂载——
+// 切到有消息的 session 时组件可能 freshly mounted。watch 默认 immediate=false
+// 不会在 mount 时触发，所以额外用 onMounted 兜底滚一次。
 watch(
   () => [
     messageStore.messages.length,
@@ -152,4 +175,10 @@ watch(
     snapToBottom()
   },
 )
+
+// mount 时兜底滚一次——处理 v-if fresh mount 场景（watch immediate=false 漏掉）
+onMounted(async () => {
+  await nextTick()
+  snapToBottom()
+})
 </script>
