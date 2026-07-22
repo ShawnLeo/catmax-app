@@ -9,6 +9,13 @@
     <!-- 消息体 -->
     <div :class="['min-w-0', message.role === 'user' ? 'max-w-[80%]' : 'flex-1']">
       <!--
+        历史 /compact 条目：不展示 /compact 用户气泡，改为分隔线 + 可折叠摘要。
+        history-mapping 把 /compact + 摘要存成 user message（textBlocks[0]='/compact'），
+        这里识别该模式并交给 CompactHistoryEntry 渲染。
+      -->
+      <CompactHistoryEntry v-if="isCompactHistoryEntry" :summary="compactSummary" />
+
+      <!--
         user 消息：合并成一个气泡（对齐 Claude Code）。
 
         气泡内布局：**上下两块**——
@@ -21,7 +28,7 @@
         紧凑，让 chip 组视觉上是一个整体）。
       -->
       <div
-        v-if="message.role === 'user' && hasAnyUserContent"
+        v-else-if="message.role === 'user' && hasAnyUserContent"
         class="rounded-2xl bg-user-bubble border border-border/50 p-3 flex flex-col gap-2 break-words"
       >
         <!--
@@ -124,6 +131,7 @@ import { useMessageStore } from '@renderer/stores/message'
 import type { NormalizedMessage } from '@shared/backend/types'
 import { computed } from 'vue'
 
+import CompactHistoryEntry from './CompactHistoryEntry.vue'
 import MarkdownView from './MarkdownView.vue'
 import ThinkingBlock from './ThinkingBlock.vue'
 import ToolCallCard from './ToolCallCard.vue'
@@ -143,6 +151,24 @@ const props = defineProps<{
 function resolveContextComponent(tag: string) {
   return contextTagRegistry.get(tag)?.component
 }
+
+/**
+ * 检测这条消息是否是历史回放的 /compact 条目。
+ *
+ * history-mapping 把 /compact + 摘要存成 user message：
+ *   textBlocks[0].text === '/compact'
+ *   textBlocks[1].text === 摘要原文（可选，无摘要时只有 textBlocks[0]）
+ *
+ * 命中时 UI 不渲染用户气泡，交给 CompactHistoryEntry 渲染分隔线 + 可折叠摘要。
+ */
+const isCompactHistoryEntry = computed(() => {
+  if (props.message.role !== 'user') return false
+  const first = props.message.textBlocks?.[0]
+  return first?.text === '/compact'
+})
+
+/** /compact 的压缩摘要原文（textBlocks[1]），无摘要时 undefined */
+const compactSummary = computed(() => props.message.textBlocks?.[1]?.text)
 
 /**
  * reasoning 块（kind==='reasoning'）。
