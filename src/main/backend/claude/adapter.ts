@@ -8,6 +8,7 @@
  * - 中断 = kill 进程
  */
 import { randomUUID } from 'node:crypto'
+import { existsSync } from 'node:fs'
 import { writeFile, unlink } from 'node:fs/promises'
 import { join } from 'node:path'
 
@@ -281,7 +282,24 @@ export class ClaudeAdapter implements AgentBackend {
     // 只有已经拿到 claude 真实 session_id 的会话才能 --resume。
     // 新建会话（startSession 建的占位 id）第一次 turn 必须不带 --resume——
     // 让 claude 自己分配 session_id，从 system.init 里读到后存映射 + 标记可续接。
-    const canResume = this.resumableSessions.has(args.sessionId)
+    //
+    // ⚠️ 重启恢复场景：用户从历史加载一个已有会话续聊时，内存里的 resumableSessions
+    // 是空的（进程刚起），但磁盘上的 .jsonl 文件存在——文件名就是 claude 真实
+    // session_id（onRealSessionId 写回 db 的就是它）。所以除了查内存 Set，还要查
+    // 磁盘：jsonl 存在 → 这就是真实 session_id，可以 --resume。
+    // 不补这个判定的话，历史会话续聊会走"新建会话"分支（不带 --resume），
+    // claude 会分配新的 session_id → 看起来像"多出来一个会话"（Bug）。
+    let canResume = this.resumableSessions.has(args.sessionId)
+    if (!canResume && args.cwd) {
+      const jsonlPath = resolveSessionJsonlPath(args.sessionId, args.cwd)
+      if (existsSync(jsonlPath)) {
+        // 磁盘有 jsonl → args.sessionId 就是 claude 真实 session_id
+        this.sessionIdMap.set(args.sessionId, args.sessionId)
+        this.resumableSessions.add(args.sessionId)
+        canResume = true
+        log.info('resumable from disk (process restarted)', args.sessionId, 'jsonl=', jsonlPath)
+      }
+    }
 
     // 启动 claude 进程
     const binary = this.opts.binaryPath ?? 'claude'
