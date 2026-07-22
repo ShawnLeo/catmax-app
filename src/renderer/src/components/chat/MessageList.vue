@@ -3,8 +3,13 @@
     外层 relative 容器——悬浮按钮锚定到这里（而不是滚动容器内部，
     否则 absolute bottom-4 会跟着内容滚走，只有滚到最顶/最底才看得到）。
     滚动容器是内层 div，按钮跟它是兄弟节点，永远贴在可视区域底部。
+
+    ⚠️ 这里不能加 h-full：ChatView 给 MessageList 传了 class=\"flex-1\"，
+    会合并到这个根 div 上。flex-1 在 flex-col 父容器里让它占满剩余高度，
+    但 h-full 强制 100% 父高度会撑爆把 Composer 挤掉。relative 单独够用
+    （flex item 的高度由 flex-1 决定，relative 只负责给 absolute 按钮做锚点）。
   -->
-  <div class="h-full relative">
+  <div class="relative">
     <div ref="container" class="h-full overflow-y-auto" @scroll="onScroll">
       <div
         v-if="messageStore.loading"
