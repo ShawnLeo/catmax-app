@@ -53,6 +53,30 @@ function extractCommandName(text: string): string | null {
   return name ? name.trim() : null
 }
 
+/**
+ * 检测 user 文本是否是 claude 自动注入的系统 sentinel——这些不是用户真实输入，
+ * UI 上应跳过（不展示成 user 消息）。
+ *
+ * 已知 sentinel：
+ *   1. <local-command-caveat>...</local-command-caveat>
+ *      slash command 执行时 claude 自动加的"以下消息由本地命令产生"声明
+ *   2. "This session is being continued from a previous conversation..."
+ *      /compact 执行后 claude 自动注入的会话延续摘要（极长）
+ *   3. <local-command-stdout>...</local-command-stdout>
+ *      slash command 的 stdout（/compact 的 "Compacted Tip: ..." 等）
+ *      注意：command-name 调用本身会设 lastWasCommandInvocation 标志，
+ *      <local-command-stdout> 紧随其后会被标志跳过。但保险起见这里也显式跳过，
+ *      防止 stdout 出现在 command 之前或其他顺序问题。
+ */
+function isSystemSentinel(text: string): boolean {
+  if (text.includes('<local-command-caveat>')) return true
+  if (text.includes('<local-command-stdout>')) return true
+  if (text.startsWith('This session is being continued from a previous conversation')) {
+    return true
+  }
+  return false
+}
+
 /** 把重放的 claude 消息流转成 NormalizedMessage[] */
 export function claudeReplayToMessages(messages: ClaudeStreamMessage[]): NormalizedMessage[] {
   const result: NormalizedMessage[] = []
@@ -156,6 +180,14 @@ export function claudeReplayToMessages(messages: ClaudeStreamMessage[]): Normali
       if (collectedText.length > 0) {
         flushAssistant()
         const rawText = collectedText.join('\n\n')
+
+        // 系统 sentinel 跳过——这些是 claude 自动注入的（/compact 摘要、caveat 声明、
+        // local-command-stdout），不是用户真实输入，UI 上不应展示成 user 消息。
+        if (isSystemSentinel(rawText)) {
+          // 不清 lastWasCommandInvocation——caveat/stdout 可能跟在 command 后，
+          // 标志逻辑会处理；compact summary 是命令前的，flag 本来就是 false。
+          continue
+        }
 
         // 命令调用检测：claude slash command（/init /compact /clear 等）会写两条
         // user 消息——第一条是 sentinel 文本（<command-message>X</command-message>
