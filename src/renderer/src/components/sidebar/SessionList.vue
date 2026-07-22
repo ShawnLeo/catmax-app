@@ -56,6 +56,7 @@
           :key="session.id"
           :session="session"
           :active="session.id === sessionStore.currentSessionId"
+          :running="isSessionRunning(session.id)"
           @click="selectSession(session.id)"
           @remove="removeSession(session.id)"
         />
@@ -100,6 +101,17 @@ const messageStore = useMessageStore()
 const currentBackendSessions = computed(
   () => sessionStore.sessionsByBackend[backendStore.currentId] ?? [],
 )
+
+/**
+ * 查某会话是否有 turn 在后台跑。
+ *
+ * 数据来源 messageStore.sessionStates（reactive Map）——applyEvent 按 sessionId
+ * 路由事件，所以即使是用户切走的后台会话，isRunning 也会正确更新。
+ * 没记录过的会话（从未在本进程跑过 turn）Map 里没条目，按 false 处理。
+ */
+function isSessionRunning(sessionId: string): boolean {
+  return messageStore.sessionStates.get(sessionId)?.isRunning ?? false
+}
 
 function backendStatus(id: BackendId) {
   return backendStore.statuses.find((s) => s.id === id)
