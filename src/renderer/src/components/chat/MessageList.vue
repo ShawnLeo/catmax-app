@@ -71,9 +71,17 @@ const showThinking = computed(() => props.showThinking ?? true)
 const messageStore = useMessageStore()
 const container = ref<HTMLElement | null>(null)
 
-// 流式输出时自动滚到底部
+// 自动滚到底部，三种触发：
+//   1. 流式输出时：messages 数组 push 新内容（length 增加）
+//   2. 切换 session：setMessages 替换数组引用 + currentSessionId 变化
+//      光靠 length 会被"新旧 session 消息数相同"场景漏掉（5 → 5 不触发），
+//      所以同时 watch currentSessionId 强制滚一次。
+//   3. lastError 变化：错误提示出现/消失时也对齐底部
+//
+// 时序：selectSession 先 setCurrentSession（触发 watch），再 await loadHistory
+// （setMessages 触发第二次 watch）。第二次 watch 时新消息已渲染，滚动才有效。
 watch(
-  () => [messageStore.messages.length, messageStore.lastError],
+  () => [messageStore.messages.length, messageStore.currentSessionId, messageStore.lastError],
   async () => {
     await nextTick()
     if (container.value) {
