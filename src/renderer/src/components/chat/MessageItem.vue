@@ -26,14 +26,16 @@
         </template>
 
         <template v-for="block in message.textBlocks" :key="block.id">
+          <!--
+            user 文本走纯文本渲染（不跑 Markdown）——用户输入就是字面文本，
+            不应该被 markdown 解析成代码块/标题/链接等。
+            whitespace-pre-wrap 保留换行 + 长串自动换行。
+          -->
           <div
             v-if="block.text.trim()"
-            :class="[
-              'leading-relaxed text-[15px]',
-              block.kind === 'reasoning' ? 'italic text-muted-foreground' : 'text-foreground',
-            ]"
+            class="leading-relaxed text-[15px] text-foreground whitespace-pre-wrap break-words"
           >
-            <MarkdownView :text="block.text" />
+            {{ block.text }}
           </div>
         </template>
       </div>
