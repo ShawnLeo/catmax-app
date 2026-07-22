@@ -220,7 +220,14 @@ async function onSend(text: string, attachments: ContextBlock[]): Promise<void> 
 
   // 推用户消息到 UI（带 contextBlocks，UI 渲染对应 tag 卡片）
   const turnId = randomUUID()
-  messageStore.pushUserMessage(turnId, text, attachments.length > 0 ? attachments : undefined)
+  // /compact 特殊处理：不展示 /compact 用户消息气泡，改为在消息流末尾插入
+  // "正在压缩上下文 / 上下文已压缩"分隔线。turn_completed 时自动从呼吸切到静态。
+  // 严格匹配 trim 后的 /compact——带参数的（/compact focus on X）走普通消息。
+  if (text.trim() === '/compact') {
+    messageStore.startCompact(turnId)
+  } else {
+    messageStore.pushUserMessage(turnId, text, attachments.length > 0 ? attachments : undefined)
+  }
 
   // 发给后端的完整 prompt：把 attachments 序列化成 sentinel 标签拼到文本里
   // 后端 adapter 收到的是单字符串，原样发给 claude/codex（不用改 adapter 契约）

@@ -44,6 +44,15 @@ interface SessionState {
   pendingQuestion: PendingQuestion | null
   lastError: string | null
   lastUsage: TokenUsage | null
+  /**
+   * /compact 进行中的 turnId——非 null 表示该 session 有 compact 正在后台跑。
+   * UI 在消息流末尾插入"正在压缩上下文"分隔线（呼吸动画）。
+   * turn_completed 时 compactDone 置 true，分隔线变成静态"上下文已压缩"。
+   * 用户切走再切回时仍能看到 compact 状态——它跟 session 走，不跟当前视图走。
+   */
+  compactTurnId: string | null
+  /** compact 是否已完成（compactTurnId 非 null 时才有意义） */
+  compactDone: boolean
 }
 
 function createEmptySessionState(): SessionState {
@@ -56,6 +65,8 @@ function createEmptySessionState(): SessionState {
     pendingQuestion: null,
     lastError: null,
     lastUsage: null,
+    compactTurnId: null,
+    compactDone: false,
   }
 }
 
@@ -139,6 +150,19 @@ export const useMessageStore = defineStore('message', () => {
 
   const lastError = computed(() => cur().lastError)
   const lastUsage = computed(() => cur().lastUsage)
+  /**
+   * 当前 session 的 compact 分隔线状态：
+   *   - null：没有 compact（从未发过 /compact，或历史回放的会话没记录）
+   *   - 'pending'：正在压缩（呼吸动画）
+   *   - 'done'：已压缩（静态文案）
+   *
+   * UI（MessageList）在消息流末尾按这个值渲染 CompactDivider。
+   */
+  const compactState = computed<'pending' | 'done' | null>(() => {
+    const s = cur()
+    if (s.compactTurnId === null) return null
+    return s.compactDone ? 'done' : 'pending'
+  })
 
   /** 把 TurnEvent 累积到对应 session 的 NormalizedMessage[]。
    *  sessionId 由 backend envelope 提供（多 turn 并发隔离）。 */
@@ -253,6 +277,10 @@ export const useMessageStore = defineStore('message', () => {
         if (!event.recoverable) {
           s.isRunning = false
           markReasoningEnded(s, event.turnId, Date.now())
+          // compact 出错也要切到 done——否则呼吸动画永远不停
+          if (s.compactTurnId === event.turnId) {
+            s.compactDone = true
+          }
         }
         break
       }
@@ -265,6 +293,12 @@ export const useMessageStore = defineStore('message', () => {
         // 兜底：纯思考无正文的 turn，reasoning 没机会被 text_delta 标记结束，
         // 这里统一兜底结束（幂等，已结束的不会被覆盖）。
         markReasoningEnded(s, event.turnId, Date.now())
+        // compact 完成：turn 匹配 compactTurnId 时把分隔线状态从"呼吸"切到"已压缩"。
+        // 分隔线继续保留（不删 compactTurnId）——它标记了"这里发生过压缩"，
+        // 用户切走再切回仍能看到。后续再发 /compact 会覆盖 compactTurnId 开新一轮。
+        if (s.compactTurnId === event.turnId) {
+          s.compactDone = true
+        }
         // turn 结束时兜底清空 pending——
         // 正常流程下 dialog 提交/cancel 时 ChatView 已经清了，
         // 这里防止 dialog 卡住（比如 turn 因各种原因提前结束时）。
@@ -365,6 +399,21 @@ export const useMessageStore = defineStore('message', () => {
   }
 
   /**
+   * 标记当前 session 进入 /compact 进行中状态。
+   * UI 会在消息流末尾插入"正在压缩上下文"分隔线（呼吸动画）。
+   * turn_completed 匹配 compactTurnId 时自动切到"已压缩"静态态。
+   *
+   * 调用时机：onSend 检测到用户发的是 /compact 命令时调用，
+   * **不**走 pushUserMessage（/compact 那行消息不展示）。
+   */
+  function startCompact(turnId: string): void {
+    if (!currentSessionId.value) return
+    const s = cur()
+    s.compactTurnId = turnId
+    s.compactDone = false
+  }
+
+  /**
    * 替换当前 session 的 messages（loadHistory 调）。
    * 不动其他 session 状态。
    */
@@ -413,6 +462,7 @@ export const useMessageStore = defineStore('message', () => {
     pendingQuestion,
     lastError,
     lastUsage,
+    compactState,
     loading,
     // session 管理
     currentSessionId,
@@ -420,6 +470,7 @@ export const useMessageStore = defineStore('message', () => {
     // 方法
     applyEvent,
     pushUserMessage,
+    startCompact,
     setCurrentSession,
     setMessages,
     clearSession,

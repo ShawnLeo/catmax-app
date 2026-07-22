@@ -28,6 +28,15 @@
         :show-thinking="showThinking"
       />
 
+      <!--
+        /compact 分隔线：用户发 /compact 时不展示 /compact 消息气泡，
+        改为在消息流末尾插入这条分隔线。
+        - pending（呼吸）：claude 后台正在压缩上下文
+        - done（静态）：压缩完成，分隔线上下的对话被压缩隔离
+        compactState 由 messageStore 跟踪（turn_completed 自动切 pending → done）。
+      -->
+      <CompactDivider v-if="messageStore.compactState" :state="messageStore.compactState" />
+
       <!-- 错误提示（codex/claude 调 API 失败时 messageStore.lastError 会被设置） -->
       <div
         v-if="messageStore.lastError"
@@ -50,6 +59,7 @@ import { useMessageStore } from '@renderer/stores/message'
 import { AlertCircleIcon } from 'lucide-vue-next'
 import { ref, watch, nextTick, computed } from 'vue'
 
+import CompactDivider from './CompactDivider.vue'
 import MessageItem from './MessageItem.vue'
 
 const props = defineProps<{
