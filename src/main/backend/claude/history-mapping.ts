@@ -35,12 +35,34 @@ import { toolResultToOutput, toolUseToInfo } from './mapping'
 // contentBlockSchema 是 z.union 带 passthrough 兜底——switch(block.type) 不会收窄字段，
 // 访问具体字段时显式 Extract + as cast（与 mapping.ts 一致）。
 
+/**
+ * 检测 user 文本是否是 claude slash command 调用 sentinel，是则返回 command-name。
+ *
+ * claude 写入 jsonl 的命令调用形如：
+ *   <command-message>init</command-message>
+ *   <command-name>/init</command-name>
+ *
+ * 我们只展示 command-name（"/init"），隐藏丑陋的 sentinel 文本。
+ * 不是命令则返回 null。
+ */
+function extractCommandName(text: string): string | null {
+  // 必须同时含 command-message 和 command-name 才算命令调用 sentinel
+  if (!text.includes('<command-message>')) return null
+  const m = text.match(/<command-name>([^<]+)<\/command-name>/)
+  const name = m?.[1]
+  return name ? name.trim() : null
+}
+
 /** 把重放的 claude 消息流转成 NormalizedMessage[] */
 export function claudeReplayToMessages(messages: ClaudeStreamMessage[]): NormalizedMessage[] {
   const result: NormalizedMessage[] = []
   let currentAssistant: NormalizedMessage | null = null
   // tool_use_id → 它所在的 assistant message（已 push 到 result）
   const pendingToolUseIds = new Map<string, { info: ToolCallInfo; messageId: string }>()
+  // 上一条 user 是命令调用（<command-message>）时置为 true——
+  // 紧跟的下一条 user 文本消息是 claude 自己注入的 command 展开 prompt（isMeta:true），
+  // 应跳过，避免历史里出现两条用户消息（command 调用 + 长 prompt 文本）。
+  let lastWasCommandInvocation = false
 
   function flushAssistant(): void {
     if (currentAssistant) {
@@ -53,6 +75,9 @@ export function claudeReplayToMessages(messages: ClaudeStreamMessage[]): Normali
     if (msg.type === 'assistant') {
       // 新 assistant message——先 flush 上一个
       flushAssistant()
+      // 命令展开标志只在"紧接的下一条 user 文本"生效；遇到 assistant 自动清掉
+      // （说明这条 user 不是命令的展开 prompt，而是新一轮真实输入）
+      lastWasCommandInvocation = false
       const assistantMsg = msg as AssistantMessage
       const assistant: NormalizedMessage = {
         id: assistantMsg.message.id,
@@ -95,6 +120,8 @@ export function claudeReplayToMessages(messages: ClaudeStreamMessage[]): Normali
       for (const block of content) {
         if (block.type === 'tool_result') {
           const tr = block as ToolResultContent
+          // tool_result 不是命令展开文本——清掉标志
+          lastWasCommandInvocation = false
           const output = toolResultToOutput(tr)
           // 在已 push 的 assistant（包括还没 flush 的 currentAssistant）里找
           const target =
@@ -115,6 +142,33 @@ export function claudeReplayToMessages(messages: ClaudeStreamMessage[]): Normali
           // user 真实输入文本——flush 当前 assistant，新建 user message
           flushAssistant()
           const rawText = (block as TextContent).text
+
+          // 命令调用检测：claude slash command（/init /compact /clear 等）会写两条
+          // user 消息——第一条是 sentinel 文本（<command-message>X</command-message>
+          // <command-name>/X</command-name>），第二条是 claude 自己注入的长 prompt
+          // 展开（isMeta:true，让 agent 知道怎么执行该命令）。
+          //
+          // UI 上只展示一条：把 sentinel 解析出 command-name（"/init"），并标记
+          // "下一条 user 文本是这次命令的展开"，跳过它，避免历史里出现两条。
+          const cmdName = extractCommandName(rawText)
+          if (cmdName) {
+            // 第一条：命令调用——只展示 command-name
+            result.push({
+              id: randomUUID(),
+              role: 'user',
+              turnId: 'history',
+              textBlocks: [{ id: randomUUID(), text: cmdName, kind: 'text' }],
+              createdAt: 0,
+            })
+            lastWasCommandInvocation = true
+            continue
+          }
+          // 上一条是命令调用 + 这条是紧随的 user 文本 → 视为 command 展开 prompt，跳过
+          if (lastWasCommandInvocation) {
+            lastWasCommandInvocation = false
+            continue
+          }
+
           // 提取 IDE context tag（<ide_selection> / <ide_opened_file> / <environment_context>）。
           // 提取后 textBlocks 存去掉 tag 的纯 prompt，contextBlocks 存结构化 tag。
           const { text, blocks } = extractContextTags(rawText, sharedContextTagExtractors)
