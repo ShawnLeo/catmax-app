@@ -30,7 +30,7 @@ import { sharedContextTagExtractors } from '@shared/backend/context-tag-handlers
 import { extractContextTags } from '@shared/backend/context-tags'
 import type { NormalizedMessage, ToolCallInfo } from '@shared/backend/types'
 
-import { toolResultToOutput, toolUseToInfo } from './mapping'
+import { toolResultToOutput, toolUseResultToStats, toolUseToInfo } from './mapping'
 
 // contentBlockSchema 是 z.union 带 passthrough 兜底——switch(block.type) 不会收窄字段，
 // 访问具体字段时显式 Extract + as cast（与 mapping.ts 一致）。
@@ -148,6 +148,7 @@ export function claudeReplayToMessages(messages: ClaudeStreamMessage[]): Normali
             id: tu.id,
             info,
             status: 'running', // 等 tool_result 改成 completed/failed
+            // 历史回放没有精确 startedAt，但 UI 可以从 taskStats.totalDurationMs 反推（非必须）
           })
           // 即使 assistant 还没 flush，也按 id 索引——后面在 result 里查找
           pendingToolUseIds.set(tu.id, { info, messageId: assistant.id })
@@ -185,6 +186,9 @@ export function claudeReplayToMessages(messages: ClaudeStreamMessage[]): Normali
             if (tb) {
               tb.status = output.ok ? 'completed' : 'failed'
               tb.output = output
+              // Task（子 Agent）完成统计--jsonl 的 user 消息带顶层 tool_use_result 字段
+              const stats = toolUseResultToStats(userMsg.tool_use_result)
+              if (stats !== undefined) tb.taskStats = stats
             }
           }
           pendingToolUseIds.delete(tr.tool_use_id)

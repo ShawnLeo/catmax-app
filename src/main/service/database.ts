@@ -190,6 +190,37 @@ export class DatabaseService {
   }
 
   /**
+   * 更新 session 的运行时配置（model / effort / permission_mode）。
+   *
+   * 与 bumpSessionTurn 的区别：
+   *   - bumpSessionTurn 用 COALESCE（仅非 null 才覆盖），用于"turn 结束补全字段"。
+   *   - updateSessionConfig 直接覆盖，用户在 Composer 里改了配置后立即写回。
+   *
+   * backend 不在这里写——session.backend 是会话固有属性（创建时定），
+   * 切 backend 走全局 currentBackend 切换 + 新建会话时再用。
+   *
+   * 全部参数可选——只更新传入的字段（用 COALESCE 跳过 undefined）。
+   */
+  updateSessionConfig(
+    id: string,
+    config: {
+      model?: string | null | undefined
+      effort?: string | null | undefined
+      permissionMode?: string | null | undefined
+    },
+  ): void {
+    this.db
+      .prepare(
+        `UPDATE sessions
+         SET model = COALESCE(?, model),
+             effort = COALESCE(?, effort),
+             permission_mode = COALESCE(?, permission_mode)
+         WHERE id = ?`,
+      )
+      .run(config.model ?? null, config.effort ?? null, config.permissionMode ?? null, id)
+  }
+
+  /**
    * 更新 session 的 backend_thread_id（claude 用：拿到真实 session_id 后回写）。
    * byBackendThreadId 是当前的占位 id，用 (backend, backend_thread_id) 唯一约束定位行。
    */

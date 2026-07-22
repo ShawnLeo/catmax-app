@@ -45,5 +45,8 @@ export const appSettingsSchema = z.object({
   language: z.enum(['zh-CN', 'en-US']).default('zh-CN'),
   sendOnEnter: z.boolean().default(true),
   showReasoningByDefault: z.boolean().default(false),
+  sidebarWidth: z.number().int().min(200).max(600).default(240),
+  rightPanelWidth: z.number().int().min(200).max(800).default(320),
+  bottomPanelHeight: z.number().int().min(100).max(600).default(320),
 })
 export type AppSettings = z.infer<typeof appSettingsSchema>

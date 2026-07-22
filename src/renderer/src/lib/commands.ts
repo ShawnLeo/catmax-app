@@ -68,28 +68,6 @@ export async function registerDefaultCommands(): Promise<void> {
   })
 
   commandRegistry.register({
-    id: 'backend.switch-codex',
-    title: '切换到 Codex 后端',
-    category: 'Backend',
-    keywords: ['backend', 'switch', 'codex', 'openai'],
-    action: async () => {
-      const b = useBackendStore()
-      await b.switchTo('codex')
-    },
-  })
-
-  commandRegistry.register({
-    id: 'backend.switch-claude',
-    title: '切换到 Claude 后端',
-    category: 'Backend',
-    keywords: ['backend', 'switch', 'claude', 'anthropic'],
-    action: async () => {
-      const b = useBackendStore()
-      await b.switchTo('claude')
-    },
-  })
-
-  commandRegistry.register({
     id: 'backend.refresh',
     title: '刷新后端状态',
     category: 'Backend',

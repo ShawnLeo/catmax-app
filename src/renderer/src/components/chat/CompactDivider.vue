@@ -13,7 +13,7 @@
     <div class="flex-1 h-px bg-border/60" />
     <div
       :class="[
-        'inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[11px] font-medium border',
+        'inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[13px] font-medium border',
         state === 'pending'
           ? 'text-muted-foreground border-border bg-muted/50 animate-pulse'
           : 'text-muted-foreground/80 border-border/60 bg-transparent',
@@ -21,7 +21,7 @@
     >
       <component
         :is="state === 'pending' ? Loader2Icon : CheckIcon"
-        class="w-3 h-3"
+        class="w-3.5 h-3.5"
         :class="state === 'pending' ? 'animate-spin' : ''"
       />
       <span>{{ state === 'pending' ? '正在压缩上下文' : '上下文已压缩' }}</span>

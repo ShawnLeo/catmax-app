@@ -1,7 +1,15 @@
 <template>
-  <div class="h-full flex relative">
-    <!-- 侧边栏 -->
+  <div ref="containerRef" class="h-full flex relative">
+    <!-- 侧边栏（始终挂载，折叠通过宽度 0 过渡，见 Sidebar.vue） -->
     <Sidebar />
+    <ResizeHandle
+      v-if="!uiStore.sidebarCollapsed"
+      side="left"
+      :min="SIDEBAR_MIN"
+      :max="sidebarMax"
+      :current="uiStore.sidebarWidth"
+      @resize="uiStore.setSidebarWidth"
+    />
 
     <!-- 主聊天区 -->
     <div class="flex-1 flex flex-col min-w-0">
@@ -43,32 +51,49 @@
         @cancel="onAskUserQuestionCancel"
       />
 
-      <Composer :disabled="!backendStore.isAvailable" v-model="runtimeConfig" @send="onSend" />
+      <Composer
+        :disabled="!backendStore.isAvailable"
+        :model-value="composerModelValue"
+        @update:model-value="onComposerUpdate"
+        @send="onSend"
+      />
+
+      <!-- 底部终端面板（始终挂载，折叠通过高度 0 过渡） -->
+      <ResizeHandle
+        v-if="uiStore.bottomPanelVisible"
+        side="bottom"
+        :min="BOTTOM_PANEL_MIN"
+        :max="bottomPanelMax"
+        :current="uiStore.bottomPanelHeight"
+        @resize="uiStore.setBottomPanelHeight"
+      />
+      <BottomTerminalPanel />
     </div>
 
-    <!-- 右栏切换按钮（floating） -->
-    <button
-      class="absolute top-2 right-2 z-10 p-1.5 rounded-md bg-background/80 hover:bg-muted text-muted-foreground hover:text-foreground"
-      title="切换右栏"
-      @click="uiStore.toggleRightPanel()"
-    >
-      <PanelRightIcon class="w-4 h-4" />
-    </button>
-
     <!-- 右栏面板 -->
-    <RightPanel :visible="uiStore.rightPanelVisible" />
+    <ResizeHandle
+      v-if="uiStore.rightPanelVisible"
+      side="right"
+      :min="RIGHT_PANEL_MIN"
+      :max="rightPanelMax"
+      :current="uiStore.rightPanelWidth"
+      @resize="uiStore.setRightPanelWidth"
+    />
+    <RightPanel v-if="uiStore.rightPanelVisible" />
   </div>
 </template>
 
 <script setup lang="ts">
 import ApprovalDialog from '@renderer/components/chat/ApprovalDialog.vue'
 import AskUserQuestionDialog from '@renderer/components/chat/AskUserQuestionDialog.vue'
+import BottomTerminalPanel from '@renderer/components/chat/BottomTerminalPanel.vue'
 import ClaudePermissionDialog from '@renderer/components/chat/ClaudePermissionDialog.vue'
 import Composer from '@renderer/components/chat/Composer.vue'
 import MessageList from '@renderer/components/chat/MessageList.vue'
 import RuntimeConfigBar from '@renderer/components/chat/RuntimeConfigBar.vue'
 import RightPanel from '@renderer/components/panel/RightPanel.vue'
 import Sidebar from '@renderer/components/sidebar/Sidebar.vue'
+import ResizeHandle from '@renderer/components/ui/ResizeHandle.vue'
 import { useStreamMessage } from '@renderer/composables/useStreamMessage'
 import { randomUUID } from '@renderer/lib/utils'
 import { useBackendStore } from '@renderer/stores/backend'
@@ -79,8 +104,9 @@ import { useUiStore } from '@renderer/stores/ui'
 import { useWorkspaceStore } from '@renderer/stores/workspace'
 import { serializeContextTags } from '@shared/backend/context-tags'
 import type { ContextBlock, EffortLevel, PermissionMode } from '@shared/backend/types'
-import { PanelRightIcon } from 'lucide-vue-next'
-import { onMounted, onUnmounted, ref, watch } from 'vue'
+import type { BackendId } from '@shared/constants'
+import type { RuntimeConfigSnapshot } from '@shared/ipc/session'
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 
 const router = useRouter()
@@ -91,6 +117,42 @@ const messageStore = useMessageStore()
 const gitStore = useGitStore()
 const uiStore = useUiStore()
 useStreamMessage()
+
+// 侧栏可拖拽宽度--min 为当前默认宽度，max 为容器一半（即最大 1:1 与聊天区同宽）
+const SIDEBAR_MIN = 280
+const RIGHT_PANEL_MIN = 320
+// 底部终端面板可拖拽高度——min 保证终端至少能显示几行，max 不超过容器 70%（留空间给聊天区）
+const BOTTOM_PANEL_MIN = 120
+const containerRef = ref<HTMLElement | null>(null)
+const containerWidth = ref(Number.POSITIVE_INFINITY)
+const containerHeight = ref(Number.POSITIVE_INFINITY)
+
+const sidebarMax = computed(() => Math.max(SIDEBAR_MIN, Math.floor(containerWidth.value / 2)))
+const rightPanelMax = computed(() =>
+  Math.max(RIGHT_PANEL_MIN, Math.floor(containerWidth.value / 2)),
+)
+const bottomPanelMax = computed(() =>
+  Math.max(BOTTOM_PANEL_MIN, Math.floor(containerHeight.value * 0.7)),
+)
+
+let resizeObserver: ResizeObserver | null = null
+onMounted(() => {
+  if (containerRef.value) {
+    containerWidth.value = containerRef.value.clientWidth
+    containerHeight.value = containerRef.value.clientHeight
+    resizeObserver = new ResizeObserver((entries) => {
+      for (const entry of entries) {
+        containerWidth.value = entry.contentRect.width
+        containerHeight.value = entry.contentRect.height
+      }
+    })
+    resizeObserver.observe(containerRef.value)
+  }
+})
+onUnmounted(() => {
+  resizeObserver?.disconnect()
+  resizeObserver = null
+})
 
 // 工作区切换时刷新 git status
 watch(
@@ -115,17 +177,53 @@ watch(
   },
 )
 
+/**
+ * 运行时配置——后端 / 模型 / 权限模式 / 思考强度。
+ *
+ * 注意 permissionMode 是非空类型——默认 'default'（与 Composer 下拉保持一致）。
+ * 序列化成 RuntimeConfigSnapshot 持久化时，permissionMode 若为 'default'
+ * 也允许写 null（"用户没显式选过"），见 toSnapshot()。
+ */
 interface RuntimeConfig {
+  backend: BackendId
   model: string | null
   effort: EffortLevel | null
   permissionMode: PermissionMode
 }
 
 const runtimeConfig = ref<RuntimeConfig>({
+  backend: 'codex',
   model: null,
   effort: 'medium',
   permissionMode: 'default',
 })
+
+/** 程序是否正在用 last-used 恢复 runtimeConfig——避免回写 watch 触发循环。 */
+const isRestoring = ref(false)
+
+/**
+ * Composer 的 v-model 桥——只暴露 model/effort/permissionMode（不含 backend）。
+ * runtimeConfig 加了 backend 字段但 Composer 的 RuntimeConfigValue 不含，
+ * 这里用 computed 把 backend 剥掉，update 通过 onComposerUpdate 写回。
+ */
+const composerModelValue = computed(() => ({
+  model: runtimeConfig.value.model,
+  effort: runtimeConfig.value.effort,
+  permissionMode: runtimeConfig.value.permissionMode,
+}))
+
+function onComposerUpdate(v: {
+  model: string | null
+  effort: EffortLevel | null
+  permissionMode: PermissionMode
+}): void {
+  runtimeConfig.value = {
+    ...runtimeConfig.value,
+    model: v.model,
+    effort: v.effort,
+    permissionMode: v.permissionMode,
+  }
+}
 
 onMounted(async () => {
   if (!workspaceStore.currentWorkspace) {
@@ -133,6 +231,35 @@ onMounted(async () => {
     return
   }
   await backendStore.refresh()
+
+  // 从 last-used 恢复 runtimeConfig——新建会话默认从这里取。
+  // permissionMode 兜底成 'default'；backend 兜底成 currentId。
+  try {
+    const last = await window.api.session.getLastRuntimeConfig()
+    if (last) {
+      isRestoring.value = true
+      runtimeConfig.value = {
+        backend: last.backend,
+        model: last.model,
+        effort: last.effort,
+        permissionMode: last.permissionMode ?? 'default',
+      }
+      isRestoring.value = false
+    }
+  } catch (e) {
+    console.warn('[ChatView] load last runtime config failed:', e)
+  }
+
+  // 若 last-used 的 backend 跟当前后端不一致，切过去。
+  if (runtimeConfig.value.backend !== backendStore.currentId) {
+    try {
+      await backendStore.switchTo(runtimeConfig.value.backend)
+    } catch (e) {
+      console.warn('[ChatView] switch to last-used backend failed:', e)
+      runtimeConfig.value.backend = backendStore.currentId
+    }
+  }
+
   await backendStore.loadModels()
   await sessionStore.load(workspaceStore.currentWorkspace.id)
 
@@ -163,15 +290,99 @@ watch(
   { immediate: true },
 )
 
-// 切换 backend 时清空 model selection——不同 backend 的 model id 不互通
-// （比如 claude 的 'sonnet' 传给 codex 会报 "The 'sonnet' model is not supported
-// when using Codex with a ChatGPT account"）。清空后上面的 watch 会从新 backend
-// 的 models 列表重新挑一个默认。
+/**
+ * 切 backend（来自 RuntimeConfigBar 下拉 / SessionList tab）时：
+ *   1. 同步 runtimeConfig.backend
+ *   2. 清空 model selection——不同 backend 的 model id 不互通
+ *      （比如 claude 的 'sonnet' 传给 codex 会报 "The 'sonnet' model is not supported
+ *      when using Codex with a ChatGPT account"）。清空后上面的 watch 会从新 backend
+ *      的 models 列表重新挑一个默认。
+ *
+ * 不在这里触发 last-used 写回——runtimeConfig 的 watch 会处理（backend 变更
+ * 是 runtimeConfig 字段变化，会自然触发 watch）。
+ */
 watch(
   () => backendStore.currentId,
-  () => {
-    runtimeConfig.value.model = null
+  (newId) => {
+    if (runtimeConfig.value.backend !== newId) {
+      runtimeConfig.value.backend = newId
+      runtimeConfig.value.model = null
+    }
   },
+)
+
+/**
+ * 切历史会话时按 session 字段恢复 runtimeConfig。
+ *
+ * session.backend：切到对应后端（selectSession 已经处理过，这里兜底对齐）。
+ * session.model/effort/permissionMode：null 时保留 last-used 不动（导入的老会话可能没记录）。
+ */
+watch(
+  () => sessionStore.currentSession?.id,
+  (newId) => {
+    if (!newId) return
+    const session = sessionStore.sessions.find((s) => s.id === newId)
+    if (!session) return
+    isRestoring.value = true
+    // backend 对齐——session.backend 是会话固有属性
+    if (session.backend !== runtimeConfig.value.backend) {
+      runtimeConfig.value.backend = session.backend
+      // backend 变了 model 必须清空（不同 backend 的 model id 不互通）
+      runtimeConfig.value.model = null
+    }
+    // model/effort/permissionMode：null 时保留现有值（避免老会话覆盖 last-used）
+    if (session.model) runtimeConfig.value.model = session.model
+    if (session.effort) runtimeConfig.value.effort = session.effort
+    if (session.permissionMode) runtimeConfig.value.permissionMode = session.permissionMode
+    isRestoring.value = false
+  },
+)
+
+/**
+ * runtimeConfig 变化时同步：
+ *   1. 写回 last-used 全局缓存（下次新建会话的默认值）
+ *   2. 写回当前 session 的 db 字段（切回这个会话能恢复）
+ *   3. 同步本地 sessions 数组（侧边栏 / 别处 reactive）
+ *
+ * isRestoring=true 时跳过——正在从 last-used/session 字段恢复时不该再回写，
+ * 否则会把恢复中的中间态当作用户选择持久化下来。
+ *
+ * isRestoring=false 但没 currentSession（用户在新建会话初始态）只写 last-used，
+ * 不调 updateConfig（没 sessionId 可写）。
+ */
+watch(
+  runtimeConfig,
+  async (cfg) => {
+    if (isRestoring.value) return
+    const snapshot: RuntimeConfigSnapshot = {
+      backend: cfg.backend,
+      model: cfg.model,
+      effort: cfg.effort,
+      permissionMode: cfg.permissionMode === 'default' ? null : cfg.permissionMode,
+    }
+    await window.api.session
+      .setLastRuntimeConfig(snapshot)
+      .catch((e) => console.warn('[ChatView] setLastRuntimeConfig failed:', e))
+    const sid = sessionStore.currentSession?.id
+    if (sid) {
+      await window.api.session
+        .updateConfig({
+          sessionId: sid,
+          model: cfg.model,
+          effort: cfg.effort,
+          permissionMode: snapshot.permissionMode,
+        })
+        .catch((e) => console.warn('[ChatView] updateConfig failed:', e))
+      // 同步本地 sessions 数组（updateConfig IPC 没返回新值）
+      const target = sessionStore.sessions.find((s) => s.id === sid)
+      if (target) {
+        target.model = cfg.model
+        target.effort = cfg.effort
+        if (snapshot.permissionMode) target.permissionMode = snapshot.permissionMode
+      }
+    }
+  },
+  { deep: true },
 )
 
 async function onSend(text: string, attachments: ContextBlock[]): Promise<void> {

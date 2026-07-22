@@ -29,6 +29,7 @@ export function createMainWindow(): BrowserWindow {
     minWidth: 800,
     minHeight: 600,
     show: false,
+    frame: false, // 完全移除窗口框架
     autoHideMenuBar: true,
     title: 'catmax',
     backgroundColor: '#18181b', // 与 dark theme --background 接近，避免白闪

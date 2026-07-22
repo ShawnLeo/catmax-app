@@ -35,4 +35,9 @@ export type SystemHandlers = {
   'system.openExternal': (args: { url: string }) => Promise<void>
   /** 检测当前系统的代理设置（macOS 读 scutil，Windows 读注册表，Linux 读 env） */
   'system.detectProxy': () => Promise<DetectedSystemProxy>
+  /** 窗口控制 */
+  'system.windowMinimize': () => Promise<void>
+  'system.windowMaximize': () => Promise<void>
+  'system.windowClose': () => Promise<void>
+  'system.windowIsMaximized': () => Promise<boolean>
 }

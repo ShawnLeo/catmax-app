@@ -33,6 +33,12 @@ export const api = {
     openDialog: requestMain<SystemHandlers, 'system.openDialog'>(IPC.SYSTEM_OPEN_DIALOG),
     openExternal: requestMain<SystemHandlers, 'system.openExternal'>(IPC.SYSTEM_OPEN_EXTERNAL),
     detectProxy: requestMain<SystemHandlers, 'system.detectProxy'>(IPC.SYSTEM_DETECT_PROXY),
+    windowMinimize: requestMain<SystemHandlers, 'system.windowMinimize'>(IPC.SYSTEM_WINDOW_MINIMIZE),
+    windowMaximize: requestMain<SystemHandlers, 'system.windowMaximize'>(IPC.SYSTEM_WINDOW_MAXIMIZE),
+    windowClose: requestMain<SystemHandlers, 'system.windowClose'>(IPC.SYSTEM_WINDOW_CLOSE),
+    windowIsMaximized: requestMain<SystemHandlers, 'system.windowIsMaximized'>(
+      IPC.SYSTEM_WINDOW_IS_MAXIMIZED,
+    ),
   },
   backend: {
     list: requestMain<BackendHandlers, 'backend.list'>(IPC.BACKEND_LIST),
@@ -70,6 +76,16 @@ export const api = {
     ),
     import: requestMain<SessionHandlers, 'session.import'>(IPC.SESSION_IMPORT),
     detail: requestMain<SessionHandlers, 'session.detail'>(IPC.SESSION_DETAIL),
+    readSubagentHistory: requestMain<SessionHandlers, 'session.readSubagentHistory'>(
+      IPC.SESSION_READ_SUBAGENT_HISTORY,
+    ),
+    updateConfig: requestMain<SessionHandlers, 'session.updateConfig'>(IPC.SESSION_UPDATE_CONFIG),
+    getLastRuntimeConfig: requestMain<SessionHandlers, 'session.getLastRuntimeConfig'>(
+      IPC.SESSION_GET_LAST_RUNTIME_CONFIG,
+    ),
+    setLastRuntimeConfig: requestMain<SessionHandlers, 'session.setLastRuntimeConfig'>(
+      IPC.SESSION_SET_LAST_RUNTIME_CONFIG,
+    ),
     onTitleChanged: (cb: (payload: SessionPushEvents['session:titleChanged']) => void) =>
       subscribeToMainEvent<SessionPushEvents, 'session:titleChanged'>(
         PUSH.SESSION_TITLE_CHANGED,

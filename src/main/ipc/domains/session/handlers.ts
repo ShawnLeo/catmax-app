@@ -1,16 +1,18 @@
 import { randomUUID } from 'node:crypto'
 
+import { readSubagentHistory as readSubagentHistoryFromJsonl } from '@main/backend/claude/jsonl-reader'
 import { encodeCwdToProjectDir } from '@main/backend/claude/jsonl-reader'
 import { ctx } from '@main/context'
 import { logger } from '@main/service/logger'
-import type { SessionSummary } from '@shared/backend/types'
-import type { BackendId } from '@shared/constants'
+import type { SessionSummary, NormalizedMessage } from '@shared/backend/types'
+import { STORAGE_KEYS, type BackendId } from '@shared/constants'
 import type { SessionRecord, SessionView, WorkspaceRecord } from '@shared/domain'
 import type {
   CreateSessionArgs,
   ImportSessionArgs,
   ImportSessionsResult,
   ImportableSession,
+  RuntimeConfigSnapshot,
   ScanImportableResult,
 } from '@shared/ipc/session'
 
@@ -378,4 +380,67 @@ export const getSessionDetail = async (args: { sessionId: string }) => {
     messages,
     aiTitle,
   }
+}
+
+/**
+ * 读取子 Agent（Task 工具调用）的完整会话历史。
+ *
+ * 用于 TaskCard 完成后展开按钮点击，把子 Agent 的每一步（Read/Edit/Bash/文本）
+ * 嵌入为可折叠的子会话视图。
+ */
+export const readSubagentHistory = async (args: {
+  backend: BackendId
+  agentId: string
+  cwd: string
+}): Promise<NormalizedMessage[]> => {
+  // 只有 claude 有子 agent（codex 返回空数组）
+  if (args.backend !== 'claude') return []
+  return readSubagentHistoryFromJsonl(args.agentId, args.cwd)
+}
+
+/**
+ * 写回 session 的运行时配置（model / effort / permissionMode）。
+ *
+ * 用户在 Composer 改配置时调（不只更新 last-used 缓存，也写回当前 session）——
+ * 这样切到别的会话再切回来，能恢复到用户最后一次在这个会话里用的配置。
+ *
+ * session.backend 不写——是会话固有属性（创建时定）。
+ */
+export const updateSessionConfig = async (args: {
+  sessionId: string
+  model?: string | null
+  effort?: string | null
+  permissionMode?: string | null
+}): Promise<void> => {
+  const session = ctx.db.findSessionById(args.sessionId)
+  if (!session) {
+    throw new SessionError('not-found', `session not found: ${args.sessionId}`)
+  }
+  ctx.db.updateSessionConfig(args.sessionId, {
+    model: args.model,
+    effort: args.effort,
+    permissionMode: args.permissionMode,
+  })
+}
+
+/**
+ * 读"最近一次运行时配置"快照（给新建会话用做默认值）。
+ *
+ * 存在 app_state 表里（key=LAST_RUNTIME_CONFIG），值是 RuntimeConfigSnapshot JSON。
+ * 文件未初始化 / JSON 损坏时返回 null——调用方兜底成默认值。
+ */
+export const getLastRuntimeConfig = async (): Promise<RuntimeConfigSnapshot | null> => {
+  const raw = ctx.db.getState(STORAGE_KEYS.LAST_RUNTIME_CONFIG)
+  if (!raw) return null
+  try {
+    return JSON.parse(raw) as RuntimeConfigSnapshot
+  } catch (e) {
+    log.warn('failed to parse last runtime config, ignoring:', e)
+    return null
+  }
+}
+
+/** 覆盖写最近一次运行时配置快照。 */
+export const setLastRuntimeConfig = async (args: RuntimeConfigSnapshot): Promise<void> => {
+  ctx.db.setState(STORAGE_KEYS.LAST_RUNTIME_CONFIG, JSON.stringify(args))
 }

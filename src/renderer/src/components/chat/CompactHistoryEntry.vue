@@ -54,6 +54,6 @@ defineProps<{
   summary?: string | undefined
 }>()
 
-/** 折叠态——默认收起（摘要对快速阅读是噪音，需要时点开看） */
-const expanded = ref(false)
+/** 折叠态——默认展开（用户希望一眼看到 /compact 后的上下文摘要） */
+const expanded = ref(true)
 </script>

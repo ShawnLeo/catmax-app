@@ -26,7 +26,13 @@ import type {
   ToolResultContent,
   ToolUseContent,
 } from '@shared/backend/claude-schema'
-import type { ToolCallInfo, ToolOutput, TurnEvent, ApprovalRequest } from '@shared/backend/types'
+import type {
+  ToolCallInfo,
+  ToolOutput,
+  ToolTaskStats,
+  TurnEvent,
+  ApprovalRequest,
+} from '@shared/backend/types'
 
 import { assessRisk } from '../shared/assess-risk'
 
@@ -346,20 +352,74 @@ export function* assistantToEvents(msg: AssistantMessage, turnId: string): Itera
   }
 }
 
-/** 从 user 消息（含 tool_result）提取 tool_call_completed 事件 */
+/**
+ * 把 tool_use_result（Task 完成时 user 消息的顶层字段）转成 ToolTaskStats。
+ *
+ * 非 Task 工具不带这个字段，返回 undefined。
+ * 字段全是 optional--claude CLI 版本不同可能缺字段，防御性提取。
+ */
+export function toolUseResultToStats(tur: unknown): ToolTaskStats | undefined {
+  if (tur === null || typeof tur !== 'object') return undefined
+  const r = tur as Record<string, unknown>
+  const stats = r.toolStats
+  return {
+    ...(typeof r.agentId === 'string' ? { agentId: r.agentId } : {}),
+    ...(typeof r.totalDurationMs === 'number' ? { totalDurationMs: r.totalDurationMs } : {}),
+    ...(typeof r.totalTokens === 'number' ? { totalTokens: r.totalTokens } : {}),
+    ...(typeof r.totalToolUseCount === 'number' ? { totalToolUseCount: r.totalToolUseCount } : {}),
+    ...(typeof r.agentType === 'string' ? { agentType: r.agentType } : {}),
+    ...(stats !== null && typeof stats === 'object'
+      ? {
+          toolStats: {
+            ...(typeof (stats as Record<string, unknown>).readCount === 'number'
+              ? { readCount: (stats as Record<string, unknown>).readCount as number }
+              : {}),
+            ...(typeof (stats as Record<string, unknown>).searchCount === 'number'
+              ? { searchCount: (stats as Record<string, unknown>).searchCount as number }
+              : {}),
+            ...(typeof (stats as Record<string, unknown>).bashCount === 'number'
+              ? { bashCount: (stats as Record<string, unknown>).bashCount as number }
+              : {}),
+            ...(typeof (stats as Record<string, unknown>).editFileCount === 'number'
+              ? { editFileCount: (stats as Record<string, unknown>).editFileCount as number }
+              : {}),
+            ...(typeof (stats as Record<string, unknown>).linesAdded === 'number'
+              ? { linesAdded: (stats as Record<string, unknown>).linesAdded as number }
+              : {}),
+            ...(typeof (stats as Record<string, unknown>).linesRemoved === 'number'
+              ? { linesRemoved: (stats as Record<string, unknown>).linesRemoved as number }
+              : {}),
+            ...(typeof (stats as Record<string, unknown>).otherToolCount === 'number'
+              ? { otherToolCount: (stats as Record<string, unknown>).otherToolCount as number }
+              : {}),
+          },
+        }
+      : {}),
+  }
+}
+
+/**
+ * 从 user 消息（含 tool_result）提取 tool_call_completed 事件。
+ *
+ * 第二个参数是 user 消息顶层的 tool_use_result 字段（可选）--Task（子 Agent）
+ * 完成时 claude CLI 会附加这个字段，携带子 Agent 的耗时 / token / 工具统计。
+ * 我们提取成 ToolTaskStats，挂到 tool_call_completed 事件上让 UI 显示。
+ */
 export function* userToolResultToEvents(
-  msg: { message: { content: ContentBlock[] } },
+  msg: { message: { content: ContentBlock[] }; tool_use_result?: unknown },
   turnId: string,
 ): Iterable<TurnEvent> {
   for (const block of msg.message.content) {
     if (block.type === 'tool_result') {
       const result = block as ToolResultContent
       const itemId = result.tool_use_id
+      const stats = toolUseResultToStats(msg.tool_use_result)
       yield {
         type: 'tool_call_completed',
         turnId,
         itemId,
         output: toolResultToOutput(result),
+        ...(stats !== undefined ? { taskStats: stats } : {}),
       }
     }
   }

@@ -1,5 +1,8 @@
 <template>
-  <aside v-if="visible" class="w-80 flex flex-col bg-card border-l border-border">
+  <aside
+    class="flex flex-col bg-card border-l border-border shrink-0"
+    :style="{ width: uiStore.rightPanelWidth + 'px' }"
+  >
     <!-- Tab 头 -->
     <div class="flex border-b border-border">
       <button
@@ -23,23 +26,22 @@
     <div class="flex-1 overflow-hidden">
       <GitPanel v-if="activeTab === 'git'" />
       <FileTree v-else-if="activeTab === 'files'" />
-      <TerminalPanel v-else-if="activeTab === 'terminal'" />
     </div>
   </aside>
 </template>
 
 <script setup lang="ts">
 import { useGitStore } from '@renderer/stores/git'
-import { FolderTreeIcon, GitBranchIcon, TerminalIcon } from 'lucide-vue-next'
+import { useUiStore } from '@renderer/stores/ui'
+import { FolderTreeIcon, GitBranchIcon } from 'lucide-vue-next'
 import { computed, ref } from 'vue'
 
 import FileTree from './FileTree.vue'
 import GitPanel from './GitPanel.vue'
-import TerminalPanel from './TerminalPanel.vue'
 
-defineProps<{ visible: boolean }>()
+const uiStore = useUiStore()
 
-type TabId = 'git' | 'files' | 'terminal'
+type TabId = 'git' | 'files'
 const activeTab = ref<TabId>('git')
 const gitStore = useGitStore()
 
@@ -54,12 +56,6 @@ const tabs = computed(() => [
     id: 'files' as const,
     label: 'Files',
     icon: FolderTreeIcon,
-    badge: undefined,
-  },
-  {
-    id: 'terminal' as const,
-    label: 'Terminal',
-    icon: TerminalIcon,
     badge: undefined,
   },
 ])

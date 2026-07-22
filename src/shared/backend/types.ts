@@ -156,6 +156,45 @@ export interface ToolTaskInfo {
   description: string
   /** 给子 agent 的完整 prompt（可能很长，前端截断展示） */
   prompt: string
+  /**
+   * 子 Agent 完成统计（agentId / 耗时 / token / 工具分类计数）。
+   * 实时流路径由 messageStore 从 tool_call_completed.taskStats 合并；
+   * 历史回放路径由 history-mapping 从 user 消息顶层 tool_use_result 合并。
+   * 完成前为 undefined（TaskCard 显示 running 态）。
+   */
+  stats?: ToolTaskStats
+}
+
+/**
+ * Task（子 Agent）完成统计--从 user 消息的 tool_use_result 字段提取。
+ *
+ * 来源：claude CLI 在子 Agent 完成时给 tool_result 附加的顶层元数据。
+ * 包含总耗时 / token 数 / 工具调用次数 / 工具分类计数。
+ *
+ * 前端用来在 TaskCard 完成态显示"153s · 31.6k tokens · 5 次工具调用"这类摘要，
+ * 让子 Agent 不再是完全黑盒。
+ */
+export interface ToolTaskStats {
+  /** 子 Agent id（完成时从 tool_use_result.agentId 拿到），用于读 ~/.claude/projects/.../subagents/agent-<id>.jsonl */
+  agentId?: string
+  /** 子 Agent 总耗时（毫秒） */
+  totalDurationMs?: number
+  /** 子 Agent 总 token 数（input + output + cache） */
+  totalTokens?: number
+  /** 子 Agent 内部工具调用总次数 */
+  totalToolUseCount?: number
+  /** 子 Agent 类型（"general-purpose" / "Explore" / ...） */
+  agentType?: string
+  /** 子 Agent 内部工具使用分类计数 */
+  toolStats?: {
+    readCount?: number
+    searchCount?: number
+    bashCount?: number
+    editFileCount?: number
+    linesAdded?: number
+    linesRemoved?: number
+    otherToolCount?: number
+  }
 }
 
 /**
@@ -277,6 +316,12 @@ export type TurnEvent =
       turnId: string
       itemId: string
       output: ToolOutput
+      /**
+       * Task（子 Agent）完成统计--仅当 tool 是 Task 时存在。
+       * 从 user 消息的顶层 tool_use_result 字段提取，让前端在完成态显示
+       * "153s · 31.6k tokens · 5 次工具调用"，把子 Agent 从黑盒变成可观测。
+       */
+      taskStats?: ToolTaskStats
     }
   | {
       type: 'approval_requested'
@@ -343,6 +388,19 @@ export interface NormalizedMessage {
     output?: ToolOutput
     approvalState?: 'pending' | 'approved' | 'rejected'
     approvalRequestId?: string
+    /**
+     * 工具调用开始时间戳（收到 tool_call_started 时设置）。
+     * 前端用来算"已运行 N 秒"--尤其 Task（子 Agent）可能跑很久，
+     * 有个实时计时器让用户知道它真的在跑而不是卡死。
+     */
+    startedAt?: number
+    /**
+     * Task（子 Agent）完成统计--仅当 info.kind === 'task' 时存在。
+     * 历史回放路径由 history-mapping 从 jsonl 的 tool_use_result 提取；
+     * 实时流路径由 messageStore 从 tool_call_completed 事件写入。
+     * 前端 TaskCard 完成态显示"153s · 31.6k tokens · 5 次工具调用"。
+     */
+    taskStats?: ToolTaskStats
   }[]
   /**
    * Context tag 块（IDE selection / opened file / environment_context 等）。

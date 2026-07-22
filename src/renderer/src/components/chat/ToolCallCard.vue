@@ -19,10 +19,7 @@
     ]"
   >
     <!-- 标题行：点击在 preview ↔ expanded 之间切换 -->
-    <button
-      class="w-full flex items-center gap-2 px-3 py-1.5 text-left"
-      @click="toggleExpand"
-    >
+    <button class="w-full flex items-center gap-2 px-3 py-1.5 text-left" @click="toggleExpand">
       <component
         :is="iconForKind(tool.info.kind)"
         class="w-3.5 h-3.5 text-muted-foreground flex-shrink-0"
@@ -31,7 +28,8 @@
       <span
         class="text-[12px] text-muted-foreground font-mono truncate flex-1 min-w-0"
         :title="displayPathTooltip"
-      >{{ displayPath }}</span>
+        >{{ displayPath }}</span
+      >
 
       <!-- 箭头：preview 不旋转；expanded 旋转 180 -->
       <ChevronDownIcon
@@ -77,8 +75,15 @@
         />
       </div>
 
-      <!-- Task 工具：子 agent 摘要 -->
-      <TaskCard v-else-if="tool.info.task" :task="tool.info.task" class="p-3" />
+      <!-- Task 工具：子 agent 摘要 + 运行计时/完成统计 -->
+      <TaskCard
+        v-else-if="tool.info.task"
+        :task="tool.info.task"
+        :tool="tool"
+        :cwd="cwd"
+        :show-thinking="showThinking ?? true"
+        class="p-3"
+      />
 
       <!-- 文件编辑：DiffView 渲染结构化 diff -->
       <DiffView v-else-if="tool.info.edit" :edit="tool.info.edit" />
@@ -91,8 +96,7 @@
       <pre
         v-else-if="tool.info.kind === 'shell_command' && tool.output?.output"
         class="font-mono text-[12px] bg-terminal text-foreground/80 p-3 overflow-x-auto whitespace-pre-wrap"
-        >{{ tool.output.output }}</pre
-      >
+        >{{ tool.output.output }}</pre>
 
       <!--
         其他工具（file_read/mcp/other）：优先显示 output，没 output 才显示 detail。
@@ -101,13 +105,11 @@
       <pre
         v-else-if="tool.output?.output"
         class="font-mono text-[12px] bg-terminal text-foreground/80 p-3 overflow-x-auto whitespace-pre-wrap"
-        >{{ tool.output.output }}</pre
-      />
+        >{{ tool.output.output }}</pre>
       <pre
         v-else-if="tool.info.detail && tool.info.detail !== '{}'"
         class="font-mono text-[12px] bg-terminal text-foreground p-3 overflow-x-auto whitespace-pre-wrap"
-        >{{ tool.info.detail }}</pre
-      >
+        >{{ tool.info.detail }}</pre>
     </div>
   </div>
 </template>
@@ -138,6 +140,10 @@ import WebCard from './web/WebCard.vue'
 
 const props = defineProps<{
   tool: NonNullable<NormalizedMessage['toolBlocks']>[number]
+  /** 工作区目录--子 agent 读 jsonl 需要 */
+  cwd: string
+  /** 是否显示思考块（透传给子 agent） */
+  showThinking?: boolean
 }>()
 
 /**

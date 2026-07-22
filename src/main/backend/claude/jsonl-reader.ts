@@ -303,3 +303,64 @@ export async function readHistoryFromJsonl(
   const normalized = claudeReplayToMessages(parsed.messages)
   return { messages: normalized, aiTitle: parsed.aiTitle }
 }
+
+/**
+ * 推算子 Agent 的 jsonl 文件路径。
+ *   ~/.claude/projects/<encoded-cwd>/subagents/agent-<agentId>.jsonl
+ *
+ * claude CLI 把每个子 Agent（Task 工具调用）的完整会话写到这个文件，格式跟外层
+ * session jsonl 一致（type: user/assistant，message.content 是 text/tool_use/tool_result）。
+ * 调用方拿到后可以直接复用 claudeReplayToMessages 转 NormalizedMessage[]。
+ */
+export function resolveSubagentJsonlPath(agentId: string, cwd: string): string {
+  const projectDir = encodeCwdToProjectDir(cwd)
+  return join(homedir(), '.claude', 'projects', projectDir, 'subagents', `agent-${agentId}.jsonl`)
+}
+
+/**
+ * 读子 Agent 的 jsonl 历史 -> NormalizedMessage[]。
+ *
+ * 用于 TaskCard 展开时拉取子 Agent 的完整会话过程（Read/Edit/Bash/文本等），
+ * 把子 Agent 从黑盒变成可回放。复用 readClaudeSessionJsonl 的解析逻辑（格式相同）。
+ *
+ * 文件不存在或解析失败时返回空数组（不抛），UI 显示"子 Agent 过程不可用"。
+ */
+export async function readSubagentHistory(
+  agentId: string,
+  cwd: string,
+): Promise<NormalizedMessage[]> {
+  const filePath = resolveSubagentJsonlPath(agentId, cwd)
+  if (!existsSync(filePath)) {
+    log.warn('subagent jsonl not found:', filePath)
+    return []
+  }
+  // 复用 readClaudeSessionJsonl 的流式读取 + normalize 逻辑--
+  // 把 sessionId 参数当占位（函数内部只用它拼路径，subagent 路径不同，绕过 sessionId）。
+  // 直接 inline 读取逻辑避免改 readClaudeSessionJsonl 签名影响其他调用方。
+  const messages: ClaudeStreamMessage[] = []
+  const stream = createInterface({
+    input: createReadStream(filePath, { encoding: 'utf-8' }),
+    crlfDelay: Infinity,
+  })
+  for await (const rawLine of stream) {
+    const line = rawLine.trim()
+    if (!line) continue
+    let obj: JsonlLine
+    try {
+      obj = JSON.parse(line) as JsonlLine
+    } catch {
+      continue
+    }
+    if (obj.type === 'assistant' && obj.message) {
+      messages.push(obj as unknown as ClaudeStreamMessage)
+      continue
+    }
+    if (obj.type === 'user' && obj.message) {
+      obj.message.content = normalizeUserContent(obj.message.content)
+      messages.push(obj as unknown as ClaudeStreamMessage)
+      continue
+    }
+  }
+  log.info('subagent jsonl parsed', filePath, messages.length, 'msgs')
+  return claudeReplayToMessages(messages)
+}

@@ -36,6 +36,7 @@
         :key="message.id"
         :message="message"
         :show-thinking="showThinking"
+        :cwd="cwd"
       />
 
       <!--
@@ -92,6 +93,7 @@
 
 <script setup lang="ts">
 import { useMessageStore } from '@renderer/stores/message'
+import { useWorkspaceStore } from '@renderer/stores/workspace'
 import { AlertCircleIcon, ArrowDownIcon } from 'lucide-vue-next'
 import { onMounted, ref, watch, nextTick, computed } from 'vue'
 
@@ -103,6 +105,10 @@ const props = defineProps<{
   showThinking?: boolean
 }>()
 const showThinking = computed(() => props.showThinking ?? true)
+const workspaceStore = useWorkspaceStore()
+
+/** 工作区目录--子 agent 读 jsonl 需要 */
+const cwd = computed(() => workspaceStore.currentWorkspace?.path ?? '')
 
 const messageStore = useMessageStore()
 const container = ref<HTMLElement | null>(null)

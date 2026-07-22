@@ -1,20 +1,25 @@
 <template>
   <!--
+    历史 /compact 条目：分隔线 + 可折叠摘要。
+    全宽渲染——必须放在 <article> 外面，绕过 user 气泡的 max-w-[80%] /
+    flex-row-reverse 约束，否则分隔线只占右侧 80%、文字看起来不居中。
+    history-mapping 把 /compact + 摘要存成 user message（textBlocks[0]='/compact'），
+    这里识别该模式并交给 CompactHistoryEntry 渲染（不再走 user 气泡布局）。
+  -->
+  <CompactHistoryEntry v-if="isCompactHistoryEntry" :summary="compactSummary" />
+
+  <!--
     消息项布局：
     - user：靠右，单个淡灰气泡（bg-user-bubble，对齐 Claude Code #222222）
     - assistant：靠左，**时间轴布局**——左侧竖线 + 每个事件一个色点串起来
       （起始色点 + 每个 tool 一个色点），文本回复贴在竖线右侧
   -->
-  <article :class="['flex gap-3', message.role === 'user' ? 'flex-row-reverse' : 'flex-row']">
+  <article
+    v-else
+    :class="['flex gap-3', message.role === 'user' ? 'flex-row-reverse' : 'flex-row']"
+  >
     <!-- 消息体 -->
     <div :class="['min-w-0', message.role === 'user' ? 'max-w-[80%]' : 'flex-1']">
-      <!--
-        历史 /compact 条目：不展示 /compact 用户气泡，改为分隔线 + 可折叠摘要。
-        history-mapping 把 /compact + 摘要存成 user message（textBlocks[0]='/compact'），
-        这里识别该模式并交给 CompactHistoryEntry 渲染。
-      -->
-      <CompactHistoryEntry v-if="isCompactHistoryEntry" :summary="compactSummary" />
-
       <!--
         user 消息：合并成一个气泡（对齐 Claude Code）。
 
@@ -26,10 +31,13 @@
         chip 是"用户引用了哪些文件"的上下文标识，作为一块放上方；
         文本是核心 prompt，自然占满下方。多 chip 之间用 gap-x-3 隔开（比 chip 内部
         紧凑，让 chip 组视觉上是一个整体）。
+
+        hover 气泡时右下角浮出操作行：发送时间（最短化）+ 复制按钮。
+        group/group-hover 控制：鼠标移开自动隐藏，不抢占视觉。
       -->
       <div
-        v-else-if="message.role === 'user' && hasAnyUserContent"
-        class="rounded-2xl bg-user-bubble border border-border/50 p-3 flex flex-col gap-2 break-words"
+        v-if="message.role === 'user' && hasAnyUserContent"
+        class="group relative rounded-2xl bg-user-bubble border border-border/50 p-3 flex flex-col gap-2 break-words"
       >
         <!--
           附件 chip 区（IDE selection / opened file）：多个 chip 聚成一组，
@@ -57,6 +65,21 @@
             {{ block.text }}
           </div>
         </template>
+
+        <!-- hover 浮出的操作行：时间 + 复制 -->
+        <div
+          class="absolute right-2 -bottom-6 flex items-center gap-1.5 text-[11px] text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none"
+        >
+          <span>{{ formattedTime }}</span>
+          <button
+            type="button"
+            class="pointer-events-auto p-0.5 rounded hover:text-foreground hover:bg-muted/60 transition-colors"
+            :title="copied ? '已复制' : '复制'"
+            @click="onCopy"
+          >
+            <component :is="copied ? CheckIcon : CopyIcon" class="w-3 h-3" />
+          </button>
+        </div>
       </div>
 
       <!--
@@ -69,7 +92,7 @@
           - 绿色脉冲 = 运行中（有工具 running 或流式输出）
           - 红色 = 有工具失败
       -->
-      <div v-else class="relative pl-6 border-l border-border/40">
+      <div v-else-if="message.role === 'assistant'" class="relative pl-6 border-l border-border/40">
         <!-- 唯一的起始色点 -->
         <span
           :class="['absolute w-2 h-2 rounded-full -left-[5px] top-1.5', assistantStatusClass]"
@@ -85,7 +108,12 @@
           <!-- Read 内联渲染（file_read + title "Read: ..."） -->
           <ToolCallInline v-if="isInlineTool(tool)" :tool="tool" />
           <!-- 其他工具走卡片 -->
-          <ToolCallCard v-else :tool="tool" />
+          <ToolCallCard
+            v-else
+            :tool="tool"
+            :cwd="cwd ?? ''"
+            :show-thinking="showThinking ?? true"
+          />
         </div>
 
         <!--
@@ -127,9 +155,11 @@
 
 <script setup lang="ts">
 import { contextTagRegistry } from '@renderer/lib/context-tag-registry'
+import { formatMessageTime } from '@renderer/lib/format'
 import { useMessageStore } from '@renderer/stores/message'
 import type { NormalizedMessage } from '@shared/backend/types'
-import { computed } from 'vue'
+import { CheckIcon, CopyIcon } from 'lucide-vue-next'
+import { computed, ref } from 'vue'
 
 import CompactHistoryEntry from './CompactHistoryEntry.vue'
 import MarkdownView from './MarkdownView.vue'
@@ -145,6 +175,8 @@ const props = defineProps<{
   message: NormalizedMessage
   /** 是否显示思考块（reasoning）。false 时过滤掉 kind='reasoning' 的 textBlocks。 */
   showThinking?: boolean
+  /** 工作区目录--子 agent 读 jsonl 需要 */
+  cwd?: string
 }>()
 
 /** 按 tag 名从注册表查 component。加新 tag 不用改这里。 */
@@ -219,6 +251,34 @@ const hasAnyUserContent = computed(() => {
   if (props.message.contextBlocks && props.message.contextBlocks.length > 0) return true
   return (props.message.textBlocks ?? []).some((b) => b.text.trim().length > 0)
 })
+
+/** user 气泡 hover 时显示的发送时间（最短化格式）。 */
+const formattedTime = computed(() => formatMessageTime(props.message.createdAt))
+
+/** 复制按钮：1.5s 内显示"已复制"对勾反馈 */
+const copied = ref(false)
+let copyTimer: ReturnType<typeof setTimeout> | null = null
+
+/** 复制 user 消息正文：拼所有 text 块，用空行分隔多个 block。 */
+function onCopy(): void {
+  const text = (props.message.textBlocks ?? [])
+    .filter((b) => b.kind === 'text' && b.text.trim())
+    .map((b) => b.text)
+    .join('\n\n')
+  if (!text) return
+  void navigator.clipboard.writeText(text).then(
+    () => {
+      copied.value = true
+      if (copyTimer) clearTimeout(copyTimer)
+      copyTimer = setTimeout(() => {
+        copied.value = false
+      }, 1500)
+    },
+    () => {
+      // 剪贴板权限被拒或不可用--忽略
+    },
+  )
+}
 
 /**
  * 判定一个工具是否内联渲染（不显示卡片）。

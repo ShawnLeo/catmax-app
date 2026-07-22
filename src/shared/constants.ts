@@ -28,6 +28,10 @@ export const IPC = {
   SYSTEM_OPEN_DIALOG: 'system.openDialog',
   SYSTEM_OPEN_EXTERNAL: 'system.openExternal',
   SYSTEM_DETECT_PROXY: 'system.detectProxy',
+  SYSTEM_WINDOW_MINIMIZE: 'system.windowMinimize',
+  SYSTEM_WINDOW_MAXIMIZE: 'system.windowMaximize',
+  SYSTEM_WINDOW_CLOSE: 'system.windowClose',
+  SYSTEM_WINDOW_IS_MAXIMIZED: 'system.windowIsMaximized',
   // backend
   BACKEND_LIST: 'backend.list',
   BACKEND_CURRENT: 'backend.current',
@@ -45,6 +49,10 @@ export const IPC = {
   SESSION_SCAN_IMPORTABLE: 'session.scanImportable',
   SESSION_IMPORT: 'session.import',
   SESSION_DETAIL: 'session.detail',
+  SESSION_READ_SUBAGENT_HISTORY: 'session.readSubagentHistory',
+  SESSION_UPDATE_CONFIG: 'session.updateConfig',
+  SESSION_GET_LAST_RUNTIME_CONFIG: 'session.getLastRuntimeConfig',
+  SESSION_SET_LAST_RUNTIME_CONFIG: 'session.setLastRuntimeConfig',
   // git
   GIT_STATUS: 'git.status',
   // fs
@@ -74,6 +82,11 @@ export const PUSH = {
 export const STORAGE_KEYS = {
   LAST_WORKSPACE_ID: 'last_workspace_id',
   CURRENT_BACKEND: 'current_backend',
+  /**
+   * 最近一次"运行时配置"快照（后端 / 模型 / 权限模式 / 思考强度），
+   * 作为新建会话的默认配置。值是 RuntimeConfigSnapshot 的 JSON 字符串。
+   */
+  LAST_RUNTIME_CONFIG: 'last_runtime_config',
 } as const
 
 /** 文件预览限制 */

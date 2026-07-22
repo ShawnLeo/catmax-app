@@ -197,6 +197,18 @@ export const useMessageStore = defineStore('message', () => {
         s.currentTurnId = event.turnId
         s.isRunning = true
         s.lastError = null
+        // /compact turnId 对齐：
+        // ChatView 的 startCompact(turnId) 传的是 renderer-local UUID（占位），
+        // 但 backend（adapter）自己起 internalTurnId 标在所有事件上，
+        // 且 startTurn 不接受外部 turnId。如果不在 turn_started 时对齐，
+        // 后续 turn_completed 里 s.compactTurnId === event.turnId 永远 false，
+        // compactDone 永不置 true，"正在压缩上下文"呼吸动画永远停不下来。
+        //
+        // 前提：Composer 在 turn 跑时禁用，没有并发 turn；startCompact 后
+        // 收到的第一个 turn_started 必然是 /compact 这个 turn，可以直接覆盖占位。
+        if (s.compactTurnId !== null && !s.compactDone) {
+          s.compactTurnId = event.turnId
+        }
         break
       }
       case 'text_delta': {
@@ -248,6 +260,8 @@ export const useMessageStore = defineStore('message', () => {
           id: event.itemId,
           info: event.tool,
           status: 'running',
+          // 记录开始时间--前端 TaskCard 用来显示"已运行 N 秒"实时计时
+          startedAt: Date.now(),
         })
         // 模型决定调工具 = "这轮想清楚了"，等工具返回再继续。
         // 工具调用开始即结束 thinking（跟 text_delta 同样的处理）。
@@ -263,6 +277,8 @@ export const useMessageStore = defineStore('message', () => {
           if (block) {
             block.status = event.output.ok ? 'completed' : 'failed'
             block.output = event.output
+            // Task（子 Agent）完成统计--把 adapter 提取的 taskStats 挂上
+            if (event.taskStats) block.taskStats = event.taskStats
           }
         }
         break

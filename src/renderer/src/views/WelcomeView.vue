@@ -1,41 +1,48 @@
 <template>
-  <div class="h-full flex flex-col items-center justify-center gap-6 p-8 relative">
-    <Button
-      variant="ghost"
-      size="sm"
-      class="absolute top-4 right-4"
-      @click="router.push('/settings')"
+  <div class="h-full flex flex-col">
+    <!-- 顶部标题栏：窗口控制按钮 + 可拖拽区域 + 设置入口。
+         无侧栏页面，窗口按钮直接放顶条最左侧，跟 ChatView 高度一致（h-12）。 -->
+    <div
+      class="h-12 shrink-0 flex items-center gap-2 px-3 border-b border-border bg-background titlebar"
     >
-      设置
-    </Button>
-
-    <div class="text-center">
-      <h1 class="text-3xl font-bold text-foreground">catmax</h1>
-      <p class="mt-2 text-muted-foreground">选择一个本地文件夹作为工作区</p>
+      <TitleBarControls />
+      <div class="flex-1" />
+      <Button variant="ghost" size="sm" class="interactive" @click="router.push('/settings')">
+        设置
+      </Button>
     </div>
 
-    <Button size="lg" :disabled="adding" @click="addWorkspace">
-      {{ adding ? '添加中...' : '选择工作区' }}
-    </Button>
+    <!-- 主体：居中内容 -->
+    <div class="flex-1 flex flex-col items-center justify-center gap-6 p-8">
+      <div class="text-center">
+        <h1 class="text-3xl font-bold text-foreground">catmax</h1>
+        <p class="mt-2 text-muted-foreground">选择一个本地文件夹作为工作区</p>
+      </div>
 
-    <div v-if="workspaceStore.workspaces.length > 0" class="w-full max-w-md">
-      <h2 class="text-sm font-medium text-muted-foreground mb-2">最近工作区</h2>
-      <div class="flex flex-col gap-1">
-        <button
-          v-for="ws in workspaceStore.workspaces"
-          :key="ws.id"
-          class="text-left p-3 rounded-md hover:bg-muted transition-colors"
-          @click="openWorkspace(ws.id)"
-        >
-          <div class="font-medium text-foreground">{{ ws.name }}</div>
-          <div class="text-xs text-muted-foreground font-mono truncate">{{ ws.path }}</div>
-        </button>
+      <Button size="lg" :disabled="adding" @click="addWorkspace">
+        {{ adding ? '添加中...' : '选择工作区' }}
+      </Button>
+
+      <div v-if="workspaceStore.workspaces.length > 0" class="w-full max-w-md">
+        <h2 class="text-sm font-medium text-muted-foreground mb-2">最近工作区</h2>
+        <div class="flex flex-col gap-1">
+          <button
+            v-for="ws in workspaceStore.workspaces"
+            :key="ws.id"
+            class="text-left p-3 rounded-md hover:bg-muted transition-colors"
+            @click="openWorkspace(ws.id)"
+          >
+            <div class="font-medium text-foreground">{{ ws.name }}</div>
+            <div class="text-xs text-muted-foreground font-mono truncate">{{ ws.path }}</div>
+          </button>
+        </div>
       </div>
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
+import TitleBarControls from '@renderer/components/TitleBarControls.vue'
 import { Button } from '@renderer/components/ui/button'
 import { useWorkspaceStore } from '@renderer/stores/workspace'
 import { ref, onMounted } from 'vue'
@@ -71,3 +78,13 @@ function openWorkspace(id: string): void {
   router.push('/chat')
 }
 </script>
+
+<style scoped>
+.titlebar {
+  -webkit-app-region: drag;
+}
+
+.interactive {
+  -webkit-app-region: no-drag;
+}
+</style>

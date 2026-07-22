@@ -32,6 +32,11 @@ onMounted(async () => {
   await settings.load()
   if (settings.settings) {
     apply(settings.settings.theme.mode)
+    uiStore.loadWidths(
+      settings.settings.sidebarWidth,
+      settings.settings.rightPanelWidth,
+      settings.settings.bottomPanelHeight,
+    )
   }
 })
 </script>

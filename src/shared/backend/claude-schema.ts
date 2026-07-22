@@ -18,17 +18,34 @@ export const claudeMessageTypeSchema = z.enum([
   'stream_event',
 ])
 
-// ============ system 消息（启动时一条） ============
+// ============ system 消息（启动时一条 / 子 Agent 生命周期通知） ============
 
 export const systemMessageSchema = z.object({
   type: z.literal('system'),
-  subtype: z.string().optional(), // 'init'
+  subtype: z.string().optional(), // 'init' | 'task_started' | 'task_notification'
   cwd: z.string().optional(),
   session_id: z.string().optional(),
   tools: z.array(z.string()).optional(),
   model: z.string().optional(),
   permissionMode: z.string().optional(),
   claude_code_version: z.string().optional(),
+  // task_started：子 Agent 启动（claude CLI 调 Agent 工具时）
+  task_id: z.string().optional(),
+  tool_use_id: z.string().optional(),
+  description: z.string().optional(),
+  task_type: z.string().optional(), // 'local_agent' | ...
+  prompt: z.string().optional(),
+  // task_notification：子 Agent 完成
+  status: z.string().optional(), // 'completed' | 'failed' | ...
+  output_file: z.string().optional(), // 子 Agent jsonl 路径（空字符串表示无）
+  summary: z.string().optional(),
+  usage: z
+    .object({
+      total_tokens: z.number().optional(),
+      tool_uses: z.number().optional(),
+      duration_ms: z.number().optional(),
+    })
+    .optional(),
 })
 
 // ============ assistant 消息（一条或多条，含流式内容） ============
@@ -96,6 +113,43 @@ export const assistantMessageSchema = z.object({
 
 // ============ user 消息（assistant 之后的 tool_result） ============
 
+/**
+ * tool_use_result 字段：Task（子 Agent）完成时 claude CLI 附加的统计信息。
+ * 出现在 user 消息的**顶层**（不在 message.content 里），只有 Task 工具的 tool_result 才带。
+ * 包含 agentId / 总耗时 / token 数 / 工具调用次数 / 工具统计（bashCount/readCount 等）。
+ */
+
+export const toolUseResultSchema = z
+  .object({
+    status: z.string().optional(),
+    prompt: z.string().optional(),
+    agentId: z.string().optional(),
+    agentType: z.string().optional(),
+    content: z.union([z.string(), z.array(z.unknown())]).optional(),
+    totalDurationMs: z.number().optional(),
+    totalTokens: z.number().optional(),
+    totalToolUseCount: z.number().optional(),
+    usage: z
+      .object({
+        input_tokens: z.number().optional(),
+        output_tokens: z.number().optional(),
+        cache_read_input_tokens: z.number().optional(),
+      })
+      .optional(),
+    toolStats: z
+      .object({
+        readCount: z.number().optional(),
+        searchCount: z.number().optional(),
+        bashCount: z.number().optional(),
+        editFileCount: z.number().optional(),
+        linesAdded: z.number().optional(),
+        linesRemoved: z.number().optional(),
+        otherToolCount: z.number().optional(),
+      })
+      .optional(),
+  })
+  .passthrough()
+
 export const userMessageSchema = z.object({
   type: z.literal('user'),
   message: z.object({
@@ -103,6 +157,8 @@ export const userMessageSchema = z.object({
     content: z.array(contentBlockSchema),
   }),
   session_id: z.string().optional(),
+  // Task（子 Agent）完成时带这个顶层字段--子 Agent 的耗时 / token / 工具统计
+  tool_use_result: toolUseResultSchema.optional(),
 })
 
 // ============ result 消息（turn 结束） ============

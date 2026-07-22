@@ -96,16 +96,19 @@
             Shift+Enter 换行
           </span>
 
-          <!-- 发送 / 停止按钮 -->
+          <!--
+            发送 / 停止按钮——统一灰阶（primary token），不使用红色 destructive。
+            黑白灰主题下用图标形态区分语义：发送=上箭头，停止=实心方块。
+            日间夜间模式都通过 --primary / --primary-foreground 自动适配。
+          -->
           <Button
             v-if="messageStore.isRunning"
-            variant="destructive"
             size="icon"
             class="h-7 w-7 rounded-full"
             title="停止"
             @click="onInterrupt"
           >
-            <SquareIcon class="w-3 h-3" />
+            <SquareIcon class="w-3 h-3 fill-current" />
           </Button>
           <Button
             v-else

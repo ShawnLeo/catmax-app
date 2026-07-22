@@ -102,3 +102,42 @@ export const detectProxy = async (): Promise<DetectedSystemProxy> => {
 
   return { enabled: false, url: '', bypass: null, source: 'none' }
 }
+
+/** 窗口控制：最小化 */
+export const windowMinimize = async (): Promise<void> => {
+  const win = ctx.getMainWindow()
+  if (win) win.minimize()
+}
+
+/**
+ * 窗口控制：最大化/还原。
+ *
+ * macOS 上 maximize() 只把窗口拉到工作区大小（保留菜单栏/Dock），
+ * 绿色按钮"没有完全放大整个屏幕"的体验来自这里——
+ * macOS 绿色按钮的原生语义是全屏，所以 darwin 走 setFullScreen。
+ * Windows/Linux 保持 maximize。
+ */
+export const windowMaximize = async (): Promise<void> => {
+  const win = ctx.getMainWindow()
+  if (!win) return
+  if (process.platform === 'darwin') {
+    win.setFullScreen(!win.isFullScreen())
+  } else if (win.isMaximized()) {
+    win.unmaximize()
+  } else {
+    win.maximize()
+  }
+}
+
+/** 窗口控制：关闭 */
+export const windowClose = async (): Promise<void> => {
+  const win = ctx.getMainWindow()
+  if (win) win.close()
+}
+
+/** 窗口控制：检查是否最大化（macOS 上反映全屏状态，与 windowMaximize 对齐） */
+export const windowIsMaximized = async (): Promise<boolean> => {
+  const win = ctx.getMainWindow()
+  if (!win) return false
+  return process.platform === 'darwin' ? win.isFullScreen() : win.isMaximized()
+}
