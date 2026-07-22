@@ -9,31 +9,34 @@
     <!-- 消息体 -->
     <div :class="['min-w-0', message.role === 'user' ? 'max-w-[80%]' : 'flex-1']">
       <!--
-        user 消息：合并成一个气泡。
-        气泡内布局：上附件（contextBlocks） / 下文本（textBlocks）。
-        气泡本身用淡灰背景（bg-user-bubble，Claude Code 风）。
+        user 消息：合并成一个气泡（对齐 Claude Code）。
+
+        气泡内布局：附件 chip 和文本 **inline 同行排列**（flex-wrap 自适应换行），
+        而不是上下分两块。Claude Code 里"file pill + 用户输入文本"是在同一行视觉
+        单元里的，chip 在前，文本紧随。chip 太多或文本太长时自动折行。
+
+        特例：IdeSelectionTag 展开后的代码预览块会撑开它自己的 chip 容器往下
+        延伸——靠 items-start 让其他 chip 仍顶部对齐不被挤。
       -->
       <div
         v-if="message.role === 'user' && hasAnyUserContent"
-        class="rounded-2xl bg-user-bubble border border-border/50 p-3 flex flex-col gap-2 break-words"
+        class="rounded-2xl bg-user-bubble border border-border/50 p-3 flex flex-wrap items-start gap-x-2 gap-y-1 break-words"
       >
+        <!-- 附件 chip（IDE selection / opened file） -->
         <template v-for="(block, i) in message.contextBlocks ?? []" :key="`ctx-${i}`">
           <component
             :is="resolveContextComponent(block.tag)"
             v-if="resolveContextComponent(block.tag)"
+            class="inline-flex"
             :data="block.data"
           />
         </template>
 
+        <!-- 用户文本（紧随 chip 同一行，whitespace-pre-wrap 保留换行） -->
         <template v-for="block in message.textBlocks" :key="block.id">
-          <!--
-            user 文本走纯文本渲染（不跑 Markdown）——用户输入就是字面文本，
-            不应该被 markdown 解析成代码块/标题/链接等。
-            whitespace-pre-wrap 保留换行 + 长串自动换行。
-          -->
           <div
             v-if="block.text.trim()"
-            class="leading-relaxed text-[15px] text-foreground whitespace-pre-wrap break-words"
+            class="flex-1 min-w-0 leading-relaxed text-[15px] text-foreground whitespace-pre-wrap break-words"
           >
             {{ block.text }}
           </div>
