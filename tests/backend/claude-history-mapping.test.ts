@@ -251,7 +251,7 @@ describe('claude history mapping', () => {
     expect(userMsgs[0]!.textBlocks).toHaveLength(0)
   })
 
-  test('/compact 场景：4 条系统注入消息只展示 /compact 一条', () => {
+  test('/compact 场景：4 条系统注入消息只展示 /compact 一条，摘要附加其后', () => {
     // /compact 执行后 claude 写入 jsonl 4 条特殊 user 消息（都是 string content，
     // jsonl-reader 会转成 array）：
     //   L1: "This session is being continued..." (compact 摘要，极长)
@@ -259,7 +259,8 @@ describe('claude history mapping', () => {
     //   L3: "<command-name>/compact</command-name> <command-message>compact</command-message>..." (命令调用)
     //   L4: "<local-command-stdout>Compacted Tip: ...</local-command-stdout>" (命令 stdout)
     //
-    // UI 上只展示 L3 解析出的 /compact，其余 3 条都是系统注入，跳过。
+    // UI 上只展示 L3 解析出的 /compact，compact 摘要作为 /compact 的产物附加在其后
+    // （textBlocks[1]），L2 L4 都是系统注入跳过。
     const messages = claudeReplayToMessages([
       {
         type: 'user',
@@ -312,6 +313,10 @@ describe('claude history mapping', () => {
     ])
     const userMsgs = messages.filter((m) => m.role === 'user')
     expect(userMsgs).toHaveLength(1)
+    // textBlocks[0] 是 /compact 命令名
     expect(userMsgs[0]!.textBlocks?.[0]?.text).toBe('/compact')
+    // textBlocks[1] 是附加的 compact 摘要
+    expect(userMsgs[0]!.textBlocks).toHaveLength(2)
+    expect(userMsgs[0]!.textBlocks?.[1]?.text).toContain('This session is being continued')
   })
 })

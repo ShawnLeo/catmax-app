@@ -54,26 +54,41 @@ function extractCommandName(text: string): string | null {
 }
 
 /**
+ * 检测 user 文本是否是 /compact 生成的会话延续摘要，是则返回摘要原文。
+ *
+ * 摘要的特征：以固定前缀开头，内容极长（含 "Summary:" / 编号列表等）。
+ * 这是 claude 在 /compact 后自动注入给下一轮 agent 的"上文总结"。
+ * 用户希望展示在 /compact 消息后面（作为 /compact 的产物），而不是独立成一条。
+ *
+ * 注意：摘要在 jsonl 里的顺序在 /compact 命令调用**之前**——所以这里只提取原文，
+ * 暂存到 pendingCompactSummary，等 /compact 命令到达时附加进去。
+ */
+function extractCompactSummary(text: string): string | null {
+  if (text.startsWith('This session is being continued from a previous conversation')) {
+    return text
+  }
+  return null
+}
+
+/**
  * 检测 user 文本是否是 claude 自动注入的系统 sentinel——这些不是用户真实输入，
  * UI 上应跳过（不展示成 user 消息）。
  *
  * 已知 sentinel：
  *   1. <local-command-caveat>...</local-command-caveat>
  *      slash command 执行时 claude 自动加的"以下消息由本地命令产生"声明
- *   2. "This session is being continued from a previous conversation..."
- *      /compact 执行后 claude 自动注入的会话延续摘要（极长）
- *   3. <local-command-stdout>...</local-command-stdout>
+ *   2. <local-command-stdout>...</local-command-stdout>
  *      slash command 的 stdout（/compact 的 "Compacted Tip: ..." 等）
  *      注意：command-name 调用本身会设 lastWasCommandInvocation 标志，
  *      <local-command-stdout> 紧随其后会被标志跳过。但保险起见这里也显式跳过，
  *      防止 stdout 出现在 command 之前或其他顺序问题。
+ *
+ * compact 摘要（"This session is being continued..."）不在这里跳过——它由
+ * extractCompactSummary 单独识别后暂存，附加到后续的 /compact 消息后面。
  */
 function isSystemSentinel(text: string): boolean {
   if (text.includes('<local-command-caveat>')) return true
   if (text.includes('<local-command-stdout>')) return true
-  if (text.startsWith('This session is being continued from a previous conversation')) {
-    return true
-  }
   return false
 }
 
@@ -87,6 +102,10 @@ export function claudeReplayToMessages(messages: ClaudeStreamMessage[]): Normali
   // 紧跟的下一条 user 文本消息是 claude 自己注入的 command 展开 prompt（isMeta:true），
   // 应跳过，避免历史里出现两条用户消息（command 调用 + 长 prompt 文本）。
   let lastWasCommandInvocation = false
+  // 暂存的 /compact 摘要原文——compact 摘要在 jsonl 里出现在 /compact 命令调用
+  // **之前**，但 UI 上希望展示在 /compact 后面。先暂存，等 /compact 命令到达时附加。
+  // 如果 /compact 命令一直没来（异常情况），flushAssistant 兜底丢弃。
+  let pendingCompactSummary: string | null = null
 
   function flushAssistant(): void {
     if (currentAssistant) {
@@ -181,11 +200,19 @@ export function claudeReplayToMessages(messages: ClaudeStreamMessage[]): Normali
         flushAssistant()
         const rawText = collectedText.join('\n\n')
 
-        // 系统 sentinel 跳过——这些是 claude 自动注入的（/compact 摘要、caveat 声明、
+        // /compact 摘要暂存——它在 jsonl 里出现在 /compact 命令**之前**，
+        // 但 UI 上希望展示在 /compact 后面，所以先暂存等命令到达时附加。
+        const compactSummary = extractCompactSummary(rawText)
+        if (compactSummary !== null) {
+          pendingCompactSummary = compactSummary
+          continue
+        }
+
+        // 系统 sentinel 跳过——这些是 claude 自动注入的（caveat 声明、
         // local-command-stdout），不是用户真实输入，UI 上不应展示成 user 消息。
         if (isSystemSentinel(rawText)) {
           // 不清 lastWasCommandInvocation——caveat/stdout 可能跟在 command 后，
-          // 标志逻辑会处理；compact summary 是命令前的，flag 本来就是 false。
+          // 标志逻辑会处理。
           continue
         }
 
@@ -196,13 +223,27 @@ export function claudeReplayToMessages(messages: ClaudeStreamMessage[]): Normali
         //
         // UI 上只展示一条：把 sentinel 解析出 command-name（"/init"），并标记
         // "下一条 user 文本是这次命令的展开"，跳过它，避免历史里出现两条。
+        //
+        // 特例：如果是 /compact 且前面暂存了 compact 摘要，把摘要作为第二个
+        // textBlock 附加进来——摘要展示在 /compact 命令后面，作为它的产物。
         const cmdName = extractCommandName(rawText)
         if (cmdName) {
+          const textBlocks: { id: string; text: string; kind: 'text' | 'reasoning' }[] = [
+            { id: randomUUID(), text: cmdName, kind: 'text' },
+          ]
+          if (cmdName === '/compact' && pendingCompactSummary) {
+            textBlocks.push({
+              id: randomUUID(),
+              text: pendingCompactSummary,
+              kind: 'text',
+            })
+          }
+          pendingCompactSummary = null
           result.push({
             id: randomUUID(),
             role: 'user',
             turnId: 'history',
-            textBlocks: [{ id: randomUUID(), text: cmdName, kind: 'text' }],
+            textBlocks,
             createdAt: 0,
           })
           lastWasCommandInvocation = true
