@@ -11,32 +11,28 @@
       <!--
         user 消息：合并成一个气泡（对齐 Claude Code）。
 
-        气泡内布局：附件 chip 和文本 **inline 同行排列**（flex-wrap 自适应换行），
-        而不是上下分两块。Claude Code 里"file pill + 用户输入文本"是在同一行视觉
-        单元里的，chip 在前，文本紧随。chip 太多或文本太长时自动折行。
-
-        特例：IdeSelectionTag 展开后的代码预览块会撑开它自己的 chip 容器往下
-        延伸——靠 items-start 让其他 chip 仍顶部对齐不被挤。
+        气泡内布局：**上下两段**——顶部附件 chip（IDE selection / opened file），
+        下方用户文本。chip 是"用户引用了哪些文件"的上下文标识，放上方更醒目；
+        文本是核心 prompt，自然占满下方。
       -->
       <div
         v-if="message.role === 'user' && hasAnyUserContent"
-        class="rounded-2xl bg-user-bubble border border-border/50 p-3 flex flex-wrap items-start gap-x-2 gap-y-1 break-words"
+        class="rounded-2xl bg-user-bubble border border-border/50 p-3 flex flex-col gap-2 break-words"
       >
         <!-- 附件 chip（IDE selection / opened file） -->
         <template v-for="(block, i) in message.contextBlocks ?? []" :key="`ctx-${i}`">
           <component
             :is="resolveContextComponent(block.tag)"
             v-if="resolveContextComponent(block.tag)"
-            class="inline-flex"
             :data="block.data"
           />
         </template>
 
-        <!-- 用户文本（紧随 chip 同一行，whitespace-pre-wrap 保留换行） -->
+        <!-- 用户文本（whitespace-pre-wrap 保留换行） -->
         <template v-for="block in message.textBlocks" :key="block.id">
           <div
             v-if="block.text.trim()"
-            class="flex-1 min-w-0 leading-relaxed text-[15px] text-foreground whitespace-pre-wrap break-words"
+            class="leading-relaxed text-[15px] text-foreground whitespace-pre-wrap break-words"
           >
             {{ block.text }}
           </div>
