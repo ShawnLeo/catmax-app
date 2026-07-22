@@ -187,4 +187,67 @@ describe('claude history mapping', () => {
     expect(messages[0]!.textBlocks?.[0]?.text).toBe('/clear')
     expect(messages[1]!.role).toBe('assistant')
   })
+
+  test('同一 user message 多个 text block 合并成一条（IDE 标签 + prompt）', () => {
+    // claude 把 IDE 附件（<ide_selection>）和实际 prompt 拆成两个 text block
+    // 存在同一条 user message 的 content 数组里。必须拼接后统一提取，才能让
+    // 标签进 contextBlocks、剩余 prompt 留 textBlocks，UI 上合成一条消息。
+    // 之前 bug：每个 text block 独立 push 一条 user message → 历史里看到两条。
+    const messages = claudeReplayToMessages([
+      {
+        type: 'user',
+        message: {
+          role: 'user',
+          content: [
+            {
+              type: 'text',
+              text: '<ide_selection>The user selected the lines 41 to 41 from /path/Composer.vue:\nModel\nThis may or may not be related to the current task.</ide_selection>',
+            },
+            {
+              type: 'text',
+              text: '把刷新按钮移动到 Composer 里',
+            },
+          ],
+        },
+      },
+      {
+        type: 'assistant',
+        message: {
+          id: 'm1',
+          type: 'message',
+          role: 'assistant',
+          content: [{ type: 'text', text: 'done' }],
+        },
+      },
+    ])
+    // 只应有一条 user 消息：ide_selection 进 contextBlocks，prompt 留 textBlocks
+    const userMsgs = messages.filter((m) => m.role === 'user')
+    expect(userMsgs).toHaveLength(1)
+    expect(userMsgs[0]!.textBlocks?.[0]?.text).toBe('把刷新按钮移动到 Composer 里')
+    expect(userMsgs[0]!.contextBlocks).toHaveLength(1)
+    expect(userMsgs[0]!.contextBlocks?.[0]?.tag).toBe('ide_selection')
+  })
+
+  test('只有 IDE 标签没实际 prompt 时仍展示 chip（不空气泡）', () => {
+    const messages = claudeReplayToMessages([
+      {
+        type: 'user',
+        message: {
+          role: 'user',
+          content: [
+            {
+              type: 'text',
+              text: '<ide_opened_file>The user opened the file /path/foo.vue in the IDE. This may or may not be related to the current task.</ide_opened_file>',
+            },
+          ],
+        },
+      },
+    ])
+    const userMsgs = messages.filter((m) => m.role === 'user')
+    expect(userMsgs).toHaveLength(1)
+    expect(userMsgs[0]!.contextBlocks).toHaveLength(1)
+    expect(userMsgs[0]!.contextBlocks?.[0]?.tag).toBe('ide_opened_file')
+    // 无 prompt 文本时 textBlocks 为空数组（UI 上只展示 chip）
+    expect(userMsgs[0]!.textBlocks).toHaveLength(0)
+  })
 })

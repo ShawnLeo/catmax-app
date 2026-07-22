@@ -114,9 +114,16 @@ export function claudeReplayToMessages(messages: ClaudeStreamMessage[]): Normali
       currentAssistant = assistant
     } else if (msg.type === 'user') {
       // user message 可能含 tool_result（配对之前 assistant 的 tool_use）
-      // 或含 text（用户真实输入）
+      // 或含 text（用户真实输入，可能多个 text block：IDE 标签 + 实际 prompt）。
+      //
+      // ⚠️ 关键：同一条 user message 里的所有 text block 是**同一次输入**——
+      // claude 把 IDE 附件（<ide_selection> / <ide_opened_file>）和用户实际 prompt
+      // 拆成两个 text block 存到同一个 content 数组里。必须先把它们拼接成完整字符串，
+      // 再走 extractContextTags，才能让标签被正确抽到 contextBlocks、剩余文本留 textBlocks，
+      // UI 上合成一条消息。否则会被拆成两条 user message（一条只有 chip，一条只有文本）。
       const userMsg = msg as UserMessage
       const content = userMsg.message.content
+      const collectedText: string[] = []
       for (const block of content) {
         if (block.type === 'tool_result') {
           const tr = block as ToolResultContent
@@ -139,49 +146,54 @@ export function claudeReplayToMessages(messages: ClaudeStreamMessage[]): Normali
           }
           pendingToolUseIds.delete(tr.tool_use_id)
         } else if (block.type === 'text') {
-          // user 真实输入文本——flush 当前 assistant，新建 user message
-          flushAssistant()
-          const rawText = (block as TextContent).text
+          // 收集 text block——先不处理，等本 message 所有 block 走完后统一拼接
+          collectedText.push((block as TextContent).text)
+        }
+        // 其他 block 类型跳过
+      }
 
-          // 命令调用检测：claude slash command（/init /compact /clear 等）会写两条
-          // user 消息——第一条是 sentinel 文本（<command-message>X</command-message>
-          // <command-name>/X</command-name>），第二条是 claude 自己注入的长 prompt
-          // 展开（isMeta:true，让 agent 知道怎么执行该命令）。
-          //
-          // UI 上只展示一条：把 sentinel 解析出 command-name（"/init"），并标记
-          // "下一条 user 文本是这次命令的展开"，跳过它，避免历史里出现两条。
-          const cmdName = extractCommandName(rawText)
-          if (cmdName) {
-            // 第一条：命令调用——只展示 command-name
-            result.push({
-              id: randomUUID(),
-              role: 'user',
-              turnId: 'history',
-              textBlocks: [{ id: randomUUID(), text: cmdName, kind: 'text' }],
-              createdAt: 0,
-            })
-            lastWasCommandInvocation = true
-            continue
-          }
-          // 上一条是命令调用 + 这条是紧随的 user 文本 → 视为 command 展开 prompt，跳过
-          if (lastWasCommandInvocation) {
-            lastWasCommandInvocation = false
-            continue
-          }
+      // 本条 user message 的所有 text block 收集完——拼接 + 命令检测 + 提取 IDE 标签
+      if (collectedText.length > 0) {
+        flushAssistant()
+        const rawText = collectedText.join('\n\n')
 
-          // 提取 IDE context tag（<ide_selection> / <ide_opened_file> / <environment_context>）。
-          // 提取后 textBlocks 存去掉 tag 的纯 prompt，contextBlocks 存结构化 tag。
-          const { text, blocks } = extractContextTags(rawText, sharedContextTagExtractors)
+        // 命令调用检测：claude slash command（/init /compact /clear 等）会写两条
+        // user 消息——第一条是 sentinel 文本（<command-message>X</command-message>
+        // <command-name>/X</command-name>），第二条是 claude 自己注入的长 prompt
+        // 展开（isMeta:true，让 agent 知道怎么执行该命令）。
+        //
+        // UI 上只展示一条：把 sentinel 解析出 command-name（"/init"），并标记
+        // "下一条 user 文本是这次命令的展开"，跳过它，避免历史里出现两条。
+        const cmdName = extractCommandName(rawText)
+        if (cmdName) {
           result.push({
             id: randomUUID(),
             role: 'user',
             turnId: 'history',
-            textBlocks: [{ id: randomUUID(), text, kind: 'text' }],
-            ...(blocks.length > 0 ? { contextBlocks: blocks } : {}),
+            textBlocks: [{ id: randomUUID(), text: cmdName, kind: 'text' }],
             createdAt: 0,
           })
+          lastWasCommandInvocation = true
+        } else if (lastWasCommandInvocation) {
+          // 上一条是命令调用 + 这条是紧随的 user 文本 → 视为 command 展开 prompt，跳过
+          lastWasCommandInvocation = false
+        } else {
+          // 提取 IDE context tag（<ide_selection> / <ide_opened_file> / <environment_context>）。
+          // 提取后 textBlocks 存去掉 tag 的纯 prompt，contextBlocks 存结构化 tag。
+          const { text, blocks } = extractContextTags(rawText, sharedContextTagExtractors)
+          // text 为空（只有 IDE 标签没实际 prompt）且无 contextBlocks 时不 push——
+          // 避免历史里出现空气泡
+          if (text.trim() || blocks.length > 0) {
+            result.push({
+              id: randomUUID(),
+              role: 'user',
+              turnId: 'history',
+              textBlocks: text.trim() ? [{ id: randomUUID(), text, kind: 'text' }] : [],
+              ...(blocks.length > 0 ? { contextBlocks: blocks } : {}),
+              createdAt: 0,
+            })
+          }
         }
-        // 其他 block 类型跳过
       }
     }
     // system / result 不在这里处理
