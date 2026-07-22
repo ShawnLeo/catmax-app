@@ -1,13 +1,19 @@
 <template>
-  <div ref="container" class="h-full overflow-y-auto relative" @scroll="onScroll">
-    <div
-      v-if="messageStore.loading"
-      class="flex items-center justify-center h-full text-muted-foreground"
-    >
-      <div class="text-center">
-        <div class="animate-pulse text-sm">加载历史中...</div>
+  <!--
+    外层 relative 容器——悬浮按钮锚定到这里（而不是滚动容器内部，
+    否则 absolute bottom-4 会跟着内容滚走，只有滚到最顶/最底才看得到）。
+    滚动容器是内层 div，按钮跟它是兄弟节点，永远贴在可视区域底部。
+  -->
+  <div class="h-full relative">
+    <div ref="container" class="h-full overflow-y-auto" @scroll="onScroll">
+      <div
+        v-if="messageStore.loading"
+        class="flex items-center justify-center h-full text-muted-foreground"
+      >
+        <div class="text-center">
+          <div class="animate-pulse text-sm">加载历史中...</div>
+        </div>
       </div>
-    </div>
     <!--
       响应式宽度（两段式）：
         小窗 <640px   → 跟随窗口（仅 px-6 边距）
@@ -51,6 +57,7 @@
         </div>
       </div>
     </div>
+    <!-- /滚动容器 -->
 
     <!--
       悬浮"回到底部"箭头：用户向上滚离底部超过阈值（120px）时显示，
