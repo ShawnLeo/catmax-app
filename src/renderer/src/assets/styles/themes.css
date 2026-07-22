@@ -30,6 +30,10 @@
   /* 紫色——给 max effort 档（"极致性能"视觉强调）专用，是项目唯一的彩色点睛 */
   --color-brain: oklch(65% 0.25 300);
   --color-brain-foreground: oklch(98% 0.02 300);
+  /* 蓝色——给"未读活动"指示点专用（侧边栏会话完成提示）。
+     跟 success 绿区分：绿色暗示成功/失败状态，但用户不知道任务结果，
+     蓝色是中性的"有新活动"信号，不带成败含义。 */
+  --color-info: oklch(70% 0.15 250);
 
   /* Layer 2: 语义 token（中性灰，primary/accent/ring 都指向 gray 阶） */
   --background: var(--color-gray-100);
@@ -93,6 +97,8 @@
   /* 紫色——dark 端饱和度高一些以便白底可见 */
   --color-brain: oklch(55% 0.28 300);
   --color-brain-foreground: oklch(98% 0.02 300);
+  /* 蓝色——未读活动指示点（light 端 chroma 高一些保证白底可见） */
+  --color-info: oklch(55% 0.18 250);
 
   /* Layer 2 */
   --background: var(--color-gray-50);

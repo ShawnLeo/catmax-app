@@ -57,6 +57,7 @@
           :session="session"
           :active="session.id === sessionStore.currentSessionId"
           :running="isSessionRunning(session.id)"
+          :unread-activity="hasUnreadActivity(session.id)"
           @click="selectSession(session.id)"
           @remove="removeSession(session.id)"
         />
@@ -111,6 +112,14 @@ const currentBackendSessions = computed(
  */
 function isSessionRunning(sessionId: string): boolean {
   return messageStore.sessionStates.get(sessionId)?.isRunning ?? false
+}
+
+/**
+ * 查某会话是否有"未读活动"——后台 turn 跑完了用户还没看。
+ * turn_completed 且非当前 session 时置 true；用户切到该 session 时清 false。
+ */
+function hasUnreadActivity(sessionId: string): boolean {
+  return messageStore.sessionStates.get(sessionId)?.unreadActivity ?? false
 }
 
 function backendStatus(id: BackendId) {

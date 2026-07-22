@@ -53,6 +53,18 @@ interface SessionState {
   compactTurnId: string | null
   /** compact 是否已完成（compactTurnId 非 null 时才有意义） */
   compactDone: boolean
+  /**
+   * 是否有"未读"的后台 turn 完成——侧边栏小蓝点的来源。
+   *
+   * 置 true：turn 在后台跑完（turn_completed），且当时用户不在看这个 session。
+   * 清 false：用户切到该 session（selectSession）。
+   *
+   * 跟 isRunning 互补：
+   *   - isRunning=true  → 侧边栏显示旋转 loader
+   *   - isRunning=false + unreadActivity=true → 侧边栏显示小蓝点（"有新活动可看"）
+   *   - isRunning=false + unreadActivity=false → 无指示器（默认/已看过）
+   */
+  unreadActivity: boolean
 }
 
 function createEmptySessionState(): SessionState {
@@ -67,6 +79,7 @@ function createEmptySessionState(): SessionState {
     lastUsage: null,
     compactTurnId: null,
     compactDone: false,
+    unreadActivity: false,
   }
 }
 
@@ -172,10 +185,13 @@ export const useMessageStore = defineStore('message', () => {
       s = createEmptySessionState()
       sessionStates.set(sessionId, s)
     }
-    applyEventToState(s, event)
+    // 是否当前正在看的 session——turn 完成时用它决定要不要置 unreadActivity
+    // （用户正在看的 session 完成不算"未读"，后台完成的才算）
+    const isCurrent = currentSessionId.value === sessionId
+    applyEventToState(s, event, isCurrent)
   }
 
-  function applyEventToState(s: SessionState, event: TurnEvent): void {
+  function applyEventToState(s: SessionState, event: TurnEvent, isCurrent: boolean): void {
     switch (event.type) {
       case 'turn_started': {
         s.currentTurnId = event.turnId
@@ -299,6 +315,11 @@ export const useMessageStore = defineStore('message', () => {
         if (s.compactTurnId === event.turnId) {
           s.compactDone = true
         }
+        // 后台 turn 完成 + 用户没在看这个 session → 标记"未读活动"，
+        // 侧边栏显示小蓝点提示"有新活动可看"。用户正在看的不标（即时看到完成）。
+        if (!isCurrent) {
+          s.unreadActivity = true
+        }
         // turn 结束时兜底清空 pending——
         // 正常流程下 dialog 提交/cancel 时 ChatView 已经清了，
         // 这里防止 dialog 卡住（比如 turn 因各种原因提前结束时）。
@@ -393,9 +414,15 @@ export const useMessageStore = defineStore('message', () => {
    *
    * 空字符串当 null 处理——sessionStore.setCurrent('') 表示"没选 session"
    * （新建会话场景），跟 null 语义一致。
+   *
+   * 切到的 session 清掉 unreadActivity——用户已经在看了，小蓝点不再需要。
    */
   function setCurrentSession(sessionId: string | null): void {
     currentSessionId.value = sessionId === '' ? null : sessionId
+    if (sessionId) {
+      const s = sessionStates.get(sessionId)
+      if (s) s.unreadActivity = false
+    }
   }
 
   /**
