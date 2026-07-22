@@ -11,22 +11,35 @@
       <!--
         user 消息：合并成一个气泡（对齐 Claude Code）。
 
-        气泡内布局：**上下两段**——顶部附件 chip（IDE selection / opened file），
-        下方用户文本。chip 是"用户引用了哪些文件"的上下文标识，放上方更醒目；
-        文本是核心 prompt，自然占满下方。
+        气泡内布局：**上下两块**——
+          1. 顶部 chip 区：所有附件 chip（IDE selection / opened file）聚成一组，
+             flex-wrap 同行排列（多个 chip 横着排，溢出折行），整体作为一块
+          2. 下方 prompt 文本：用户输入的核心 prompt，单独一块
+
+        chip 是"用户引用了哪些文件"的上下文标识，作为一块放上方；
+        文本是核心 prompt，自然占满下方。多 chip 之间用 gap-x-3 隔开（比 chip 内部
+        紧凑，让 chip 组视觉上是一个整体）。
       -->
       <div
         v-if="message.role === 'user' && hasAnyUserContent"
         class="rounded-2xl bg-user-bubble border border-border/50 p-3 flex flex-col gap-2 break-words"
       >
-        <!-- 附件 chip（IDE selection / opened file） -->
-        <template v-for="(block, i) in message.contextBlocks ?? []" :key="`ctx-${i}`">
-          <component
-            :is="resolveContextComponent(block.tag)"
-            v-if="resolveContextComponent(block.tag)"
-            :data="block.data"
-          />
-        </template>
+        <!--
+          附件 chip 区（IDE selection / opened file）：多个 chip 聚成一组，
+          flex-wrap 同行排列，溢出自动折行。整组在上方，跟下方 prompt 文本分块。
+        -->
+        <div
+          v-if="(message.contextBlocks?.length ?? 0) > 0"
+          class="flex flex-wrap items-center gap-x-3 gap-y-1"
+        >
+          <template v-for="(block, i) in message.contextBlocks ?? []" :key="`ctx-${i}`">
+            <component
+              :is="resolveContextComponent(block.tag)"
+              v-if="resolveContextComponent(block.tag)"
+              :data="block.data"
+            />
+          </template>
+        </div>
 
         <!-- 用户文本（whitespace-pre-wrap 保留换行） -->
         <template v-for="block in message.textBlocks" :key="block.id">
