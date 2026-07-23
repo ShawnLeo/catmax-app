@@ -428,10 +428,11 @@ export class ClaudeAdapter implements AgentBackend {
         options.allowDangerouslySkipPermissions = true
       }
     }
-    // 注入代理 env（SDK 会把这些传给子进程）
-    if (Object.keys(this.extraEnv).length > 0) {
-      options.env = { ...this.extraEnv }
-    }
+    // 注入子进程 env。
+    // ⚠️ SDK 的 options.env 是【整体替换】语义（见 sdk.d.ts 示例 env:{...process.env,...}），
+    // 必须先展开 process.env 再覆盖 extraEnv，否则子进程会丢失 PATH / HOME / SHELL 等
+    // 基础变量 → claude 跑任何 Bash 命令都会 "command not found"（实测会话里 PATH= 为空）。
+    options.env = { ...process.env, ...this.extraEnv }
     // binary 路径：packaged 模式指向 unpacked 真实路径；dev 让 SDK 自行 resolve
     const binaryPath = this.resolveSdkBinaryPath()
     if (binaryPath !== undefined) {

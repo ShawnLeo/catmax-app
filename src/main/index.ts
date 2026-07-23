@@ -1,5 +1,6 @@
 import { is } from '@electron-toolkit/utils'
 import { app, BrowserWindow } from 'electron'
+import fixPath from 'fix-path'
 
 import { ctx } from './context'
 import { registerAllHandlers } from './ipc/register'
@@ -20,8 +21,16 @@ if (is.dev) {
   app.commandLine.appendSwitch('remote-allow-origins', '*')
 }
 
+// macOS GUI app 的 PATH 阉割修复。
+// 从 Dock/Finder 启动的 GUI 进程，PATH 通常只有 /usr/bin:/bin:...，
+// 不含 Homebrew 的 /opt/homebrew/bin 或 /usr/local/bin → claude/codex 子进程
+// 跑 git/gh/node 等会 "command not found"。fix-path 读登录 shell 的完整 PATH 补回。
+// 必须在 spawn 任何后端子进程之前调用（whenReady 内最早处即可）。
+fixPath()
+
 void app.whenReady().then(async () => {
   log.info('app ready', app.getVersion())
+  log.info('PATH after fix-path:', process.env.PATH)
 
   // 初始化持久化
   ctx.db.migrate()
