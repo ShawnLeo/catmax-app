@@ -30,28 +30,17 @@
         </div>
       </div>
 
-      <ApprovalDialog v-if="messageStore.pendingApproval" />
-
       <!--
-        Claude 权限请求 dialog——claude 通过内置 MCP server 的权限请求触发
-        （--permission-prompt-tool = mcp__catmax__approve）。
-        跟 codex 的 ApprovalDialog 互斥显示（同一时刻只一个 backend 在跑 turn）。
+        底部交互区：有 pending 权限时显示 PermissionPanel（覆盖输入框位置，
+        让聊天记录始终可见），否则显示 Composer。
+        claude 权限（pendingClaudePermission）和 codex 权限（pendingApproval）
+        都走同一个 PermissionPanel。同一时刻只一个 backend 在跑 turn。
       -->
-      <ClaudePermissionDialog v-if="messageStore.pendingClaudePermission" />
-
-      <!--
-        AskUserQuestion 弹窗——claude 调 AskUserQuestion 时弹出。
-        pendingQuestion 由 backend 推 ask_user_question TurnEvent 设置。
-        提交时把答案拼成自然语言，复用 onSend 当新用户消息发下一轮 turn
-        （claude -p 模式不接受外部 tool_result 回写，只能走新 turn --resume）。
-      -->
-      <AskUserQuestionDialog
-        v-if="messageStore.pendingQuestion"
-        @submit="onAskUserQuestionSubmit"
-        @cancel="onAskUserQuestionCancel"
+      <PermissionPanel
+        v-if="messageStore.pendingApproval || messageStore.pendingClaudePermission"
       />
-
       <Composer
+        v-else
         :disabled="!backendStore.isAvailable"
         :model-value="composerModelValue"
         @update:model-value="onComposerUpdate"
@@ -84,12 +73,10 @@
 </template>
 
 <script setup lang="ts">
-import ApprovalDialog from '@renderer/components/chat/ApprovalDialog.vue'
-import AskUserQuestionDialog from '@renderer/components/chat/AskUserQuestionDialog.vue'
 import BottomTerminalPanel from '@renderer/components/chat/BottomTerminalPanel.vue'
-import ClaudePermissionDialog from '@renderer/components/chat/ClaudePermissionDialog.vue'
 import Composer from '@renderer/components/chat/Composer.vue'
 import MessageList from '@renderer/components/chat/MessageList.vue'
+import PermissionPanel from '@renderer/components/chat/PermissionPanel.vue'
 import RuntimeConfigBar from '@renderer/components/chat/RuntimeConfigBar.vue'
 import RightPanel from '@renderer/components/panel/RightPanel.vue'
 import Sidebar from '@renderer/components/sidebar/Sidebar.vue'
@@ -103,7 +90,12 @@ import { useSessionStore } from '@renderer/stores/session'
 import { useUiStore } from '@renderer/stores/ui'
 import { useWorkspaceStore } from '@renderer/stores/workspace'
 import { serializeContextTags } from '@shared/backend/context-tags'
-import type { ContextBlock, EffortLevel, PermissionMode } from '@shared/backend/types'
+import type {
+  ContextBlock,
+  EffortLevel,
+  PermissionMode,
+  TurnConfigUpdate,
+} from '@shared/backend/types'
 import type { BackendId } from '@shared/constants'
 import type { RuntimeConfigSnapshot } from '@shared/ipc/session'
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
@@ -352,7 +344,7 @@ watch(
  */
 watch(
   runtimeConfig,
-  async (cfg) => {
+  async (cfg, oldCfg) => {
     if (isRestoring.value) return
     const snapshot: RuntimeConfigSnapshot = {
       backend: cfg.backend,
@@ -379,6 +371,26 @@ watch(
         target.model = cfg.model
         target.effort = cfg.effort
         if (snapshot.permissionMode) target.permissionMode = snapshot.permissionMode
+      }
+    }
+
+    // 热切换：如果当前有正在运行的 turn，且 backend 支持热切换，
+    // 把变更的配置即时下发给后端（不中断当前 turn）。
+    // 只下发实际变化了的字段，避免无谓的 SDK control 请求。
+    if (messageStore.isRunning && messageStore.currentTurnId && oldCfg) {
+      const supportsHotSwap = backendStore.current?.capabilities.supportsHotSwap
+      if (!supportsHotSwap) return
+      const turnId = messageStore.currentTurnId
+      const update: TurnConfigUpdate = {}
+      if (cfg.model && cfg.model !== oldCfg.model) update.model = cfg.model
+      if (cfg.effort && cfg.effort !== oldCfg.effort) update.effort = cfg.effort
+      if (cfg.permissionMode !== oldCfg.permissionMode) {
+        update.permissionMode = cfg.permissionMode
+      }
+      if (Object.keys(update).length > 0) {
+        window.api.backend
+          .updateTurnConfig({ turnId, config: update })
+          .catch((e) => console.warn('[ChatView] updateTurnConfig failed:', e))
       }
     }
   },
@@ -460,20 +472,5 @@ async function onSend(text: string, attachments: ContextBlock[]): Promise<void> 
   if (model !== null) startArgs.model = model
   if (effort !== null) startArgs.effort = effort
   await window.api.backend.startTurn(startArgs)
-}
-
-/**
- * AskUserQuestion 弹窗提交——把答案拼成的自然语言当作新用户消息发下一轮 turn。
- * claude -p 模式硬编码拒绝外部对 AskUserQuestion 的 tool_result 回应（实测过），
- * 没法在同一 turn 进程内回写答案，所以走新一轮 turn + --resume 继续。
- */
-async function onAskUserQuestionSubmit(text: string): Promise<void> {
-  messageStore.pendingQuestion = null
-  await onSend(text, [])
-}
-
-/** AskUserQuestion 弹窗取消——清 pendingQuestion，不发任何消息。 */
-function onAskUserQuestionCancel(): void {
-  messageStore.pendingQuestion = null
 }
 </script>

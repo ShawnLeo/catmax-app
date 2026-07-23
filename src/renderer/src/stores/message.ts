@@ -5,7 +5,6 @@ import type {
   TokenUsage,
   TurnEvent,
   ApprovalRequest,
-  ToolControlQuestion,
 } from '@shared/backend/types'
 import { defineStore } from 'pinia'
 import { computed, reactive, ref } from 'vue'
@@ -14,13 +13,6 @@ interface PendingApproval {
   requestId: string
   request: ApprovalRequest
   turnId: string
-}
-
-interface PendingQuestion {
-  requestId: string
-  toolUseId: string
-  turnId: string
-  questions: ToolControlQuestion[]
 }
 
 /**
@@ -38,10 +30,8 @@ interface SessionState {
   isRunning: boolean
   /** codex approval 请求 */
   pendingApproval: PendingApproval | null
-  /** claude 通过内置 MCP server 的权限请求（走 ClaudePermissionDialog） */
+  /** claude 通过内置 MCP server 的权限请求（走 PermissionPanel） */
   pendingClaudePermission: PendingApproval | null
-  /** claude AskUserQuestion（走 AskUserQuestionDialog） */
-  pendingQuestion: PendingQuestion | null
   lastError: string | null
   lastUsage: TokenUsage | null
   /**
@@ -74,7 +64,6 @@ function createEmptySessionState(): SessionState {
     isRunning: false,
     pendingApproval: null,
     pendingClaudePermission: null,
-    pendingQuestion: null,
     lastError: null,
     lastUsage: null,
     compactTurnId: null,
@@ -148,16 +137,6 @@ export const useMessageStore = defineStore('message', () => {
       if (!id) return
       const s = cur()
       s.pendingClaudePermission = v
-    },
-  })
-
-  const pendingQuestion = computed({
-    get: () => cur().pendingQuestion,
-    set: (v: PendingQuestion | null) => {
-      const id = currentSessionId.value
-      if (!id) return
-      const s = cur()
-      s.pendingQuestion = v
     },
   })
 
@@ -284,22 +263,13 @@ export const useMessageStore = defineStore('message', () => {
         break
       }
       case 'approval_requested': {
-        // 按 source 分发——claude 走 pendingClaudePermission（ClaudePermissionDialog），
-        // codex（不带 source）走 pendingApproval（ApprovalDialog）。
+        // 按 source 分发——claude 走 pendingClaudePermission（PermissionPanel），
+        // codex（不带 source）走 pendingApproval（PermissionPanel）。
         const target = event.source === 'claude' ? 'pendingClaudePermission' : 'pendingApproval'
         s[target] = {
           requestId: event.requestId,
           request: event.request,
           turnId: event.turnId,
-        }
-        break
-      }
-      case 'ask_user_question': {
-        s.pendingQuestion = {
-          requestId: event.requestId,
-          toolUseId: event.toolUseId,
-          turnId: event.turnId,
-          questions: event.questions,
         }
         break
       }
@@ -337,9 +307,8 @@ export const useMessageStore = defineStore('message', () => {
           s.unreadActivity = true
         }
         // turn 结束时兜底清空 pending——
-        // 正常流程下 dialog 提交/cancel 时 ChatView 已经清了，
-        // 这里防止 dialog 卡住（比如 turn 因各种原因提前结束时）。
-        s.pendingQuestion = null
+        // 正常流程下 PermissionPanel 决策时已经清了，
+        // 这里防止面板卡住（比如 turn 因各种原因提前结束时）。
         s.pendingClaudePermission = null
         break
       }
@@ -502,7 +471,6 @@ export const useMessageStore = defineStore('message', () => {
     isRunning,
     pendingApproval,
     pendingClaudePermission,
-    pendingQuestion,
     lastError,
     lastUsage,
     compactState,

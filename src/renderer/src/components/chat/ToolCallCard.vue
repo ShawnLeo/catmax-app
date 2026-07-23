@@ -46,7 +46,7 @@
       max-h 用 inline style——Tailwind v4 的 max-h-40 在动态 :class 里 JIT 可能扫不到。
 
       渲染优先级（互斥，第一个匹配的胜出）：
-        1. control：控制流工具（EnterPlanMode/ExitPlanMode/TodoWrite/AskUserQuestion）
+        1. control：控制流工具（EnterPlanMode/ExitPlanMode/TodoWrite）
         2. edit：文件编辑（Edit/Write/MultiEdit）→ DiffView
         3. output：stdout（shell_command 优先显示这个，不再重复显示命令本身）
         4. detail：fallback 显示原始 input JSON（但跳过 "{}" 空对象）
@@ -129,7 +129,6 @@ import {
 } from 'lucide-vue-next'
 import { computed, ref, type Component } from 'vue'
 
-import AskUserQuestionCard from './control/AskUserQuestionCard.vue'
 import EnterPlanModeCard from './control/EnterPlanModeCard.vue'
 import ExitPlanModeCard from './control/ExitPlanModeCard.vue'
 import TodoWriteCard from './control/TodoWriteCard.vue'
@@ -192,8 +191,6 @@ const controlComponent = computed<Component | null>(() => {
       return ExitPlanModeCard
     case 'todo_write':
       return TodoWriteCard
-    case 'ask_user_question':
-      return AskUserQuestionCard
     default:
       return null
   }
@@ -238,8 +235,6 @@ const typeName = computed(() => {
           return 'Plan'
         case 'todo_write':
           return 'Todo'
-        case 'ask_user_question':
-          return 'Question'
         default:
           return 'Action'
       }
@@ -248,7 +243,6 @@ const typeName = computed(() => {
       // 识别已知的控制流工具名，给个友好名称
       if (/^(EnterPlanMode|ExitPlanMode)$/.test(title)) return 'Plan'
       if (title === 'TodoWrite') return 'Todo'
-      if (title === 'AskUserQuestion') return 'Question'
       if (/^(WebSearch|WebFetch)$/.test(title)) return title
       if (title === 'Task') return 'Task'
       return 'Tool'
@@ -274,7 +268,7 @@ const fullPath = computed(() => {
   // 控制流工具：不显示路径，fullPath 为空（typeName 已经表达了语义）
   if (props.tool.info.kind === 'control') return ''
   // 兼容旧消息：识别控制流工具名，fullPath 为空
-  if (/^(EnterPlanMode|ExitPlanMode|TodoWrite|AskUserQuestion)$/.test(title)) return ''
+  if (/^(EnterPlanMode|ExitPlanMode|TodoWrite)$/.test(title)) return ''
   // shell_command / mcp / file_read / other / task（无前缀时）：title 本身就是要显示的内容
   return title
 })

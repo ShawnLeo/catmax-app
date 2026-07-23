@@ -1,114 +1,115 @@
 /**
- * ClaudeAdapter —— claude CLI 的 AgentBackend 实现。
+ * Claude 后端 adapter —— 基于 Agent SDK（@anthropic-ai/claude-agent-sdk）。
  *
- * 和 codex 不同：
- * - 每次 turn 启动一个新 claude 进程（不是长连接）
- * - 用 --resume <session_id> 续接会话
- * - 没有反向 approval 请求（permission-mode 自动决策）
- * - 中断 = kill 进程
+ * 历史背景：本文件原是 per-turn spawn `claude` CLI + 解析 stream-json stdout 的实现。
+ * 现已迁移到 Agent SDK：SDK 内部仍 spawn 一个 bundled claude binary，但通过 typed
+ * 的 SDKMessage 流 + canUseTool 进程内回调，消除了 ApprovalBridge / Unix socket / MCP
+ * server 子进程 / 临时 mcp-config 那一整套机制。
+ *
+ * 设计契约：
+ * - 每次 startTurn 调一次 query()，迭代 SDKMessage 流 → 转 TurnEvent yield
+ * - 权限：options.canUseTool 回调 → push approval_requested 事件 → await 用户决策
+ * - interrupt：ctx.query.interrupt()（SDK 原生，比 SIGTERM 优雅）
+ * - 会话连续性：options.resume: claudeSessionId（等价 CLI 的 --resume）
+ * - binary 解析：dev 模式 SDK 自行 resolve；packaged 模式传 pathToClaudeCodeExecutable
+ *   指向 app.asar.unpacked 里的真实路径（PoC 验证见 docs/Agent SDK Electron 打包 PoC 验证报告.md）
  */
 import { randomUUID } from 'node:crypto'
 import { existsSync } from 'node:fs'
-import { writeFile, unlink } from 'node:fs/promises'
+import { unlink } from 'node:fs/promises'
 import { join } from 'node:path'
 
-import { logger } from '@main/service/logger'
 import {
-  type AssistantMessage,
-  type ResultMessage,
-  type StreamEventMessage,
-} from '@shared/backend/claude-schema'
+  query,
+  type CanUseTool,
+  type ModelInfo,
+  type PermissionResult,
+  type PermissionUpdate,
+  type Query,
+  type SDKMessage,
+  type SDKUserMessage,
+} from '@anthropic-ai/claude-agent-sdk'
 import {
   BackendError,
   type AgentBackend,
   type ApprovalDecision,
   type BackendCapabilities,
+  type EffortLevel,
   type ModelOption,
   type NormalizedMessage,
   type SessionSummary,
   type StartSessionArgs,
   type StartTurnArgs,
+  type TurnConfigUpdate,
   type TurnEvent,
 } from '@shared/backend/types'
 import { app } from 'electron'
 
-import { checkCliHealth } from '../health-check'
-import { type ProcessSpawner, RealProcessSpawner } from '../process-spawner'
+import { logger } from '../../service/logger'
 
-import { ApprovalBridge, type BridgePermissionRequest } from './approval-bridge'
 import {
   listClaudeSessionsFromDisk,
   readHistoryFromJsonl,
   resolveSessionJsonlPath,
 } from './jsonl-reader'
+import { claudePermissionToApprovalRequest } from './mapping'
 import {
-  StreamEventAggregator,
-  assistantToEvents,
-  claudePermissionToApprovalRequest,
-  resultToEvent,
-  userToolResultToEvents,
-} from './mapping'
-// MCP server 脚本路径——electron-vite 编译时把 `?modulePath` 后缀替换成打包后的绝对路径
-// （dev: out/main/mcp-server.js，packaged: app.asar 内的对应路径）。
-// 注意：server.ts 是独立入口（在 electron.vite.config.ts 的 rollupOptions.input 配置），
-// 不能 import 这个文件的内容（会拉到 main bundle），只能拿路径字符串。
-import mcpServerScriptPath from './mcp/server?modulePath'
-import { encodeUserMessage, LineBuffer, parseClaudeLine } from './protocol'
+  SdkPartialAggregator,
+  isSdkAssistantMessage,
+  isSdkPartialMessage,
+  isSdkResultMessage,
+  isSdkSystemMessage,
+  isSdkUserMessage,
+  sdkAssistantToEvents,
+  sdkResultToEvent,
+  sdkSystemSessionId,
+  sdkUserToolResultToEvents,
+} from './sdk-mapping'
 
 const log = logger.domain('claude-adapter')
 
-/**
- * per-turn 上下文——支持多 turn 并发隔离。
- *
- * 每个字段都属于"当前 turn"独立状态，多个并发 turn 各持一份，互不串台。
- * 由 startTurn 创建、generator finally 块（或 interrupt / dispose）清理。
- */
+// ============ per-turn 上下文 ============
+
 interface TurnContext {
-  /** claude 子进程 */
-  proc: ReturnType<ProcessSpawner['spawn']>
-  /** ApprovalBridge——MCP server 子进程通过 socket 连进来 */
-  bridge: ApprovalBridge
-  /** 临时 mcp-config JSON 文件路径——turn 结束时删 */
-  mcpConfigPath: string
-  /** 事件队列——stdout data 回调和 handlePermissionRequest 都 push 进来 */
-  queue: TurnEvent[]
-  /** generator 主循环的 resolve——push 事件后调它唤醒等待 */
-  resolveWait: (() => void) | null
-  /** per-turn 的审批 Map——key 是 `${turnId}:${bridgeRequestId}` */
+  /** SDK 的 Query 对象（async iterable + interrupt/setModel/setPermissionMode 等控制方法） */
+  query: Query
+  /** AbortController，用于 dispose 时强制中断 */
+  abortController: AbortController
+  /**
+   * pending 权限审批：requestId → { resolver, suggestions }。requestId 格式 `${turnId}:${nonce}`。
+   * suggestions 是 SDK canUseTool 给的 PermissionUpdate[]，approve_always 时作为 updatedPermissions 回传，
+   * 让"本会话都允许"真正生效（否则 SDK 不知道要持久化规则，下次还会问）。
+   */
   pendingApprovals: Map<
     string,
     {
       resolve: (action: ApprovalDecision['action']) => void
-      bridgeRequestId: number
-      originalInput: Record<string, unknown>
+      suggestions?: PermissionUpdate[] | undefined
     }
   >
-  /** 是否被 interrupt 中断——interrupt 设 true 并 push turn_completed 事件，
-   * generator yield 后 return，finally 块的 cleanupTurnContext 据此决定是否 kill 进程。
-   * （正常完成时进程已 exit，无需 kill） */
+  /** 是否已被 interrupt（避免重复中断） */
   interrupted: boolean
+  /** 当前 turn 对应的 catmax session id（用于回填 sessionIdMap） */
+  sessionId: string
+  /** streaming-input 的输入控制句柄：close() 让输入迭代器结束，query 自然完成 */
+  inputController: { close: () => void }
 }
 
+// ============ adapter 选项 ============
+
 export interface ClaudeAdapterOptions {
-  binaryPath?: string
-  spawner?: ProcessSpawner
   cwd?: string
-  /**
-   * 当 claude 在 system.init 返回真实 session_id 时触发（参数：internalId, realId）。
-   * manager 注入此回调，把 db 里 session.backend_thread_id 从占位 UUID 更新成真实 id，
-   * 让用户重启应用后仍能 --resume 加载历史。
-   */
+  /** claude 返回真实 session_id 时触发（manager 用来回写 db backend_thread_id） */
   onRealSessionId?: (internalId: string, realSessionId: string) => void
 }
+
+// ============ ClaudeAdapter ============
 
 export class ClaudeAdapter implements AgentBackend {
   readonly id = 'claude' as const
 
   readonly capabilities: BackendCapabilities = {
     supportsInterrupt: true,
-    // 通过内置 MCP server + --permission-prompt-tool 实现：
-    // claude spawn 时把权限决策委托给 mcp__catmax__approve 工具，
-    // MCP server 子进程 → Unix socket → main → IPC → renderer 弹 ClaudePermissionDialog。
     supportsApproval: true,
     supportsSteer: false,
     supportsThreadFork: false,
@@ -124,77 +125,63 @@ export class ClaudeAdapter implements AgentBackend {
       'bypassPermissions',
     ],
     supportedEfforts: ['low', 'medium', 'high', 'xhigh', 'max'],
+    // SDK streaming-input 模式下 Query 暴露 setModel/setPermissionMode/applyFlagSettings
+    supportsHotSwap: true,
   }
 
   private opts: ClaudeAdapterOptions
-  private spawner: ProcessSpawner
-
-  /**
-   * per-turn 上下文——支持多 turn 并发（用户切到 session B 时 A 的 turn 还在跑）。
-   *
-   * 每个 turn 有自己独立的：
-   * - proc（claude 子进程）
-   * - bridge（ApprovalBridge，独立的 socket + token）
-   * - mcpConfigPath（临时 mcp-config JSON 文件）
-   * - queue / resolveWait（事件队列 + generator 唤醒）
-   * - pendingApprovals（per-turn 的审批 Map）
-   *
-   * interrupt / respondApproval 用 turnId 精确定位 context，不会误伤其他 turn。
-   */
+  /** turnId → TurnContext（支持多 turn 并发） */
   private turnContexts = new Map<string, TurnContext>()
-
-  /** internal session id → claude session id 反向映射 */
+  /** catmax 内部 session id → claude 真实 session id（首次 turn 后由 system.init 回填） */
   private sessionIdMap = new Map<string, string>()
-  /**
-   * internal session id → 是否已经拿到 claude 分配的真实 session_id。
-   * 全新会话（startSession 时建的）第一次 turn 时 claude 还没分配 id，必须
-   * 不带 --resume 启动；拿到 system.init 的 session_id 后标记 true，后续才能 --resume。
-   * Bug D：之前一律 --resume 一个随机 UUID，claude 找不到会话就立刻 stderr 报错退出，
-   * stdout 只吐一条 is_error result，UI 拿不到流式响应。
-   */
+  /** 已拿到 claude 真实 session_id 的 session（决定能否 resume） */
   private resumableSessions = new Set<string>()
+  /** 额外 env（代理设置等），注入到 SDK query 的 options.env */
+  private extraEnv: Record<string, string> = {}
+  /**
+   * 可用模型列表缓存（首次 query 后从 initializationResult 拿到）。
+   * undefined = 还没拿到过，listModels 返回静态 fallback。
+   */
+  private modelsCache: ModelInfo[] | undefined
 
   constructor(opts: ClaudeAdapterOptions = {}) {
     this.opts = opts
-    this.spawner = opts.spawner ?? new RealProcessSpawner()
   }
 
-  /** 运行时设置 binaryPath（settings 加载后注入） */
-  setBinaryPath(path: string): void {
-    this.opts = { ...this.opts, binaryPath: path }
+  // ---- 向后兼容：manager 通过 setBinaryPath/setExtraEnv 注入设置 ----
+  // SDK 自带 binary，setBinaryPath 不再生效，但保留空实现避免 manager 报错。
+  setBinaryPath(_path: string): void {
+    log.info('setBinaryPath ignored — Agent SDK bundles its own binary')
   }
 
-  /** 注入额外的子进程环境变量（HTTPS_PROXY 等）——每次 turn spawn 时带上 */
   setExtraEnv(env: Record<string, string>): void {
     this.extraEnv = env
   }
-  private extraEnv: Record<string, string> = {}
 
   async initialize(): Promise<void> {
-    // claude 不需要预初始化——每次 turn 启动新进程
-    log.info('initialized (lazy, per-turn)')
+    log.info('initialized (lazy, per-turn via SDK query)')
   }
 
   async healthCheck(): Promise<{ ok: boolean; version?: string; error?: string }> {
-    const binary = this.opts.binaryPath ?? 'claude'
-    return checkCliHealth(binary, ['--version'])
+    // SDK 模式下 binary 是 bundled 的，不做 --version spawn 检查。
+    // 真正的可用性在首次 query 时验证（system.init 到达 = binary 可用 + auth 有效）。
+    // 这里返回乐观结果，让 UI 不阻塞；如果 binary 缺失，首次发消息会报错。
+    return { ok: true }
   }
 
   async dispose(): Promise<void> {
-    // 清理所有还在跑的 turn——app 退出 / backend 切换时调。
-    // 直接走 cleanupTurnContext（同步清理 kill/bridge/unlink），不走 interrupt 的事件推送——
-    // dispose 需要确保资源立即释放，不能依赖 generator 异步 yield 完成。
-    // 标记 interrupted 让 cleanup 知道要 kill 进程。
-    const turnIds = Array.from(this.turnContexts.keys())
+    const turnIds = [...this.turnContexts.keys()]
     for (const id of turnIds) {
       const ctx = this.turnContexts.get(id)
-      if (ctx) ctx.interrupted = true
-      // 唤醒可能卡在 await 的 generator，让它退出（finally 块的 cleanup 会 no-op）
-      ctx?.queue.push({ type: 'turn_completed', turnId: id, status: 'interrupted' })
-      ctx?.resolveWait?.()
+      if (ctx) {
+        ctx.interrupted = true
+        ctx.abortController.abort()
+      }
     }
-    await Promise.all(turnIds.map((id) => this.cleanupTurnContext(id)))
-    log.info('disposed,', turnIds.length, 'turns cleaned')
+    if (turnIds.length > 0) {
+      log.info('dispose: aborted', turnIds.length, 'running turn(s)')
+    }
+    this.turnContexts.clear()
   }
 
   getCapabilities(): BackendCapabilities {
@@ -202,7 +189,18 @@ export class ClaudeAdapter implements AgentBackend {
   }
 
   async listModels(): Promise<ModelOption[]> {
-    // claude 不像 codex 那样有 model/list，返回固定的常用模型
+    // 有动态缓存（首次 query 后从 SDK initializationResult 拿到）→ 返回真实列表
+    if (this.modelsCache && this.modelsCache.length > 0) {
+      return this.modelsCache.map((m) => ({
+        id: m.value,
+        displayName: m.displayName,
+        ...(m.description ? { description: m.description } : {}),
+        ...(m.supportedEffortLevels
+          ? { supportedEfforts: this.mapEffortLevels(m.supportedEffortLevels) }
+          : {}),
+      }))
+    }
+    // 无缓存（尚未跑过 query）→ 静态 fallback，保证 UI 初始有选项
     return [
       { id: 'sonnet', displayName: 'Sonnet (latest)', isDefault: true },
       { id: 'opus', displayName: 'Opus (latest)' },
@@ -210,61 +208,45 @@ export class ClaudeAdapter implements AgentBackend {
     ]
   }
 
+  invalidateModelsCache(): void {
+    this.modelsCache = undefined
+  }
+
+  /** SDK 的 effort 等级 → catmax 的 EffortLevel（补 'none'） */
+  private mapEffortLevels(levels: ('low' | 'medium' | 'high' | 'xhigh' | 'max')[]): EffortLevel[] {
+    return ['none', ...levels]
+  }
+
   async startSession(
     args: StartSessionArgs,
   ): Promise<{ sessionId: string; backendThreadId: string }> {
-    // claude session 是进程级的，不预创建。生成 App 内部 id 即可。
     const sessionId = randomUUID()
-    // backendThreadId 等于 sessionId（claude 第一次 turn 时会返回真实 session_id，我们记下映射）
-    this.sessionIdMap.set(sessionId, sessionId) // 临时占位，第一次 turn 后更新
+    this.sessionIdMap.set(sessionId, sessionId) // 占位，首次 turn 后回填真实 id
     void args
-    return {
-      sessionId,
-      backendThreadId: sessionId,
-    }
+    return { sessionId, backendThreadId: sessionId }
   }
 
   async listSessions(cwd?: string): Promise<SessionSummary[]> {
-    // 扫磁盘枚举 ~/.claude/projects/<encoded-cwd>/*.jsonl。
-    // - 传 cwd：只扫单个项目目录（reconcile 用）
-    // - 不传 cwd：扫所有项目目录（「扫描导入」全盘模式用）
-    // 之前直接返回 [] 是 MVP 阶段没做，现在能扫了——jsonl 文件就是事实来源。
     return listClaudeSessionsFromDisk(cwd)
   }
 
   async deleteSession(backendThreadId: string, cwd?: string): Promise<void> {
-    // 删 ~/.claude/projects/<encoded-cwd>/<sessionId>.jsonl 文件。
-    // 复用 resolveSessionJsonlPath（jsonl-reader 里的路径推算逻辑）。
-    // 失败仅日志不抛——DB tombstone 会兜底，reconcile 不会再把这条登记回来。
-    const filePath = resolveSessionJsonlPath(backendThreadId, cwd)
+    const spawnCwd = cwd ?? this.opts.cwd
+    const jsonlPath = resolveSessionJsonlPath(backendThreadId, spawnCwd)
     try {
-      await unlink(filePath)
-      log.info('deleted claude session file', filePath)
+      await unlink(jsonlPath)
     } catch (e) {
-      const code = (e as NodeJS.ErrnoException).code
-      if (code === 'ENOENT') return // 文件已不存在，幂等
-      log.warn('failed to delete claude session file', filePath, e)
+      if ((e as NodeJS.ErrnoException).code === 'ENOENT') return
+      log.warn('deleteSession: unlink failed', jsonlPath, e)
     }
   }
 
-  async resumeSession(backendThreadId: string): Promise<{ messages: never[] }> {
-    // 不需要主动 resume——下次 startTurn 会用 --resume
+  async resumeSession(backendThreadId: string): Promise<{ messages: NormalizedMessage[] }> {
     void backendThreadId
+    // resume 在下一个 startTurn 通过 options.resume 隐式发生
     return { messages: [] }
   }
 
-  /**
-   * 读会话历史：直接读 ~/.claude/projects/<encoded-cwd>/<sessionId>.jsonl 文件。
-   *
-   * 为什么不 spawn `claude --resume <id>` 读 stdout：
-   * - `--resume` 不带 stdin 时 claude 报错 "No deferred tool marker found" 退出
-   * - 即便带上 prompt 也会消耗 token + 起一个新 turn，副作用太大
-   * - jsonl 文件就是 claude 自己的持久化格式，包含完整历史 + aiTitle
-   *
-   * cwd 必须传——claude 把历史文件按 cwd 分目录存。
-   *
-   * 找不到文件时抛错（不静默返空）——让 UI 能提示用户。
-   */
   async getHistory(
     backendThreadId: string,
     cwd?: string,
@@ -274,7 +256,7 @@ export class ClaudeAdapter implements AgentBackend {
     if (result === null) {
       throw new BackendError(
         'protocol',
-        `claude getHistory(${backendThreadId}, cwd=${spawnCwd ?? '<inherit>'}): session jsonl not found`,
+        `claude getHistory(${backendThreadId}, cwd=${spawnCwd ?? '<include>'}): session jsonl not found`,
       )
     }
     log.info(
@@ -287,408 +269,409 @@ export class ClaudeAdapter implements AgentBackend {
     return { messages: result.messages, aiTitle: result.aiTitle }
   }
 
+  // ============ 核心：startTurn ============
+
   async *startTurn(args: StartTurnArgs): AsyncIterable<TurnEvent> {
     const internalTurnId = randomUUID()
     yield { type: 'turn_started', turnId: internalTurnId, sessionId: args.sessionId }
 
-    // 找 claude session_id
+    // ---- 解析 claude session id + 决定能否 resume ----
     const claudeSessionId = this.sessionIdMap.get(args.sessionId) ?? args.sessionId
-    // 只有已经拿到 claude 真实 session_id 的会话才能 --resume。
-    // 新建会话（startSession 建的占位 id）第一次 turn 必须不带 --resume——
-    // 让 claude 自己分配 session_id，从 system.init 里读到后存映射 + 标记可续接。
-    //
-    // ⚠️ 重启恢复场景：用户从历史加载一个已有会话续聊时，内存里的 resumableSessions
-    // 是空的（进程刚起），但磁盘上的 .jsonl 文件存在——文件名就是 claude 真实
-    // session_id（onRealSessionId 写回 db 的就是它）。所以除了查内存 Set，还要查
-    // 磁盘：jsonl 存在 → 这就是真实 session_id，可以 --resume。
-    // 不补这个判定的话，历史会话续聊会走"新建会话"分支（不带 --resume），
-    // claude 会分配新的 session_id → 看起来像"多出来一个会话"（Bug）。
     let canResume = this.resumableSessions.has(args.sessionId)
     if (!canResume && args.cwd) {
+      // 进程重启兜底：如果 jsonl 已存在，说明这个 id 就是真实 session id
       const jsonlPath = resolveSessionJsonlPath(args.sessionId, args.cwd)
       if (existsSync(jsonlPath)) {
-        // 磁盘有 jsonl → args.sessionId 就是 claude 真实 session_id
         this.sessionIdMap.set(args.sessionId, args.sessionId)
         this.resumableSessions.add(args.sessionId)
         canResume = true
-        log.info('resumable from disk (process restarted)', args.sessionId, 'jsonl=', jsonlPath)
+        log.info('resumable from disk (process restarted)', args.sessionId)
       }
     }
 
-    // 启动 claude 进程
-    const binary = this.opts.binaryPath ?? 'claude'
-    const procArgs = [
-      '-p',
-      '--output-format',
-      'stream-json',
-      '--input-format',
-      'stream-json',
-      '--verbose',
-      // 开启真正的逐 token 流式输出（默认 claude 是按 message 整块输出，不是流式）。
-      // 加了这个 flag 后，stdout 会多出 stream_event 类型的消息，每个 token 增量一条。
-      // Bug G：之前没加这个 flag，UI 看到的是"等全部响应完成才一次性渲染"。
-      '--include-partial-messages',
-    ]
-    if (canResume) {
-      procArgs.push('--resume', claudeSessionId)
+    // ---- 构建 SDK query options ----
+    const spawnCwd = args.cwd ?? this.opts.cwd
+    const abortController = new AbortController()
+    const aggregator = new SdkPartialAggregator(internalTurnId)
+    let sawStreamEvents = false
+
+    // pendingApprovals：canUseTool 回调 await 这里的 promise，respondApproval resolve 它。
+    // suggestions 存进来给 approve_always 回传（见 canUseTool 注释）。
+    const pendingApprovals = new Map<
+      string,
+      {
+        resolve: (action: ApprovalDecision['action']) => void
+        suggestions?: PermissionUpdate[] | undefined
+      }
+    >()
+
+    // 事件队列 + 唤醒机制：canUseTool 回调和 SDK 流都把事件推进来，generator 主循环消费。
+    // resolveWait 用对象包装，避免 TS 在 async 闭包里对 let 变量的控制流 narrowing 问题。
+    const queue: TurnEvent[] = []
+    const waker = { resolve: null as (() => void) | null }
+    const pushEvent = (event: TurnEvent): void => {
+      queue.push(event)
+      waker.resolve?.()
     }
-    if (args.model) {
-      procArgs.push('--model', args.model)
+
+    // canUseTool 回调：SDK 每次要执行工具前调用。
+    // options 带 SDK 原生计算的友好文案（displayName/description/decisionReason/title）
+    // 和 suggestions（approve_always 时作为 updatedPermissions 回传，让"本会话都允许"真生效）。
+    const canUseTool: CanUseTool = async (toolName, input, options) => {
+      const request = claudePermissionToApprovalRequest(toolName, input, {
+        displayName: options.displayName,
+        description: options.description,
+        decisionReason: options.decisionReason,
+        title: options.title,
+      })
+      const requestId = `${internalTurnId}:${randomUUID()}`
+
+      const decisionAction = await new Promise<ApprovalDecision['action']>((resolve) => {
+        pendingApprovals.set(requestId, { resolve, suggestions: options.suggestions })
+        pushEvent({
+          type: 'approval_requested',
+          turnId: internalTurnId,
+          requestId,
+          request,
+          source: 'claude',
+        })
+      })
+
+      const pending = pendingApprovals.get(requestId)
+      pendingApprovals.delete(requestId)
+
+      if (decisionAction === 'reject') {
+        return {
+          behavior: 'deny',
+          message: '用户拒绝',
+          decisionClassification: 'user_reject',
+        } satisfies PermissionResult
+      }
+      // approve_always + 有 suggestions → 放行 + 回传 updatedPermissions，持久化"本会话都允许"
+      if (decisionAction === 'approve_always' && pending?.suggestions?.length) {
+        return {
+          behavior: 'allow',
+          updatedInput: input,
+          updatedPermissions: pending.suggestions,
+          decisionClassification: 'user_permanent',
+        } satisfies PermissionResult
+      }
+      // approve（或 approve_always 但无 suggestions 兜底）→ 放行，原样回传 input
+      return {
+        behavior: 'allow',
+        updatedInput: input,
+        decisionClassification: 'user_temporary',
+      } satisfies PermissionResult
     }
-    // effort='none'：claude CLI 没有 --thinking off（--help 实测无此 flag，
-    // --thinking adaptive / --max-thinking-tokens 是 Agent SDK 参数，不是 CLI 的），
-    // 只能映射到 --effort low 把 reasoning 压到最低档（非真正关闭）。
-    // 其他档位 low/medium/high/xhigh/max 原样透传。
+
+    // ---- 组装 options ----
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const options: Record<string, any> = {
+      abortController,
+      includePartialMessages: true, // 真正的 token 级流式（对应 CLI 的 --include-partial-messages）
+      canUseTool, // 进程内权限回调，替代 CLI 的 --permission-prompt-tool + MCP + socket
+    }
+    if (spawnCwd !== undefined) options.cwd = spawnCwd
+    if (canResume) options.resume = claudeSessionId
+    if (args.model) options.model = args.model
     if (args.effort) {
-      procArgs.push('--effort', args.effort === 'none' ? 'low' : args.effort)
+      // effort='none'：SDK 同样没有真正的 off，映射到 low（与 CLI 时代一致）
+      options.effort = args.effort === 'none' ? 'low' : args.effort
     }
     if (args.permissionMode) {
-      procArgs.push('--permission-mode', args.permissionMode)
+      options.permissionMode = args.permissionMode
+      if (args.permissionMode === 'bypassPermissions') {
+        options.allowDangerouslySkipPermissions = true
+      }
+    }
+    // 注入代理 env（SDK 会把这些传给子进程）
+    if (Object.keys(this.extraEnv).length > 0) {
+      options.env = { ...this.extraEnv }
+    }
+    // binary 路径：packaged 模式指向 unpacked 真实路径；dev 让 SDK 自行 resolve
+    const binaryPath = this.resolveSdkBinaryPath()
+    if (binaryPath !== undefined) {
+      options.pathToClaudeCodeExecutable = binaryPath
     }
 
-    // ============ 启动 ApprovalBridge + 配置 mcp-config + 加 permission-prompt-tool flags ============
-    // 这一块是 claude 权限交互的核心机制：
-    // - ApprovalBridge：一个 Unix socket server，等 MCP server 子进程连进来
-    // - mcp-config：告诉 claude spawn 哪个 MCP server（我们内置的 catmax MCP）
-    // - --permission-prompt-tool：claude 把权限决策委托给 mcp__catmax__approve
-    //
-    // 注意：MCP server 子进程由 claude 自己 spawn（不是我们 spawn），生命周期跟 claude 进程绑定。
-    // 我们只负责起 socket server + 写 mcp-config + 加 flags，剩下交给 claude。
-    const userData = app.getPath('userData')
-    const socketPath = join(userData, `catmax-claude-${internalTurnId}.sock`)
-    const bridgeToken = randomUUID()
+    // ---- streaming-input：prompt 用 AsyncIterable<SDKUserMessage> ----
+    // 必须用 streaming-input 模式才能调 Query 的 setModel/setPermissionMode/applyFlagSettings
+    //（SDK 文档：control methods only available in streaming input mode）。
+    // 输入源 yield 一条用户消息后保持开启，让 Query 活跃；turn 结束时 close()。
+    let resolveInputWait: (() => void) | null = null
+    let inputClosed = false
+    const inputQueue: SDKUserMessage[] = []
+    const inputController = {
+      close: () => {
+        inputClosed = true
+        resolveInputWait?.()
+      },
+    }
+    async function* inputStream(): AsyncIterable<SDKUserMessage> {
+      // 第一条：用户本次的消息
+      yield {
+        type: 'user',
+        message: { role: 'user', content: args.prompt },
+        parent_tool_use_id: null,
+      }
+      // 保持开启，等 close 或后续 push（用于 steer 等场景）
+      while (!inputClosed) {
+        await new Promise<void>((resolve) => {
+          resolveInputWait = resolve
+        })
+        resolveInputWait = null
+        while (inputQueue.length > 0) {
+          yield inputQueue.shift()!
+        }
+      }
+    }
 
-    // 创建 per-turn 上下文（在 bridge 创建前就放到 map，让 handlePermissionRequest 能找到）
+    // ---- 创建 query ----
+    let sdkQuery: Query
+    try {
+      sdkQuery = query({ prompt: inputStream(), options })
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e)
+      log.error('query() creation failed:', msg)
+      inputController.close()
+      yield {
+        type: 'error',
+        turnId: internalTurnId,
+        message: `SDK query 启动失败: ${msg}`,
+        recoverable: false,
+      }
+      yield { type: 'turn_completed', turnId: internalTurnId, status: 'error' }
+      return
+    }
+
     const ctx: TurnContext = {
-      proc: undefined as unknown as TurnContext['proc'], // 先占位，spawn 后填
-      bridge: undefined as unknown as ApprovalBridge, // 先占位，下面立即填
-      mcpConfigPath: '', // 下面填
-      queue: [],
-      resolveWait: null,
-      pendingApprovals: new Map(),
+      query: sdkQuery,
+      abortController,
+      pendingApprovals,
       interrupted: false,
+      sessionId: args.sessionId,
+      inputController,
     }
     this.turnContexts.set(internalTurnId, ctx)
 
-    ctx.bridge = new ApprovalBridge({
-      socketPath,
-      token: bridgeToken,
-      turnId: internalTurnId,
-      onRequest: (req) => this.handlePermissionRequest(req, internalTurnId),
-      onDisconnect: () => {
-        // bridge 断开意味着 MCP server 退出 → claude 进程也快退了
-        // 把当前 turn 的 pendingApprovals 全部 reject，让 promise 不会永远 hang
-        for (const [id, pending] of ctx.pendingApprovals) {
-          log.info('bridge disconnected, rejecting pending approval', id)
-          pending.resolve('reject')
-          ctx.pendingApprovals.delete(id)
+    // ---- 后台异步消费 SDK 流，把事件推入 queue ----
+    const streamDone = { value: false, error: null as Error | null }
+    void (async () => {
+      try {
+        for await (const msg of sdkQuery) {
+          const events = this.processSdkMessage(
+            msg,
+            internalTurnId,
+            args.sessionId,
+            aggregator,
+            () => {
+              sawStreamEvents = true
+            },
+            sawStreamEvents,
+          )
+          for (const ev of events) pushEvent(ev)
+          if (events.some((e) => e.type === 'turn_completed')) break
         }
-      },
-    })
-    await ctx.bridge.start()
-
-    const mcpConfig = {
-      mcpServers: {
-        catmax: {
-          type: 'stdio',
-          // Electron 当 Node 用（ELECTRON_RUN_AS_NODE=1）——避免启动整个 Electron
-          command: process.execPath,
-          args: [mcpServerScriptPath],
-          env: {
-            ELECTRON_RUN_AS_NODE: '1',
-            ELECTRON_DISABLE_SECURITY_WARNINGS: 'true',
-            CATMAX_APPROVAL_SOCKET: socketPath,
-            CATMAX_APPROVAL_TOKEN: bridgeToken,
-          },
-        },
-      },
-    }
-    const mcpConfigPath = join(userData, `catmax-mcp-${internalTurnId}.json`)
-    ctx.mcpConfigPath = mcpConfigPath
-    await writeFile(mcpConfigPath, JSON.stringify(mcpConfig), 'utf8')
-
-    procArgs.push('--strict-mcp-config', '--mcp-config', mcpConfigPath)
-    procArgs.push('--permission-prompt-tool', 'mcp__catmax__approve')
-
-    // spawn cwd 优先级：调用方传入（args.cwd）> adapter opts > undefined（继承 main 进程 cwd）
-    // Bug E-1：claude 是 per-turn process 模型，每次 turn 都要 spawn 新进程——
-    // cwd 必须正确，否则文件工具和历史文件都会落到错误目录。
-    const spawnCwd = args.cwd ?? this.opts.cwd
-    const proc = this.spawner.spawn({
-      command: binary,
-      args: procArgs,
-      // 注入代理 env（claude 调 Anthropic API 时用得到）
-      env: { ...this.extraEnv },
-      ...(spawnCwd !== undefined ? { cwd: spawnCwd } : {}),
-    })
-    ctx.proc = proc
-
-    // 写用户消息到 stdin 并 close（claude 一次只处理一条 user 消息）
-    proc.write(encodeUserMessage(args.prompt) + '\n')
-    proc.endInput()
-
-    // 读 stdout 流，转 TurnEvent。
-    // queue / resolveWait 用 ctx（per-turn context）——多 turn 并发时各自独立。
-    const queue: TurnEvent[] = ctx.queue
-    let resolveWait: (() => void) | null = null
-    ctx.resolveWait = null
-    let done = false
-    const lineBuffer = new LineBuffer()
-    // 流式事件聚合器：处理 --include-partial-messages 模式下的 stream_event
-    const aggregator = new StreamEventAggregator(internalTurnId)
-    // 跟踪是否见过 stream_event —— 如果见过，最终的完整 assistant 消息就忽略
-    // （因为 aggregator 已经把每个 token 推给 UI 了，再处理完整块会重复显示）
-    let sawStreamEvents = false
-
-    /** helper：push 一个事件到队列，并唤醒 generator 主循环 */
-    const pushEvent = (event: TurnEvent): void => {
-      queue.push(event)
-      ctx.resolveWait?.()
-      resolveWait?.()
-    }
-
-    const onChunk = (chunk: Buffer): void => {
-      const lines = lineBuffer.push(chunk)
-      for (const line of lines) {
-        const msg = parseClaudeLine(line)
-        if (!msg) continue
-        if (msg.type === 'system') {
-          // 记下 claude 真实 session_id，并标记此会话可续接（下次 turn 可以 --resume）
-          if (msg.session_id) {
-            this.sessionIdMap.set(args.sessionId, msg.session_id)
-            this.resumableSessions.add(args.sessionId)
-            log.info('claude assigned session_id', msg.session_id, 'for internal', args.sessionId)
-            // 通知 manager 把真实 id 回写 db——重启后才能 --resume 加载历史
-            try {
-              this.opts.onRealSessionId?.(args.sessionId, msg.session_id)
-            } catch (e) {
-              log.warn('onRealSessionId callback failed:', e)
+        // turn 正常结束后，缓存可用模型列表（initializationResult 复用首次连接结果，零额外开销）
+        // 这样下次 listModels() 能返回真实列表而非静态 fallback。
+        if (!this.modelsCache) {
+          try {
+            const init = await sdkQuery.initializationResult()
+            if (init.models && init.models.length > 0) {
+              this.modelsCache = init.models
+              log.info('cached', init.models.length, 'models from initializationResult')
             }
+          } catch (e) {
+            log.debug('initializationResult for models cache failed:', e)
           }
-          continue
         }
-        if (msg.type === 'stream_event') {
-          // 真正的逐 token 流式 —— Bug G
-          sawStreamEvents = true
-          for (const event of aggregator.push(msg as StreamEventMessage)) {
-            pushEvent(event)
-            // AskUserQuestion 特殊：tool_call_started 带 askUserQuestion 字段时，
-            // 额外推一条 ask_user_question 事件给 UI 弹 dialog。
-            // 不在 mapping 里直接推是为了保持 mapping 纯粹（一进一出）。
-            if (event.type === 'tool_call_started' && event.askUserQuestion) {
-              pushEvent({
-                type: 'ask_user_question',
-                turnId: internalTurnId,
-                requestId: event.itemId, // 用 tool_use_id 作 requestId（一对一）
-                toolUseId: event.itemId,
-                questions: event.askUserQuestion.questions,
-              })
-            }
-          }
-          continue
-        }
-        if (msg.type === 'assistant') {
-          // 如果已经流式推送过（sawStreamEvents=true），最终的完整 assistant 消息忽略，
-          // 避免重复。否则（没开 --include-partial-messages 时）才用完整块。
-          if (sawStreamEvents) continue
-          for (const event of assistantToEvents(msg as AssistantMessage, internalTurnId)) {
-            pushEvent(event)
-            // 同 stream_event 路径——AskUserQuestion tool_use 额外推 ask_user_question
-            if (event.type === 'tool_call_started' && event.askUserQuestion) {
-              pushEvent({
-                type: 'ask_user_question',
-                turnId: internalTurnId,
-                requestId: event.itemId,
-                toolUseId: event.itemId,
-                questions: event.askUserQuestion.questions,
-              })
-            }
-          }
-          continue
-        }
-        if (msg.type === 'user') {
-          for (const event of userToolResultToEvents(msg, internalTurnId)) {
-            pushEvent(event)
-          }
-          continue
-        }
-        if (msg.type === 'result') {
-          const resultMsg = msg as ResultMessage
-          // 收尾：把还没收到 content_block_stop 的 tool_use 兜底发出
-          if (sawStreamEvents) {
-            for (const event of aggregator.flushPendingToolUse()) {
-              pushEvent(event)
-            }
-          }
-          // Bug D-2：is_error 的 result 必须先推 error event，把 claude 报的错暴露给 UI。
-          // 否则用户只看到「消息发出但没响应」——turn_completed('error') 不会带可读消息。
-          if (resultMsg.is_error) {
-            const errText =
-              (Array.isArray(resultMsg.errors) && resultMsg.errors.length > 0
-                ? resultMsg.errors.join('; ')
-                : undefined) ?? 'claude turn ended with error (no detail)'
-            pushEvent({
-              type: 'error',
-              turnId: internalTurnId,
-              message: errText,
-              recoverable: false,
-            })
-          }
-          pushEvent(resultToEvent(resultMsg, internalTurnId))
-          done = true
-        }
+      } catch (e) {
+        streamDone.error = e instanceof Error ? e : new Error(String(e))
+        pushEvent({
+          type: 'error',
+          turnId: internalTurnId,
+          message: streamDone.error.message,
+          recoverable: false,
+        })
+        pushEvent({ type: 'turn_completed', turnId: internalTurnId, status: 'error' })
+      } finally {
+        streamDone.value = true
+        waker.resolve?.()
       }
-    }
+    })()
 
-    proc.child.stdout?.on('data', onChunk)
-    proc.child.on('exit', () => {
-      done = true
-      resolveWait?.()
-      ctx.resolveWait?.()
-    })
-
+    // ---- generator 主循环：从 queue yield 事件 ----
     try {
-      while (!done || queue.length > 0) {
-        if (queue.length === 0) {
-          await new Promise<void>((resolve) => {
-            resolveWait = resolve
-            ctx.resolveWait = resolve
-          })
-          resolveWait = null
-          ctx.resolveWait = null
-        }
+      while (!streamDone.value || queue.length > 0) {
         while (queue.length > 0) {
           const event = queue.shift()!
           yield event
-          // 只有 turn_completed 终结 generator——error 事件后我们仍想 yield 跟在
-          // 后面的 turn_completed（Bug D-2：error event 先 yield，紧接 turn_completed）。
-          if (event.type === 'turn_completed') {
-            return
-          }
+          if (event.type === 'turn_completed') return
+        }
+        // queue 空了但流还没结束，等待唤醒
+        if (!streamDone.value) {
+          await new Promise<void>((resolve) => {
+            waker.resolve = resolve
+          })
+          waker.resolve = null
         }
       }
     } finally {
-      // 清理当前 turn 的 context——多 turn 并发时只清自己的，不影响其他 turn
-      await this.cleanupTurnContext(internalTurnId)
-    }
-  }
-
-  /**
-   * 清理单个 turn 的 context：
-   * - 中断时 kill claude 进程（interrupted 标记）
-   * - reject 所有 pendingApprovals（防止 promise 永远 hang）
-   * - stop bridge（关 socket server，删 socket 文件）
-   * - unlink mcp-config 临时文件
-   * - 从 turnContexts 里 delete
-   *
-   * 由 generator finally 块统一调用（turn 正常结束 / interrupt / generator 抛错都走这里）。
-   * interrupt 不再自己清理——它只 push turn_completed 事件，让 generator yield 后 return
-   * 触发 finally 块统一清理。这样能保证前端收到 turn_completed 事件（之前 interrupt 直接
-   * 清理会导致 generator 不 yield 任何结束事件，前端 isRunning 永远 true）。
-   */
-  private async cleanupTurnContext(turnId: string): Promise<void> {
-    const ctx = this.turnContexts.get(turnId)
-    if (!ctx) return // 已经被清理过，no-op
-    this.turnContexts.delete(turnId)
-    // 中断时确保 claude 进程被杀（正常完成时进程已 exit，kill 是 no-op 所以无需守卫，
-    // 但用 interrupted 标记更明确，避免对已退出进程发送信号）
-    if (ctx.interrupted) {
-      try {
-        ctx.proc.kill('SIGTERM')
-      } catch (e) {
-        log.warn('cleanup kill failed:', e)
-      }
-    }
-    // reject 所有未完成的 pendingApprovals
-    for (const [, pending] of ctx.pendingApprovals) {
-      pending.resolve('reject')
-    }
-    ctx.pendingApprovals.clear()
-    try {
-      await ctx.bridge.stop()
-    } catch (e) {
-      log.warn('bridge stop failed:', e)
-    }
-    if (ctx.mcpConfigPath) {
-      try {
-        await unlink(ctx.mcpConfigPath)
-      } catch {
-        // 文件可能不存在（turn 启动失败时），忽略
+      // 关闭 streaming-input 迭代器，让 query 自然结束
+      inputController.close()
+      this.turnContexts.delete(internalTurnId)
+      // 中断未决的权限审批，避免 promise 泄漏
+      for (const [, pending] of pendingApprovals) pending.resolve('reject')
+      pendingApprovals.clear()
+      // 如果 generator 被提前 return/break（流还没结束），确保 abort
+      if (!streamDone.value) {
+        ctx.interrupted = true
+        abortController.abort()
       }
     }
   }
 
+  // ============ SDK 消息分发 ============
+
   /**
-   * ApprovalBridge 收到 MCP server 转发上来的权限请求时触发。
-   *
-   * 流程：
-   * 1. 把请求转成 ApprovalRequest（复用 mapping 层的 claudePermissionToApprovalRequest）
-   * 2. push approval_requested TurnEvent 到当前 turn 的队列
-   * 3. 挂一个 promise，等 respondApproval 调用
-   * 4. promise 完成后把决策写回 bridge → MCP server → claude
-   *
-   * requestId 用 `${turnId}:${bridgeRequestId}` 复合形式——确保多 turn 并发时
-   * 各自从 1 开始递增的 bridgeRequestId 不会撞。
+   * 处理一条 SDKMessage，返回要 emit 的 TurnEvent[]。
+   * 对应 CLI 时代 adapter.ts 的 onChunk 分发逻辑。
    */
-  private handlePermissionRequest(req: BridgePermissionRequest, turnId: string): void {
+  private processSdkMessage(
+    msg: SDKMessage,
+    turnId: string,
+    sessionId: string,
+    aggregator: SdkPartialAggregator,
+    markStreamed: () => void,
+    sawStreamEvents: boolean,
+  ): TurnEvent[] {
+    const events: TurnEvent[] = []
+
+    if (isSdkSystemMessage(msg)) {
+      const sid = sdkSystemSessionId(msg)
+      if (sid) {
+        // 回填真实 session id + 触发 onRealSessionId（manager 用来回写 db）
+        this.sessionIdMap.set(sessionId, sid)
+        this.resumableSessions.add(sessionId)
+        try {
+          this.opts.onRealSessionId?.(sessionId, sid)
+        } catch (e) {
+          log.warn('onRealSessionId callback failed:', e)
+        }
+      }
+      return events
+    }
+
+    if (isSdkPartialMessage(msg)) {
+      markStreamed()
+      const partialEvents = aggregator.push(msg)
+      events.push(...partialEvents)
+      return events
+    }
+
+    if (isSdkAssistantMessage(msg)) {
+      // 完整 assistant 消息。如果已经走了 partial 路径，跳过（避免重复）。
+      if (sawStreamEvents) return events
+      for (const ev of sdkAssistantToEvents(msg, turnId)) {
+        events.push(ev)
+      }
+      return events
+    }
+
+    if (isSdkUserMessage(msg)) {
+      // tool_result → tool_call_completed
+      events.push(...sdkUserToolResultToEvents(msg, turnId))
+      return events
+    }
+
+    if (isSdkResultMessage(msg)) {
+      // turn 结束。先 flush 兜底 tool_use，再推 turn_completed。
+      if (sawStreamEvents) {
+        events.push(...aggregator.flushPendingToolUse())
+      }
+      const resultEvent = sdkResultToEvent(msg, turnId)
+      // result 是 error 时，先推 error 事件让 UI 显示可读错误（Bug D-2）
+      if (resultEvent.type === 'turn_completed' && resultEvent.status === 'error') {
+        events.push({
+          type: 'error',
+          turnId,
+          message: `claude turn ended with error (subtype: ${msg.subtype})`,
+          recoverable: false,
+        })
+      }
+      events.push(resultEvent)
+      return events
+    }
+
+    // 其他消息类型（status / api_retry / hook 等）暂不处理
+    return events
+  }
+
+  /**
+   * 运行中热切换 model/effort/permissionMode。
+   *
+   * 依赖 SDK streaming-input 模式下 Query 的 control 方法：
+   * - model → setModel()：当前 turn 的下一次 model 调用起生效
+   * - permissionMode → setPermissionMode()：立即生效
+   * - effort → applyFlagSettings({ effortLevel })：下一 turn 生效
+   *
+   * 每项独立 try/catch，失败只 log warn 不抛（部分成功优于全失败）。
+   */
+  async updateTurnConfig(turnId: string, config: TurnConfigUpdate): Promise<void> {
     const ctx = this.turnContexts.get(turnId)
     if (!ctx) {
-      log.warn('handlePermissionRequest: no context for turn', turnId)
+      log.debug('updateTurnConfig: no context for turn (already completed?)', turnId)
       return
     }
-    const request = claudePermissionToApprovalRequest(req.toolName, req.input)
-    // 复合 requestId：`${turnId}:${bridgeRequestId}`——多 turn 并发隔离
-    const requestId = `${turnId}:${req.requestId}`
 
-    const promise = new Promise<ApprovalDecision['action']>((resolve) => {
-      ctx.pendingApprovals.set(requestId, {
-        resolve,
-        bridgeRequestId: req.requestId,
-        originalInput: req.input,
-      })
-    })
+    if (config.model !== undefined) {
+      try {
+        await ctx.query.setModel(config.model)
+        log.info('hot-swap model →', config.model)
+      } catch (e) {
+        log.warn('setModel hot-swap failed:', e)
+      }
+    }
 
-    // 推 approval_requested 事件到当前 turn 的队列（source='claude' 让 renderer 区分）
-    ctx.queue.push({
-      type: 'approval_requested',
-      turnId,
-      requestId,
-      request,
-      source: 'claude',
-    })
-    ctx.resolveWait?.()
+    if (config.permissionMode !== undefined) {
+      try {
+        await ctx.query.setPermissionMode(config.permissionMode)
+        log.info('hot-swap permissionMode →', config.permissionMode)
+      } catch (e) {
+        log.warn('setPermissionMode hot-swap failed:', e)
+      }
+    }
 
-    // 用户决策后写回 bridge → MCP server → claude
-    void promise.then((action) => {
-      const behavior: 'allow' | 'deny' = action === 'reject' ? 'deny' : 'allow'
-      const message = action === 'reject' ? '用户拒绝' : undefined
-      ctx.bridge.respond(req.requestId, behavior, req.input, message)
-      ctx.pendingApprovals.delete(requestId)
-    })
+    if (config.effort !== undefined) {
+      try {
+        // effort='none'：SDK 没有真正的 off，映射到 low（与 query options 一致）
+        const effortLevel = config.effort === 'none' ? 'low' : config.effort
+        await ctx.query.applyFlagSettings({ effortLevel })
+        log.info('hot-swap effort →', effortLevel, '(下一 turn 生效)')
+      } catch (e) {
+        log.warn('applyFlagSettings(effort) hot-swap failed:', e)
+      }
+    }
   }
 
   async interrupt(turnId: string): Promise<void> {
     const ctx = this.turnContexts.get(turnId)
     if (!ctx) {
-      // turn 已结束（generator 已 return 并 cleanup）或不存在。
-      // 这是正常情况——用户见 UI 没反应二次点击、或 turn 自己刚跑完都会走到这里。
-      // 降为 debug：warn 会误导成 bug 信号。
       log.debug('interrupt: no context for turn (already completed?)', turnId)
       return
     }
-    // 防止多次 interrupt 重复推 turn_completed 事件
     if (ctx.interrupted) return
-    log.info('interrupting claude process, turn=', turnId)
     ctx.interrupted = true
-    // push turn_completed(interrupted) 到队列——generator 主循环 yield 后 return，
-    // finally 块的 cleanupTurnContext 统一负责 kill 进程 / stop bridge / reject approvals / unlink。
-    // 这样能确保前端收到 turn_completed 事件，UI 的 isRunning 正确清零。
-    ctx.queue.push({ type: 'turn_completed', turnId, status: 'interrupted' })
-    ctx.resolveWait?.()
+    // SDK 的 interrupt 是协作式的——发中断信号让 query 流尽快结束。
+    try {
+      await ctx.query.interrupt()
+    } catch (e) {
+      log.warn('query.interrupt() failed, falling back to abort:', e)
+      ctx.abortController.abort()
+    }
   }
 
   async respondApproval(decision: ApprovalDecision): Promise<void> {
-    // requestId 是复合形式 `${turnId}:${bridgeRequestId}`——拆出 turnId 找 context
     const colonIdx = decision.requestId.lastIndexOf(':')
     if (colonIdx < 0) {
       log.warn('respondApproval: invalid requestId format', decision.requestId)
@@ -707,5 +690,35 @@ export class ClaudeAdapter implements AgentBackend {
     }
     ctx.pendingApprovals.delete(decision.requestId)
     pending.resolve(decision.action)
+  }
+
+  // ============ binary 路径解析（ASAR 打包支持） ============
+
+  /**
+   * 解析 SDK bundled binary 的磁盘路径。
+   * - dev 模式：返回 undefined，让 SDK 通过 import.meta.url + createRequire 自行 resolve
+   *   （PoC 验证：pnpm 的 .pnpm 结构能让 SDK 正确找到 binary）
+   * - packaged 模式：返回 app.asar.unpacked 里的真实路径
+   *   （PoC 验证：electron-builder 不会自动收集 optionalDependencies 的平台包，
+   *    必须配 asarUnpack，再显式传 pathToClaudeCodeExecutable 绕过 resolve 链）
+   */
+  private resolveSdkBinaryPath(): string | undefined {
+    if (!app.isPackaged) return undefined
+
+    const platform = `${process.platform}-${process.arch}`
+    // electron-builder 把 asarUnpack 的文件放到 app.asar.unpacked/
+    const candidate = join(
+      process.resourcesPath,
+      'app.asar.unpacked',
+      'node_modules',
+      `@anthropic-ai/claude-agent-sdk-${platform}`,
+      'claude',
+    )
+    if (existsSync(candidate)) return candidate
+    log.warn(
+      'packaged mode but SDK binary not found at expected unpacked path; SDK resolve may fail:',
+      candidate,
+    )
+    return undefined
   }
 }

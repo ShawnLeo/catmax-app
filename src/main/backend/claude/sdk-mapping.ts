@@ -1,0 +1,325 @@
+/**
+ * Claude Agent SDK message → TurnEvent 转译层。
+ *
+ * 这是 CLI 时代 mapping.ts 的 SDK 版本。SDK 的 SDKMessage 与 CLI 的 stream-json
+ * 消息结构同构（都包装 Anthropic Messages API），所以核心映射逻辑（toolUseToInfo 等）
+ * 直接复用自 ./mapping.ts，只把输入类型从 zod 推断的 CLI schema 换成 SDK 的 typed 消息。
+ *
+ * 两种 SDK 消息来源（对应 CLI 的两种）：
+ * 1. SDKAssistantMessage（完整块）→ sdkAssistantToEvents（对应 assistantToEvents）
+ * 2. SDKPartialAssistantMessage（逐 token delta，type 仍叫 'stream_event'）
+ *    → SdkPartialAggregator（对应 StreamEventAggregator，但 SDK 已给 typed 事件，更简单）
+ *
+ * 注意：不从 @anthropic-ai/sdk 直接导入 Beta 类型（它是 claude-agent-sdk 的传递依赖，
+ * pnpm 结构下 TS 解析不到）。用 SDK 自身类型推导的索引类型代替。
+ */
+import { randomUUID } from 'node:crypto'
+
+import type {
+  SDKAssistantMessage,
+  SDKMessage,
+  SDKPartialAssistantMessage,
+  SDKResultMessage,
+  SDKSystemMessage,
+  SDKUserMessage,
+} from '@anthropic-ai/claude-agent-sdk'
+import type { ToolCallInfo, TurnEvent } from '@shared/backend/types'
+
+import { toolResultToOutput, toolUseResultToStats, toolUseToInfo } from './mapping'
+
+// ============ 局部类型：从 SDK 类型推导 content block 形状，避免直接引用 @anthropic-ai/sdk ============
+
+/** SDK assistant message 的 content block（联合，含 text/thinking/tool_use/...） */
+type SdkContentBlock = SDKAssistantMessage['message']['content'][number]
+
+/** tool_use block 的结构（从联合里 narrowing 出来） */
+interface SdkToolUseBlock {
+  type: 'tool_use'
+  id: string
+  name: string
+  input: unknown
+}
+
+/** tool_result block 的结构（user message 里） */
+interface SdkToolResultBlock {
+  type: 'tool_result'
+  tool_use_id: string
+  content?: unknown
+  is_error?: boolean
+}
+
+// ============ 类型适配：把 SDK 的 content block 桥接到 mapping.ts 认识的形状 ============
+
+/** SDK tool_use block → mapping.ts 的 ToolUseContent 形状 */
+function sdkToToolUse(block: SdkToolUseBlock): Parameters<typeof toolUseToInfo>[0] {
+  return { type: 'tool_use', id: block.id, name: block.name, input: block.input }
+}
+
+/** SDK tool_result block → mapping.ts 的 ToolResultContent 形状 */
+function sdkToToolResult(block: SdkToolResultBlock): Parameters<typeof toolResultToOutput>[0] {
+  return {
+    type: 'tool_result',
+    tool_use_id: block.tool_use_id,
+    content: block.content as string | unknown[] | undefined,
+    is_error: block.is_error,
+  }
+}
+
+// ============ SDK 消息 → TurnEvent ============
+
+/**
+ * 从 SDKAssistantMessage 提取事件序列。
+ *
+ * 对应 CLI 时代的 assistantToEvents。includePartialMessages: true 时走 partial 路径，
+ * 这个函数主要用于非 partial 模式或作为兜底。
+ */
+export function* sdkAssistantToEvents(
+  msg: SDKAssistantMessage,
+  turnId: string,
+): Iterable<TurnEvent> {
+  for (const block of msg.message.content) {
+    const itemId = sdkBlockId(block)
+    switch (block.type) {
+      case 'text': {
+        const text = (block as { text: string }).text
+        yield { type: 'text_delta', turnId, itemId, text }
+        break
+      }
+      case 'thinking': {
+        const text = (block as { thinking: string }).thinking
+        yield { type: 'reasoning_delta', turnId, itemId, text }
+        break
+      }
+      case 'tool_use': {
+        const toolUse = block as unknown as SdkToolUseBlock
+        const tool: ToolCallInfo = toolUseToInfo(sdkToToolUse(toolUse))
+        yield { type: 'tool_call_started', turnId, itemId, tool }
+        break
+      }
+      default:
+        break
+    }
+  }
+}
+
+/**
+ * 从 SDKUserMessage 提取 tool_call_completed 事件。
+ *
+ * SDK 的 user message 里的 tool_result 块标记上一个 tool_use 完成。
+ * tool_use_result 是 Task（子 Agent）完成时附加的统计字段。
+ */
+export function* sdkUserToolResultToEvents(
+  msg: SDKUserMessage,
+  turnId: string,
+): Iterable<TurnEvent> {
+  const content = (msg.message as { content: unknown }).content
+  if (!Array.isArray(content)) return
+  const stats = toolUseResultToStats(msg.tool_use_result)
+  for (const block of content) {
+    if (typeof block !== 'object' || block === null) continue
+    if ((block as { type?: string }).type === 'tool_result') {
+      const result = block as SdkToolResultBlock
+      const itemId = result.tool_use_id
+      yield {
+        type: 'tool_call_completed',
+        turnId,
+        itemId,
+        output: toolResultToOutput(sdkToToolResult(result)),
+        ...(stats !== undefined ? { taskStats: stats } : {}),
+      }
+    }
+  }
+}
+
+// ============ SdkPartialAggregator：stream_event → TurnEvent 状态机 ============
+
+/** 单个 block 的流式追踪状态 */
+interface PartialBlockState {
+  type: string
+  itemId?: string // tool_use 的 id
+  toolName?: string // tool_use 的 name（content_block_start 就有）
+  toolInputBuffer?: string // input_json_delta 的累积片段
+}
+
+/**
+ * SDKPartialAssistantMessage → TurnEvent[]。
+ *
+ * SDK 的 partial message（type: 'stream_event'）就是 Anthropic Messages API 的流式事件，
+ * 与 CLI 的 stream_event 完全相同。tool_use 的 input 仍是逐 delta 累积的 JSON 片段，
+ * 需要在 content_block_stop 时才能解析。这是一个轻量状态机，按 content block index 跟踪。
+ */
+export class SdkPartialAggregator {
+  private blocks = new Map<number, PartialBlockState>()
+  private firedToolStarts = new Set<string>()
+
+  constructor(private readonly turnId: string) {}
+
+  /** 喂一条 partial 消息，返回要 emit 的 TurnEvent[] */
+  push(msg: SDKPartialAssistantMessage): TurnEvent[] {
+    return this.handleStreamEvent(msg.event)
+  }
+
+  /** turn 结束时兜底：把还没发 tool_call_started 的 tool_use 补上 */
+  flushPendingToolUse(): TurnEvent[] {
+    const events: TurnEvent[] = []
+    for (const [, block] of this.blocks) {
+      if (block.type === 'tool_use' && block.itemId && !this.firedToolStarts.has(block.itemId)) {
+        const ev = this.buildToolCallStarted(block)
+        if (ev) events.push(ev)
+      }
+    }
+    return events
+  }
+
+  // SDK 的 event 类型是 BetaRawMessageStreamEvent（来自 @anthropic-ai/sdk），
+  // 这里用结构化的 case 判断，不直接引用该类型。
+  private handleStreamEvent(event: SDKPartialAssistantMessage['event']): TurnEvent[] {
+    const events: TurnEvent[] = []
+    const evt = event as {
+      type: string
+      index?: number
+      content_block?: { type: string; id?: string; name?: string }
+      delta?: { type: string; text?: string; thinking?: string; partial_json?: string }
+    }
+
+    switch (evt.type) {
+      case 'content_block_start': {
+        const idx = evt.index
+        const block = evt.content_block
+        if (idx === undefined || !block) break
+        const entry: PartialBlockState = { type: block.type }
+        if (block.type === 'tool_use') {
+          if (block.id) entry.itemId = block.id
+          entry.toolName = block.name ?? ''
+          entry.toolInputBuffer = ''
+        }
+        this.blocks.set(idx, entry)
+        break
+      }
+      case 'content_block_delta': {
+        const idx = evt.index
+        const entry = idx !== undefined ? this.blocks.get(idx) : undefined
+        if (!entry || !evt.delta) break
+        const delta = evt.delta
+        if (delta.type === 'text_delta' && typeof delta.text === 'string') {
+          const itemId = entry.itemId ?? `text-${idx}`
+          events.push({ type: 'text_delta', turnId: this.turnId, itemId, text: delta.text })
+        } else if (delta.type === 'thinking_delta' && typeof delta.thinking === 'string') {
+          const itemId = entry.itemId ?? `thinking-${idx}`
+          events.push({
+            type: 'reasoning_delta',
+            turnId: this.turnId,
+            itemId,
+            text: delta.thinking,
+          })
+        } else if (delta.type === 'input_json_delta' && typeof delta.partial_json === 'string') {
+          if (entry.toolInputBuffer !== undefined) {
+            entry.toolInputBuffer += delta.partial_json
+          }
+        }
+        break
+      }
+      case 'content_block_stop': {
+        const idx = evt.index
+        const entry = idx !== undefined ? this.blocks.get(idx) : undefined
+        if (!entry) break
+        if (entry.type === 'tool_use' && entry.itemId) {
+          const ev = this.buildToolCallStarted(entry)
+          if (ev) events.push(ev)
+        }
+        break
+      }
+      default:
+        break
+    }
+    return events
+  }
+
+  private buildToolCallStarted(entry: PartialBlockState): TurnEvent | null {
+    if (!entry.itemId) return null
+    if (this.firedToolStarts.has(entry.itemId)) return null
+    this.firedToolStarts.add(entry.itemId)
+
+    let input: Record<string, unknown> = {}
+    if (entry.toolInputBuffer !== undefined && entry.toolInputBuffer.length > 0) {
+      try {
+        input = JSON.parse(entry.toolInputBuffer)
+      } catch {
+        input = { _raw: entry.toolInputBuffer }
+      }
+    }
+
+    const tool: ToolCallInfo = toolUseToInfo({
+      type: 'tool_use',
+      id: entry.itemId,
+      name: entry.toolName ?? '',
+      input,
+    })
+
+    return { type: 'tool_call_started', turnId: this.turnId, itemId: entry.itemId, tool }
+  }
+}
+
+// ============ result / system 消息 ============
+
+/** SDKResultMessage → turn_completed 事件 */
+export function sdkResultToEvent(msg: SDKResultMessage, turnId: string): TurnEvent {
+  // SDK 的 result subtype 是 'success' | 'error_during_execution' | ...（没有单纯的 'error' 或 'interrupted'）
+  // is_error 才是判断错误的权威字段
+  const isErr = msg.is_error
+  const status: 'completed' | 'interrupted' | 'error' = isErr ? 'error' : 'completed'
+  const usage = {
+    ...(msg.usage.input_tokens !== undefined ? { inputTokens: msg.usage.input_tokens } : {}),
+    ...(msg.usage.output_tokens !== undefined ? { outputTokens: msg.usage.output_tokens } : {}),
+    ...(msg.usage.cache_read_input_tokens !== undefined
+      ? { cacheReadTokens: msg.usage.cache_read_input_tokens }
+      : {}),
+    ...(msg.total_cost_usd !== undefined ? { costUsd: msg.total_cost_usd } : {}),
+  }
+  return {
+    type: 'turn_completed',
+    turnId,
+    status,
+    usage,
+  }
+}
+
+/** 提取 SDKSystemMessage 的 session_id（用于 onRealSessionId 回调） */
+export function sdkSystemSessionId(msg: SDKSystemMessage): string | undefined {
+  return msg.session_id
+}
+
+// ============ 类型保护 ============
+
+/** SDK content block 取 id */
+function sdkBlockId(block: SdkContentBlock): string {
+  if (block.type === 'tool_use') {
+    return (block as unknown as SdkToolUseBlock).id
+  }
+  return randomUUID()
+}
+
+/** 判断 SDKMessage 是否是 assistant 消息 */
+export function isSdkAssistantMessage(msg: SDKMessage): msg is SDKAssistantMessage {
+  return msg.type === 'assistant'
+}
+
+/** 判断 SDKMessage 是否是 partial（stream_event）消息 */
+export function isSdkPartialMessage(msg: SDKMessage): msg is SDKPartialAssistantMessage {
+  return msg.type === 'stream_event'
+}
+
+/** 判断 SDKMessage 是否是 user 消息 */
+export function isSdkUserMessage(msg: SDKMessage): msg is SDKUserMessage {
+  return msg.type === 'user'
+}
+
+/** 判断 SDKMessage 是否是 result 消息 */
+export function isSdkResultMessage(msg: SDKMessage): msg is SDKResultMessage {
+  return msg.type === 'result'
+}
+
+/** 判断 SDKMessage 是否是 system 消息 */
+export function isSdkSystemMessage(msg: SDKMessage): msg is SDKSystemMessage {
+  return msg.type === 'system'
+}

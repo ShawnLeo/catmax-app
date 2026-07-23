@@ -35,6 +35,15 @@ export interface BackendCapabilities {
   supportsPermissionMode: boolean
   supportedPermissionModes: PermissionMode[]
   supportedEfforts: EffortLevel[]
+  /** 支持 turn 进行中热切换 model/effort/permissionMode（SDK streaming-input 模式） */
+  supportsHotSwap: boolean
+}
+
+/** 运行中 turn 的配置热切换请求 */
+export interface TurnConfigUpdate {
+  model?: string
+  effort?: EffortLevel
+  permissionMode?: PermissionMode
 }
 
 /** 模型选项 —— 由 Adapter 从后端动态拉取 */
@@ -109,8 +118,8 @@ export interface ToolCallInfo {
    */
   edit?: ToolEditInfo
   /**
-   * 控制流工具的结构化数据（EnterPlanMode / ExitPlanMode / TodoWrite / AskUserQuestion）。
-   * 这些工具的 input 不是文件/命令，而是 plan markdown / todos / questions——
+   * 控制流工具的结构化数据（EnterPlanMode / ExitPlanMode / TodoWrite）。
+   * 这些工具的 input 不是文件/命令，而是 plan markdown / todos——
    * 前端按 control.type 分发到专门渲染组件，不走 detail/output 默认渲染。
    */
   control?: ToolControlInfo
@@ -204,16 +213,13 @@ export interface ToolTaskStats {
  * - enter_plan_mode：进入计划模式（无数据，纯提示）
  * - exit_plan_mode：退出计划模式 + 携带 markdown 实施方案
  * - todo_write：更新 todo 列表
- * - ask_user_question：向用户提问（多选项）
  */
 export interface ToolControlInfo {
-  type: 'enter_plan_mode' | 'exit_plan_mode' | 'todo_write' | 'ask_user_question'
+  type: 'enter_plan_mode' | 'exit_plan_mode' | 'todo_write'
   /** exit_plan_mode：markdown 计划内容（用户审批的核心） */
   plan?: string
   /** todo_write：todo 列表 */
   todos?: ToolControlTodo[]
-  /** ask_user_question：问题列表 */
-  questions?: ToolControlQuestion[]
 }
 
 export interface ToolControlTodo {
@@ -221,19 +227,6 @@ export interface ToolControlTodo {
   status: 'pending' | 'in_progress' | 'completed'
   /** 当前进行中的简短描述（claude 给的） */
   activeForm?: string
-}
-
-export interface ToolControlQuestion {
-  header: string
-  question: string
-  options: ToolControlQuestionOption[]
-  /** 多选允许（default false）——claude AskUserQuestion 的 multiSelect 字段 */
-  multiSelect?: boolean
-}
-
-export interface ToolControlQuestionOption {
-  label: string
-  description: string
 }
 
 /**
@@ -275,6 +268,16 @@ export interface ApprovalRequest {
   title: string
   detail: string
   riskLevel: 'low' | 'medium' | 'high'
+  /**
+   * 以下三项由 Claude Agent SDK 的 canUseTool 回调 options 透传（SDK 原生计算的友好文案）。
+   * codex 不填——PermissionPanel 对 undefined 自然回退到 detail 展示。
+   */
+  /** 友好动作名，如 "Write" / "Read file"，适合做标签/按钮 */
+  displayName?: string
+  /** 人类可读目标/副标题，如 "/tmp/x.txt" 或 "Claude will have read/write access to ~/Downloads" */
+  description?: string
+  /** 为什么触发这次权限请求，如 "Path is outside allowed working directories" */
+  decisionReason?: string
 }
 
 /** approval 决策 */
@@ -304,12 +307,6 @@ export type TurnEvent =
       turnId: string
       itemId: string
       tool: ToolCallInfo
-      /**
-       * AskUserQuestion 专属标记——adapter 检测到这个字段时，会额外推一条
-       * `ask_user_question` 事件给 UI 弹 dialog。mapping 层在 buildToolCallStarted 时塞入。
-       * 不带这个字段的 tool_call_started 都是普通工具，UI 不弹 dialog。
-       */
-      askUserQuestion?: { questions: ToolControlQuestion[] }
     }
   | {
       type: 'tool_call_completed'
@@ -329,21 +326,12 @@ export type TurnEvent =
       requestId: string
       request: ApprovalRequest
       /**
-       * 标识来源 backend——renderer 用来决定弹哪个 dialog。
-       * - undefined / 'codex'：走 ApprovalDialog（codex approval）
-       * - 'claude'：走 ClaudePermissionDialog（claude 通过 MCP server 的权限请求）
+       * 标识来源 backend——renderer 用来决定写哪个 pending slot。
+       * - undefined / 'codex'：走 pendingApproval（codex approval）
+       * - 'claude'：走 pendingClaudePermission（claude 通过 MCP server 的权限请求）
+       * 两者都由 PermissionPanel 渲染。
        */
       source?: 'claude' | 'codex'
-    }
-  | {
-      /** AskUserQuestion——claude 想问用户问题，UI 弹 AskUserQuestionDialog */
-      type: 'ask_user_question'
-      turnId: string
-      /** 唯一标识——用 tool_use_id（和 itemId 一致），dialog 提交/cancel 时用它清 pendingQuestion */
-      requestId: string
-      /** AskUserQuestion tool_use 的 id（同 itemId），保留语义 */
-      toolUseId: string
-      questions: ToolControlQuestion[]
     }
   | { type: 'error'; turnId: string; message: string; recoverable: boolean }
   | {
@@ -449,6 +437,8 @@ export interface AgentBackend {
   interrupt(turnId: string): Promise<void>
   respondApproval(decision: ApprovalDecision): Promise<void>
   steer?(turnId: string, prompt: string): Promise<void>
+  /** 运行中热切换 model/effort/permissionMode（仅 supportsHotSwap 的 backend 实现） */
+  updateTurnConfig?(turnId: string, config: TurnConfigUpdate): Promise<void>
 
   /**
    * 物理删除后端侧的会话数据（用户在 catmax UI 删除会话时调用）。
