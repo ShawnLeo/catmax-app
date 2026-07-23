@@ -83,6 +83,10 @@ interface TurnContext {
       originalInput: Record<string, unknown>
     }
   >
+  /** 是否被 interrupt 中断——interrupt 设 true 并 push turn_completed 事件，
+   * generator yield 后 return，finally 块的 cleanupTurnContext 据此决定是否 kill 进程。
+   * （正常完成时进程已 exit，无需 kill） */
+  interrupted: boolean
 }
 
 export interface ClaudeAdapterOptions {
@@ -177,9 +181,19 @@ export class ClaudeAdapter implements AgentBackend {
   }
 
   async dispose(): Promise<void> {
-    // 清理所有还在跑的 turn——app 退出 / backend 切换时调
+    // 清理所有还在跑的 turn——app 退出 / backend 切换时调。
+    // 直接走 cleanupTurnContext（同步清理 kill/bridge/unlink），不走 interrupt 的事件推送——
+    // dispose 需要确保资源立即释放，不能依赖 generator 异步 yield 完成。
+    // 标记 interrupted 让 cleanup 知道要 kill 进程。
     const turnIds = Array.from(this.turnContexts.keys())
-    await Promise.all(turnIds.map((id) => this.interrupt(id)))
+    for (const id of turnIds) {
+      const ctx = this.turnContexts.get(id)
+      if (ctx) ctx.interrupted = true
+      // 唤醒可能卡在 await 的 generator，让它退出（finally 块的 cleanup 会 no-op）
+      ctx?.queue.push({ type: 'turn_completed', turnId: id, status: 'interrupted' })
+      ctx?.resolveWait?.()
+    }
+    await Promise.all(turnIds.map((id) => this.cleanupTurnContext(id)))
     log.info('disposed,', turnIds.length, 'turns cleaned')
   }
 
@@ -352,6 +366,7 @@ export class ClaudeAdapter implements AgentBackend {
       queue: [],
       resolveWait: null,
       pendingApprovals: new Map(),
+      interrupted: false,
     }
     this.turnContexts.set(internalTurnId, ctx)
 
@@ -560,18 +575,30 @@ export class ClaudeAdapter implements AgentBackend {
 
   /**
    * 清理单个 turn 的 context：
+   * - 中断时 kill claude 进程（interrupted 标记）
+   * - reject 所有 pendingApprovals（防止 promise 永远 hang）
    * - stop bridge（关 socket server，删 socket 文件）
    * - unlink mcp-config 临时文件
-   * - reject 所有 pendingApprovals（防止 promise 永远 hang）
    * - 从 turnContexts 里 delete
    *
-   * 由 generator finally 块（turn 正常结束 / interrupt / generator 抛错）调用。
-   * interrupt 也单独调用，会先 delete turnContexts 让 finally 块的 cleanup 变 no-op。
+   * 由 generator finally 块统一调用（turn 正常结束 / interrupt / generator 抛错都走这里）。
+   * interrupt 不再自己清理——它只 push turn_completed 事件，让 generator yield 后 return
+   * 触发 finally 块统一清理。这样能保证前端收到 turn_completed 事件（之前 interrupt 直接
+   * 清理会导致 generator 不 yield 任何结束事件，前端 isRunning 永远 true）。
    */
   private async cleanupTurnContext(turnId: string): Promise<void> {
     const ctx = this.turnContexts.get(turnId)
-    if (!ctx) return // 已经被 interrupt 清理过，no-op
+    if (!ctx) return // 已经被清理过，no-op
     this.turnContexts.delete(turnId)
+    // 中断时确保 claude 进程被杀（正常完成时进程已 exit，kill 是 no-op 所以无需守卫，
+    // 但用 interrupted 标记更明确，避免对已退出进程发送信号）
+    if (ctx.interrupted) {
+      try {
+        ctx.proc.kill('SIGTERM')
+      } catch (e) {
+        log.warn('cleanup kill failed:', e)
+      }
+    }
     // reject 所有未完成的 pendingApprovals
     for (const [, pending] of ctx.pendingApprovals) {
       pending.resolve('reject')
@@ -643,35 +670,21 @@ export class ClaudeAdapter implements AgentBackend {
   async interrupt(turnId: string): Promise<void> {
     const ctx = this.turnContexts.get(turnId)
     if (!ctx) {
-      log.warn('interrupt: no context for turn', turnId)
+      // turn 已结束（generator 已 return 并 cleanup）或不存在。
+      // 这是正常情况——用户见 UI 没反应二次点击、或 turn 自己刚跑完都会走到这里。
+      // 降为 debug：warn 会误导成 bug 信号。
+      log.debug('interrupt: no context for turn (already completed?)', turnId)
       return
     }
+    // 防止多次 interrupt 重复推 turn_completed 事件
+    if (ctx.interrupted) return
     log.info('interrupting claude process, turn=', turnId)
-    // 先 delete turnContexts，让 generator finally 块的 cleanupTurnContext 变 no-op（避免竞争）
-    this.turnContexts.delete(turnId)
-    try {
-      ctx.proc.kill('SIGTERM')
-    } catch (e) {
-      log.warn('interrupt kill failed:', e)
-    }
-    // reject 所有 pendingApprovals（让 promise 完成，避免内存泄漏）
-    for (const [, pending] of ctx.pendingApprovals) {
-      pending.resolve('reject')
-    }
-    ctx.pendingApprovals.clear()
-    // stop bridge + 删 mcp-config
-    try {
-      await ctx.bridge.stop()
-    } catch (e) {
-      log.warn('interrupt bridge stop failed:', e)
-    }
-    if (ctx.mcpConfigPath) {
-      try {
-        await unlink(ctx.mcpConfigPath)
-      } catch {
-        // 忽略
-      }
-    }
+    ctx.interrupted = true
+    // push turn_completed(interrupted) 到队列——generator 主循环 yield 后 return，
+    // finally 块的 cleanupTurnContext 统一负责 kill 进程 / stop bridge / reject approvals / unlink。
+    // 这样能确保前端收到 turn_completed 事件，UI 的 isRunning 正确清零。
+    ctx.queue.push({ type: 'turn_completed', turnId, status: 'interrupted' })
+    ctx.resolveWait?.()
   }
 
   async respondApproval(decision: ApprovalDecision): Promise<void> {
