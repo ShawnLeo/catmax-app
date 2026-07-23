@@ -3,12 +3,13 @@
     思考（reasoning）块——可折叠披露组件，替换原本内联的斜体灰文。
 
     两态：
-      - streaming（实时）：header 显示动态 "thinking..."（灰白呼吸 + 三个错峰动画点），
-        内容默认折叠。用户可点击展开看实时输出的推理过程。
+      - streaming（实时）：header 显示 "thinking" + 三点渐进式加载动画
+        （1→2→3 个点依次出现，到 3 个后整体淡出，循环往复，像加载中 gif），
+        文字本身带轻微呼吸效果。内容默认折叠。
       - done（完成）：header 显示 "已思考 ▾"，默认折叠，点击展开看完整推理。
 
     默认始终折叠——思考内容对快速阅读是噪音，需要时再点开。
-    streaming 态下文案是动画的，本身就是"正在思考"的视觉信号，
+    streaming 态下文案 + 动画本身就是"正在思考"的视觉信号，
     不需要额外 spinner。
   -->
   <div class="my-0.5">
@@ -19,22 +20,15 @@
       :title="streaming ? '正在思考...' : '点击展开/收起推理'"
       @click="open = !open"
     >
-      <BrainIcon class="w-3.5 h-3.5 flex-shrink-0 text-muted-foreground" />
+      <BrainIcon
+        class="w-3.5 h-3.5 flex-shrink-0 text-muted-foreground"
+        :class="streaming ? 'animate-pulse' : ''"
+      />
 
-      <!-- streaming：动态 thinking... 文字 + 三个错峰呼吸的灰点 -->
+      <!-- streaming：呼吸的 "thinking" 文字 + 三点渐进式加载动画 -->
       <template v-if="streaming">
-        <span>thinking</span>
-        <span class="inline-flex items-center gap-[2px] ml-0.5">
-          <span
-            class="block w-[3px] h-[3px] rounded-full bg-muted-foreground animate-[thinkdot_1.2s_ease-in-out_infinite]"
-          />
-          <span
-            class="block w-[3px] h-[3px] rounded-full bg-muted-foreground animate-[thinkdot_1.2s_ease-in-out_infinite_0.2s]"
-          />
-          <span
-            class="block w-[3px] h-[3px] rounded-full bg-muted-foreground animate-[thinkdot_1.2s_ease-in-out_infinite_0.4s]"
-          />
-        </span>
+        <span class="animate-[thinkbreath_1.6s_ease-in-out_infinite]">thinking</span>
+        <LoadingDots class="ml-0.5 text-muted-foreground" :dot-size="3" :duration="1.6" />
       </template>
 
       <!-- done：静态文案 + 耗时（如有）+ 折叠箭头 -->
@@ -64,6 +58,7 @@
 import { BrainIcon, ChevronDownIcon } from 'lucide-vue-next'
 import { computed, ref } from 'vue'
 
+import LoadingDots from './LoadingDots.vue'
 import MarkdownView from './MarkdownView.vue'
 
 const props = defineProps<{
@@ -97,16 +92,14 @@ const durationLabel = computed(() => {
 </script>
 
 <style scoped>
-/* 三个点的错峰呼吸动画——opacity 0.2 → 1 → 0.2 循环 */
-@keyframes thinkdot {
+/* "thinking" 文字的轻微呼吸——opacity 0.5 → 1 循环，跟三点动画同节奏 */
+@keyframes thinkbreath {
   0%,
   100% {
-    opacity: 0.2;
-    transform: scale(0.8);
+    opacity: 0.5;
   }
   50% {
     opacity: 1;
-    transform: scale(1);
   }
 }
 </style>

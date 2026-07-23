@@ -53,12 +53,17 @@ function buildDiffFile() {
     if (edit.type === 'string_replace') {
       // claude Edit / MultiEdit：oldString → newString 的行级 diff
       // MultiEdit 暂时只渲染第一组（顶层 oldString/newString，mapping 已保证有第一组数据）
-      const oldStr = edit.oldString ?? ''
-      const newStr = edit.newString ?? ''
+      const oldStr = ensureTrailingNewline(edit.oldString ?? '')
+      const newStr = ensureTrailingNewline(edit.newString ?? '')
       file = generateDiffFile(edit.filePath, oldStr, edit.filePath, newStr, lang, lang)
     } else if (edit.type === 'full_content') {
       // claude Write：整文件覆盖。oldContent 给空——所有行被标绿（新增）
-      file = generateDiffFile(edit.filePath, '', edit.filePath, edit.content ?? '', lang, lang)
+      // content 为空时不构建——空文件 Write 没有可 diff 内容，强行喂给库会刷两条
+      // "No hunks / identical content" 警告，且渲染也是空白，直接走 fallback 更干净。
+      const content = ensureTrailingNewline(edit.content ?? '')
+      if (content) {
+        file = generateDiffFile(edit.filePath, '', edit.filePath, content, lang, lang)
+      }
     } else if (edit.type === 'unified_diff' && edit.diff) {
       // codex：直接把 unified diff 文本作为 hunk 数组传给构造器
       // 库会 parse +/- 行并渲染
@@ -114,6 +119,19 @@ onUnmounted(() => {
 watch(() => props.edit, buildDiffFile, { deep: false })
 
 // ============ 工具函数 ============
+/**
+ * 给内容补一个结尾换行（若缺失）。
+ *
+ * 纯粹是为了喂给 @git-diff-view：库内部用 createTwoFilesPatch 把内容生成 patch，
+ * 再 round-trip 校验 patch ↔ 内容是否一致。当内容缺少结尾换行时，patch 会带
+ * "No newline at end of file" 标记，round-trip 在最后一行对不上，触发开发态警告：
+ *   "Mismatch detected between 'newFileContent' and 'diff' at line N"
+ * 补一个换行后 round-trip 就能对齐；diff 显示的行内容不变（结尾换行是纯展示细节）。
+ */
+function ensureTrailingNewline(s: string): string {
+  return s && !s.endsWith('\n') ? s + '\n' : s
+}
+
 /** 从文件路径推语言 id（lowlight/highlight.js 接受的语言名） */
 function guessLang(filePath: string): string {
   const ext = filePath.split('.').pop()?.toLowerCase() ?? ''
@@ -141,7 +159,10 @@ function guessLang(filePath: string): string {
     zsh: 'bash',
     sql: 'sql',
   }
-  return map[ext] ?? ext ?? 'plaintext'
+  // 未知扩展名不能直接把 ext 当 lang 传给 lowlight——没注册的语言会触发
+  // "not support current lang: xxx yet" 警告（如 .factories）。统一回退 plaintext，
+  // lowlight 会走 highlightAuto 兜底，不报错。
+  return map[ext] ?? 'plaintext'
 }
 
 /** fallback 文本：构建失败时给个最小可用信息 */

@@ -48,6 +48,34 @@
       -->
       <CompactDivider v-if="messageStore.compactState" :state="messageStore.compactState" />
 
+      <!--
+        agent 工作中指示器——消息流底部的一行"正在干活"反馈。
+
+        显示条件：turn 正在跑（isRunning）且没卡在等用户输入
+        （pendingApproval / pendingClaudePermission / pendingAgentQuestion 都是 null）。
+        等用户确认权限 / 回答问题时 agent 是暂停的，这时显示"正在工作"会误导。
+
+        从用户点发送（markTurnStarting 乐观置 isRunning=true）一直到 turn_completed
+        全程显示，覆盖了"发出消息到首个 thinking/文本出现"这段原本无反馈的空窗期。
+
+        样式跟 assistant 消息的时间轴一致：左侧竖线 + 色点（绿色脉冲 = running），
+        让它视觉上属于 assistant 侧的对话流，而不是一个突兀的浮层。
+      -->
+      <div v-if="agentWorking" class="flex gap-3 flex-row">
+        <div class="min-w-0 flex-1">
+          <div class="relative pl-6 border-l border-border/40">
+            <span
+              class="absolute w-2 h-2 rounded-full -left-[5px] top-1.5 bg-success animate-pulse"
+            />
+            <div class="mt-1 flex items-center gap-2 text-[13px] text-muted-foreground">
+              <Loader2Icon class="w-3.5 h-3.5 flex-shrink-0 animate-spin" />
+              <span>正在思考</span>
+              <LoadingDots class="text-muted-foreground" :dot-size="4" :duration="1.6" />
+            </div>
+          </div>
+        </div>
+      </div>
+
       <!-- 错误提示（codex/claude 调 API 失败时 messageStore.lastError 会被设置） -->
       <div
         v-if="messageStore.lastError"
@@ -94,10 +122,11 @@
 <script setup lang="ts">
 import { useMessageStore } from '@renderer/stores/message'
 import { useWorkspaceStore } from '@renderer/stores/workspace'
-import { AlertCircleIcon, ArrowDownIcon } from 'lucide-vue-next'
+import { AlertCircleIcon, ArrowDownIcon, Loader2Icon } from 'lucide-vue-next'
 import { onMounted, ref, watch, nextTick, computed } from 'vue'
 
 import CompactDivider from './CompactDivider.vue'
+import LoadingDots from './LoadingDots.vue'
 import MessageItem from './MessageItem.vue'
 
 const props = defineProps<{
@@ -112,6 +141,24 @@ const cwd = computed(() => workspaceStore.currentWorkspace?.path ?? '')
 
 const messageStore = useMessageStore()
 const container = ref<HTMLElement | null>(null)
+
+/**
+ * 是否显示底部"agent 正在干活"指示器。
+ *
+ * 条件：
+ *   1. turn 正在跑（isRunning）——从 markTurnStarting（发消息即置 true）到 turn_completed
+ *   2. 没卡在等用户输入——pendingApproval / pendingClaudePermission / pendingAgentQuestion
+ *      任一非空时 agent 实际是暂停的（等用户确认权限或回答问题），不显示"正在工作"
+ *
+ * 覆盖了"发出消息到首个 thinking/文本出现"这段原本没有任何反馈的空窗期。
+ */
+const agentWorking = computed(
+  () =>
+    messageStore.isRunning &&
+    !messageStore.pendingApproval &&
+    !messageStore.pendingClaudePermission &&
+    !messageStore.pendingAgentQuestion,
+)
 
 /**
  * 是否显示"回到底部"箭头。
@@ -183,6 +230,7 @@ watch(
     messageStore.currentSessionId,
     messageStore.lastError,
     messageStore.loading,
+    agentWorking.value,
   ],
   async () => {
     // loading 中不滚——消息列表被 loading overlay 盖住，滚了也看不到

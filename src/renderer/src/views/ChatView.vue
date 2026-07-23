@@ -454,6 +454,12 @@ async function onSend(text: string, attachments: ContextBlock[]): Promise<void> 
     messageStore.pushUserMessage(turnId, text, attachments.length > 0 ? attachments : undefined)
   }
 
+  // 乐观标记 turn 已开始——发消息后立刻让 UI 进入"agent 正在干活"状态
+  // （底部 loading 指示器、Composer 停止按钮），不用等 backend 的 turn_started
+  // 事件（网络/进程启动有数百 ms ~ 数秒延迟，期间没有任何反馈）。
+  // 后续真正的 turn_started 会覆盖；turn_completed / error 会复位，不会卡死。
+  messageStore.markTurnStarting(sessionId, turnId)
+
   // 发给后端的完整 prompt：把 attachments 序列化成 sentinel 标签拼到文本里
   // 后端 adapter 收到的是单字符串，原样发给 claude/codex（不用改 adapter 契约）
   const fullPrompt = serializeContextTags(text, attachments)

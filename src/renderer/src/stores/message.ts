@@ -456,6 +456,29 @@ export const useMessageStore = defineStore('message', () => {
   }
 
   /**
+   * 乐观标记 turn 已开始——发消息后立刻把 isRunning/currentTurnId 设上，
+   * 让 UI（MessageList 底部 loading 指示器、Composer 停止按钮）马上有反馈，
+   * 不用等 backend 的 turn_started 事件（其间有几百 ms ~ 数秒的网络/进程启动延迟）。
+   *
+   * 后续真正的 turn_started 事件到达时会覆盖这些字段（幂等）；
+   * turn_completed / 不可恢复 error 会把 isRunning 置回 false。
+   * 所以即使 backend 启动失败，状态也不会卡死——用户看到的只是"短暂亮了一下又灭"。
+   *
+   * @param sessionId  目标 session（支持非当前 session 的后台 turn，跟 applyEvent 对齐）
+   * @param turnId     本次发送的 turnId（跟 pushUserMessage 用同一个）
+   */
+  function markTurnStarting(sessionId: string, turnId: string): void {
+    let s = sessionStates.get(sessionId)
+    if (!s) {
+      s = createEmptySessionState()
+      sessionStates.set(sessionId, s)
+    }
+    s.currentTurnId = turnId
+    s.isRunning = true
+    s.lastError = null
+  }
+
+  /**
    * 替换当前 session 的 messages（loadHistory 调）。
    * 不动其他 session 状态。
    */
@@ -513,6 +536,7 @@ export const useMessageStore = defineStore('message', () => {
     applyEvent,
     pushUserMessage,
     startCompact,
+    markTurnStarting,
     setCurrentSession,
     setMessages,
     clearSession,
