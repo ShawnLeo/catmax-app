@@ -424,10 +424,13 @@ export class ClaudeAdapter implements AgentBackend {
     }
     if (args.permissionMode) {
       options.permissionMode = args.permissionMode
-      if (args.permissionMode === 'bypassPermissions') {
-        options.allowDangerouslySkipPermissions = true
-      }
     }
+    // 始终授权 allowDangerouslySkipPermissions。
+    // 这个 flag 本身不绕过权限——实际是否绕过由 permissionMode 控制。
+    // 但它必须在启动时设，否则运行中热切换到 bypassPermissions 会被 claude
+    // 拒绝（claude 的安全设计：bypass 是进程级授权，不能运行中从低权限提升）。
+    // catmax 的权限控制由 canUseTool 回调 + permissionMode 共同保障，不依赖此 flag。
+    options.allowDangerouslySkipPermissions = true
     // 注入子进程 env。
     // ⚠️ SDK 的 options.env 是【整体替换】语义（见 sdk.d.ts 示例 env:{...process.env,...}），
     // 必须先展开 process.env 再覆盖 extraEnv，否则子进程会丢失 PATH / HOME / SHELL 等
