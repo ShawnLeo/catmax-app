@@ -85,6 +85,9 @@ module.exports = {
     'node_modules/',
     '*.config.*',
     '.eslintrc.cjs',
+    // PoC 验证脚本是独立 .mjs，import SDK 但不在 tsconfig project 里，
+    // typed-linting 会崩（parserServices 缺失）。它们不走项目类型/lint 流水线。
+    'poc/',
     'src/renderer/src/auto-imports.d.ts',
     'src/renderer/src/components.d.ts',
   ],
