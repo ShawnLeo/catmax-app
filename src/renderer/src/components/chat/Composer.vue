@@ -54,6 +54,7 @@
             ]"
             placement="top"
             title="模型"
+            :trigger-width="120"
             @update:model-value="onModelSelect"
           />
 

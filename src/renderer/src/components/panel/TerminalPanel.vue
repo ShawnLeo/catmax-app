@@ -66,6 +66,15 @@
       >
         <PlusIcon class="w-3.5 h-3.5" />
       </button>
+
+      <!-- 关闭终端面板 -->
+      <button
+        class="p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted shrink-0"
+        title="关闭终端面板"
+        @click="uiStore.toggleBottomPanel()"
+      >
+        <ChevronDownIcon class="w-3.5 h-3.5" />
+      </button>
     </div>
 
     <!--
@@ -94,14 +103,16 @@
 
 <script setup lang="ts">
 import { useTerminalStore } from '@renderer/stores/terminal'
+import { useUiStore } from '@renderer/stores/ui'
 import { useWorkspaceStore } from '@renderer/stores/workspace'
 import { FitAddon } from '@xterm/addon-fit'
 import { WebLinksAddon } from '@xterm/addon-web-links'
 import { Terminal } from '@xterm/xterm'
-import { PlusIcon, TerminalIcon, XIcon } from 'lucide-vue-next'
+import { ChevronDownIcon, PlusIcon, TerminalIcon, XIcon } from 'lucide-vue-next'
 import { nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 
 const terminalStore = useTerminalStore()
+const uiStore = useUiStore()
 const workspaceStore = useWorkspaceStore()
 
 // —— xterm 多实例管理 ——

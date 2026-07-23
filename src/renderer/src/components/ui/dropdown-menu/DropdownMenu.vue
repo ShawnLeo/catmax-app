@@ -18,9 +18,10 @@
       :title="title"
       :disabled="disabled"
       class="flex items-center gap-2 px-3 py-2 rounded-md text-sm transition-colors bg-secondary text-secondary-foreground hover:bg-accent hover:text-accent-foreground disabled:opacity-50 disabled:cursor-not-allowed focus:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+      :style="triggerStyle"
       @click="onTriggerClick"
     >
-      <span class="truncate max-w-[180px]">{{ triggerLabel }}</span>
+      <span class="truncate flex-1">{{ triggerLabel }}</span>
       <ChevronDownIcon
         class="w-3.5 h-3.5 flex-shrink-0 transition-transform"
         :class="open ? 'rotate-180' : ''"
@@ -81,6 +82,11 @@ const props = withDefaults(
     title?: string | undefined
     /** 禁用整个下拉 */
     disabled?: boolean
+    /**
+     * trigger 按钮固定宽度（px）。不传时按钮宽度由内容撑开。
+     * 用于"模型名长度差异大但不想让按钮被撑得跳来跳去"这类场景。
+     */
+    triggerWidth?: number
   }>(),
   {
     align: 'left',
@@ -94,6 +100,10 @@ const emit = defineEmits<{
 
 const open = ref(false)
 const rootEl = ref<HTMLElement | null>(null)
+
+const triggerStyle = computed(() =>
+  typeof props.triggerWidth === 'number' ? { width: `${props.triggerWidth}px` } : undefined,
+)
 
 /**
  * trigger 按钮显示的文案：

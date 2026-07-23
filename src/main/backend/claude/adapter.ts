@@ -190,9 +190,9 @@ export class ClaudeAdapter implements AgentBackend {
   async listModels(): Promise<ModelOption[]> {
     // claude 不像 codex 那样有 model/list，返回固定的常用模型
     return [
-      { id: 'sonnet', displayName: 'Claude Sonnet (latest)', isDefault: true },
-      { id: 'opus', displayName: 'Claude Opus (latest)' },
-      { id: 'haiku', displayName: 'Claude Haiku (latest)' },
+      { id: 'sonnet', displayName: 'Sonnet (latest)', isDefault: true },
+      { id: 'opus', displayName: 'Opus (latest)' },
+      { id: 'haiku', displayName: 'Haiku (latest)' },
     ]
   }
 
