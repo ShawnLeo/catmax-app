@@ -23,19 +23,7 @@
 
     <div class="flex-1" />
 
-    <!-- Backend status -->
-    <span
-      :class="[
-        'text-xs px-2 py-0.5 rounded-full',
-        backendStore.isAvailable
-          ? 'bg-success/10 text-success'
-          : 'bg-destructive/10 text-destructive',
-      ]"
-    >
-      {{ backendStore.current?.version ?? 'not connected' }}
-    </span>
-
-    <!-- 底部终端面板切换按钮（在右栏切换按钮前） -->
+<!-- 底部终端面板切换按钮（在右栏切换按钮前） -->
     <button
       :class="[
         'p-1.5 rounded-md hover:bg-muted transition-colors',
@@ -67,12 +55,10 @@
 
 <script setup lang="ts">
 import TitleBarControls from '@renderer/components/TitleBarControls.vue'
-import { useBackendStore } from '@renderer/stores/backend'
 import { useSessionStore } from '@renderer/stores/session'
 import { useUiStore } from '@renderer/stores/ui'
 import { PanelBottomIcon, PanelLeftIcon, PanelRightIcon } from 'lucide-vue-next'
 
-const backendStore = useBackendStore()
 const sessionStore = useSessionStore()
 const uiStore = useUiStore()
 </script>

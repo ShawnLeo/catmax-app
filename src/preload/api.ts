@@ -22,6 +22,7 @@ export const api = {
     remove: requestMain<WorkspaceHandlers, 'workspace.remove'>(IPC.WORKSPACE_REMOVE),
     rename: requestMain<WorkspaceHandlers, 'workspace.rename'>(IPC.WORKSPACE_RENAME),
     setEditor: requestMain<WorkspaceHandlers, 'workspace.setEditor'>(IPC.WORKSPACE_SET_EDITOR),
+    touch: requestMain<WorkspaceHandlers, 'workspace.touch'>(IPC.WORKSPACE_TOUCH),
   },
   settings: {
     get: requestMain<SettingsHandlers, 'settings.get'>(IPC.SETTINGS_GET),

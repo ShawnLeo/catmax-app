@@ -9,13 +9,13 @@
     <!-- 窗口控制按钮（macOS 红绿灯 / Windows 标准按钮） -->
     <TitleBarControls />
 
-    <!-- 工作区切换触发器：只显示名字 + 下拉箭头 -->
+    <!-- 工作区切换触发器：Catmax logo + 名字 + 下拉箭头 -->
     <button
       ref="triggerRef"
       class="flex-1 min-w-0 flex items-center gap-2 px-2 py-1.5 rounded-md hover:bg-muted text-left interactive"
       @click="showPicker = !showPicker"
     >
-      <FolderIcon class="w-4 h-4 flex-shrink-0 text-muted-foreground" />
+      <CatmaxLogo variant="plain" class="w-5 h-5 flex-shrink-0 text-foreground" />
       <span class="flex-1 min-w-0 text-sm font-medium text-foreground truncate">
         {{ workspaceStore.currentWorkspace?.name ?? '选择工作区' }}
       </span>
@@ -61,6 +61,7 @@
 </template>
 
 <script setup lang="ts">
+import CatmaxLogo from '@renderer/components/icons/CatmaxLogo.vue'
 import TitleBarControls from '@renderer/components/TitleBarControls.vue'
 import { useWorkspaceStore } from '@renderer/stores/workspace'
 import { FolderIcon, ChevronDownIcon, PlusIcon } from 'lucide-vue-next'
@@ -123,7 +124,7 @@ function handleClickOutside(event: MouseEvent): void {
 }
 
 async function selectWorkspace(id: string): Promise<void> {
-  workspaceStore.setCurrent(id)
+  await workspaceStore.setCurrent(id)
   showPicker.value = false
   // 重新加载该工作区的 sessions
   if (workspaceStore.currentWorkspace) {

@@ -43,10 +43,14 @@
             <header>
               <h2 class="text-lg font-semibold text-foreground">关于</h2>
             </header>
-            <div class="text-sm text-muted-foreground space-y-1">
-              <div>catmax v{{ platformInfo?.appVersion ?? '...' }}</div>
-              <div>Electron v{{ platformInfo?.electronVersion ?? '...' }}</div>
-              <div>{{ platformInfo?.platform ?? '...' }} {{ platformInfo?.arch ?? '' }}</div>
+            <div class="flex items-center gap-3">
+              <CatmaxLogo variant="badge" class="w-12 h-12 rounded-[22%]" />
+              <div class="text-sm text-muted-foreground space-y-1">
+                <div class="text-foreground font-medium">Catmax</div>
+                <div>v{{ platformInfo?.appVersion ?? '...' }}</div>
+                <div>Electron v{{ platformInfo?.electronVersion ?? '...' }}</div>
+                <div>{{ platformInfo?.platform ?? '...' }} {{ platformInfo?.arch ?? '' }}</div>
+              </div>
             </div>
           </section>
         </div>
@@ -56,6 +60,7 @@
 </template>
 
 <script setup lang="ts">
+import CatmaxLogo from '@renderer/components/icons/CatmaxLogo.vue'
 import BackendSection from '@renderer/components/settings/BackendSection.vue'
 import ProxySection from '@renderer/components/settings/ProxySection.vue'
 import ThemeSection from '@renderer/components/settings/ThemeSection.vue'

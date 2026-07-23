@@ -40,6 +40,9 @@ export async function renameWorkspace(_args: RenameWorkspaceArgs): Promise<void>
 export async function setWorkspaceEditor(_args: SetWorkspaceEditorArgs): Promise<void> {
   throw new Error('implemented in main')
 }
+export async function touchWorkspace(_args: { id: string }): Promise<void> {
+  throw new Error('implemented in main')
+}
 
 /** 聚合类型：所有 workspace handler 的 channel → 签名映射 */
 export type WorkspaceHandlers = {
@@ -48,4 +51,5 @@ export type WorkspaceHandlers = {
   'workspace.remove': typeof removeWorkspace
   'workspace.rename': typeof renameWorkspace
   'workspace.setEditor': typeof setWorkspaceEditor
+  'workspace.touch': typeof touchWorkspace
 }

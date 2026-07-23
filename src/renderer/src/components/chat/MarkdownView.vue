@@ -7,26 +7,66 @@
       这里在容器上监听 click，向上找最近的 .code-block-wrapper，取其 pre code 文本写剪贴板
     - 任务列表的 checkbox 可点（本地状态，刷新会丢——临时检查清单语义）
   -->
-  <div ref="container" class="markdown-body" @click="onClick" v-html="rendered" />
+  <div
+    v-if="rendered === undefined"
+    class="animate-pulse text-muted-foreground text-sm select-none"
+  >
+    <!--
+      同步渲染未命中（markdown 管线还在初始化）的极短占位。
+      预热完成后几乎不会出现；出现也只是首启那一瞬，比空白好——告诉用户内容正在来。
+    -->
+    …
+  </div>
+  <div v-else ref="container" class="markdown-body" @click="onClick" v-html="rendered" />
 </template>
 
 <script setup lang="ts">
-import { renderMarkdown } from '@renderer/lib/markdown'
+import { renderMarkdown, renderMarkdownSync } from '@renderer/lib/markdown'
 import { ref, watch } from 'vue'
 
 const props = defineProps<{ text: string }>()
-const rendered = ref('')
 const container = ref<HTMLElement | null>(null)
+
+/**
+ * 渲染策略：优先同步（消除历史加载的"空白→闪现"），管线未就绪时回退异步。
+ *
+ * 历史加载性能关键路径：app 启动时 prewarmMarkdown() 已让 getMarkdown() 在后台
+ * 完成（markdown-it + Shiki 初始化约几百毫秒）。到用户点开会话时管线多半已就绪，
+ * renderMarkdownSync 能在 setup 阶段同步返回 HTML——组件挂载即有内容，
+ * 不再有"先空白再闪出"的 1s 延迟。
+ *
+ * 同步路径未命中（冷启动极快、或用户瞬间点开会话）→ watch 回退到异步 renderMarkdown，
+ * 此时 initPromise 已在跑，多个 MarkdownView 共享同一个 promise，一起 resolve。
+ */
+const rendered = ref<string | undefined>(tryRenderSync(props.text))
+
+function tryRenderSync(text: string): string | undefined {
+  // 同步路径：管线就绪 → 立即返回 HTML；未就绪 → 返回 undefined，让 watch 走异步
+  try {
+    return renderMarkdownSync(text)
+  } catch {
+    return undefined
+  }
+}
 
 watch(
   () => props.text,
-  async (text) => {
-    try {
-      rendered.value = await renderMarkdown(text)
-    } catch {
-      // fallback：直接显示转义后的纯文本
-      rendered.value = `<p>${text.replace(/</g, '&lt;')}</p>`
+  (text) => {
+    // 每次文本变化先试同步（预热完成后绝大多数命中）
+    const sync = tryRenderSync(text)
+    if (sync !== undefined) {
+      rendered.value = sync
+      return
     }
+    // 同步未命中（管线还在初始化）→ 异步渲染
+    void renderMarkdown(text)
+      .then((html) => {
+        rendered.value = html
+      })
+      .catch(() => {
+        // fallback：直接显示转义后的纯文本
+        rendered.value = `<p>${text.replace(/</g, '&lt;')}</p>`
+      })
   },
   { immediate: true },
 )

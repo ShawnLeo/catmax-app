@@ -78,3 +78,10 @@ export const setWorkspaceEditor = async (args: SetWorkspaceEditorArgs): Promise<
   if (!existing) throw new WorkspaceError('not-found', `workspace not found: ${args.id}`)
   ctx.db.updateWorkspaceEditor(args.id, args.editor)
 }
+
+// 更新 last_opened_at —— 让"最近工作区"列表真正反映打开顺序。
+export const touchWorkspace = async (args: { id: string }): Promise<void> => {
+  const existing = ctx.db.findWorkspaceById(args.id)
+  if (!existing) throw new WorkspaceError('not-found', `workspace not found: ${args.id}`)
+  ctx.db.touchWorkspace(args.id, Date.now())
+}

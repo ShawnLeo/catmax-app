@@ -2,9 +2,26 @@ import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 
 import { is } from '@electron-toolkit/utils'
-import { BrowserWindow, shell } from 'electron'
+import { app, BrowserWindow, nativeImage, shell } from 'electron'
 
 import { ctx } from './context'
+
+/**
+ * 解析 App 图标资源路径。
+ *
+ * resources/icon.png 是 512x512 猫咪图标。
+ * dev 模式 app.getAppPath() = 项目根 → <root>/resources/icon.png；
+ * packaged 模式 resources/ 被 asarUnpack 到 process.resourcesPath。
+ * 用 app.getAppPath() 主路径 + process.resourcesPath 兜底，两个都找不到返回 undefined。
+ */
+function resolveIconPath(): string | undefined {
+  const candidates = [
+    join(app.getAppPath(), 'resources/icon.png'), // dev / packaged app root
+    join(process.resourcesPath, 'icon.png'), // packaged asarUnpack 兜底
+    join(__dirname, '../resources/icon.png'), // 旧路径兜底
+  ]
+  return candidates.find((p) => existsSync(p))
+}
 
 /**
  * 解析 preload 产物路径。
@@ -23,6 +40,17 @@ function resolvePreloadPath(): string {
 }
 
 export function createMainWindow(): BrowserWindow {
+  const iconPath = resolveIconPath()
+  const icon = iconPath ? nativeImage.createFromPath(iconPath) : undefined
+
+  // macOS：BrowserWindow 的 icon 选项对 Dock 图标无效（只影响 Win 任务栏）。
+  // dev 模式跑的是 node_modules 里的 Electron.app，Dock 默认显示 Electron 图标，
+  // 必须显式 app.dock.setIcon() 才能在 dev 下也看到猫咪图标。
+  // （packaged 模式下 .icns 已是 app 图标，这里再设一次也无害。）
+  if (icon && process.platform === 'darwin' && app.dock) {
+    app.dock.setIcon(icon)
+  }
+
   const win = new BrowserWindow({
     width: 1280,
     height: 800,
@@ -31,7 +59,8 @@ export function createMainWindow(): BrowserWindow {
     show: false,
     frame: false, // 完全移除窗口框架
     autoHideMenuBar: true,
-    title: 'catmax',
+    title: 'Catmax',
+    ...(icon ? { icon } : {}), // Windows 任务栏图标（macOS 见上面的 dock.setIcon）
     backgroundColor: '#18181b', // 与 dark theme --background 接近，避免白闪
     webPreferences: {
       preload: resolvePreloadPath(),

@@ -8,6 +8,7 @@ import {
   removeWorkspace,
   renameWorkspace,
   setWorkspaceEditor,
+  touchWorkspace,
 } from './handlers'
 
 export function registerWorkspaceHandlers(): void {
@@ -19,6 +20,7 @@ export function registerWorkspaceHandlers(): void {
     'workspace.setEditor',
     setWorkspaceEditor,
   )
+  handleRendererRequest<WorkspaceHandlers, 'workspace.touch'>('workspace.touch', touchWorkspace)
 }
 
 export type { WorkspaceHandlers } from '@shared/ipc/workspace'

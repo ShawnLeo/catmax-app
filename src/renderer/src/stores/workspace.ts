@@ -44,8 +44,22 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     if (ws) ws.name = name
   }
 
-  function setCurrent(id: string): void {
+  // 切换当前工作区，并把 last_opened_at 更新到后端，让"最近工作区"列表反映真实打开顺序。
+  // 失败不抛——这只是辅助排序，不应阻塞打开流程。
+  async function setCurrent(id: string): Promise<void> {
     currentWorkspaceId.value = id
+    const idx = workspaces.value.findIndex((w) => w.id === id)
+    if (idx === -1) return
+    // 本地立即重排：更新时间戳并提到最前，UI 不必等下一次 load。
+    const now = Date.now()
+    workspaces.value[idx] = { ...workspaces.value[idx]!, lastOpenedAt: now }
+    const [ws] = workspaces.value.splice(idx, 1)
+    workspaces.value.unshift(ws!)
+    try {
+      await window.api.workspace.touch({ id })
+    } catch {
+      // 静默——touch 仅用于排序，失败不影响打开。
+    }
   }
 
   return {

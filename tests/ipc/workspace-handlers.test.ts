@@ -20,8 +20,14 @@ vi.mock('@main/context', async () => {
 })
 
 const ctxModule: any = await import('@main/context')
-const { addWorkspace, listWorkspaces, removeWorkspace, renameWorkspace, setWorkspaceEditor } =
-  await import('@main/ipc/domains/workspace/handlers')
+const {
+  addWorkspace,
+  listWorkspaces,
+  removeWorkspace,
+  renameWorkspace,
+  setWorkspaceEditor,
+  touchWorkspace,
+} = await import('@main/ipc/domains/workspace/handlers')
 
 afterEach(() => {
   // 清空 db 数据避免污染（保留表结构）
@@ -146,5 +152,34 @@ describe('workspace handlers', () => {
     } finally {
       rmSync(tempDir, { recursive: true, force: true })
     }
+  })
+
+  test('touchWorkspace 更新 lastOpenedAt 并排到最前', async () => {
+    const dirA = mkdtempSync(join(tmpdir(), 'catmax-ws-touch-a-'))
+    const dirB = mkdtempSync(join(tmpdir(), 'catmax-ws-touch-b-'))
+    try {
+      const wsA = await addWorkspace({ path: dirA })
+      const wsB = await addWorkspace({ path: dirB })
+      // 创建顺序：A 先 B 后，初始列表 B 在前
+      expect((await listWorkspaces())[0]?.id).toBe(wsB.id)
+
+      // touch A —— A 应排到最前，且 lastOpenedAt 增大
+      const beforeA = (await listWorkspaces()).find((w) => w.id === wsA.id)!.lastOpenedAt
+      // 确保 touch 的时间戳严格大于创建时间（addWorkspace 用 Date.now()，这里稍等一拍）
+      await new Promise((r) => setTimeout(r, 5))
+      await touchWorkspace({ id: wsA.id })
+      const list = await listWorkspaces()
+      expect(list[0]?.id).toBe(wsA.id)
+      expect(list.find((w) => w.id === wsA.id)!.lastOpenedAt).toBeGreaterThan(beforeA)
+    } finally {
+      rmSync(dirA, { recursive: true, force: true })
+      rmSync(dirB, { recursive: true, force: true })
+    }
+  })
+
+  test('touchWorkspace 不存在的 id 抛 not-found', async () => {
+    await expect(touchWorkspace({ id: 'non-existent-id' })).rejects.toMatchObject({
+      code: 'not-found',
+    })
   })
 })

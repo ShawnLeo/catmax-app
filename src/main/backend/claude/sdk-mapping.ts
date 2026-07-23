@@ -147,10 +147,19 @@ interface PartialBlockState {
  * SDK 的 partial message（type: 'stream_event'）就是 Anthropic Messages API 的流式事件，
  * 与 CLI 的 stream_event 完全相同。tool_use 的 input 仍是逐 delta 累积的 JSON 片段，
  * 需要在 content_block_stop 时才能解析。这是一个轻量状态机，按 content block index 跟踪。
+ *
+ * ⚠️ itemId 唯一性：Anthropic 流式 API 的 content_block `index` 在【每个 assistant message
+ * 内】从 0 重新计数。agentic loop 里一个 turn 有多个 assistant message（think→tool_use，
+ * 然后 think→text）。text/thinking 块没有 API id，如果用 `text-${idx}` 生成 itemId，
+ * 第二条消息的 text/thinking 会和第一条撞 itemId → 前端把新内容追加进旧块
+ *（thinking 串进第一个 thinking 块、Markdown 复用第一个 text 块）。
+ * 解法：用单调递增的 blockSeq 给每个块生成全局唯一 itemId；并在 message_start 清空 blocks。
  */
 export class SdkPartialAggregator {
   private blocks = new Map<number, PartialBlockState>()
   private firedToolStarts = new Set<string>()
+  /** 单调递增序列：给没有 API id 的 block（text/thinking）生成全局唯一 itemId */
+  private blockSeq = 0
 
   constructor(private readonly turnId: string) {}
 
@@ -183,15 +192,26 @@ export class SdkPartialAggregator {
     }
 
     switch (evt.type) {
+      case 'message_start': {
+        // 新的 assistant message 开始：content_block index 会从 0 重新计数，
+        // 清空 blocks 防止旧 entry 被同 index 的新块误命中 / Map 无限增长。
+        this.blocks.clear()
+        break
+      }
       case 'content_block_start': {
         const idx = evt.index
         const block = evt.content_block
         if (idx === undefined || !block) break
         const entry: PartialBlockState = { type: block.type }
         if (block.type === 'tool_use') {
+          // tool_use 有 API 提供的全局唯一 id，直接用
           if (block.id) entry.itemId = block.id
           entry.toolName = block.name ?? ''
           entry.toolInputBuffer = ''
+        } else {
+          // text/thinking 没有 API id，用单调计数器生成全局唯一 itemId
+          //（不能用 idx，因为 idx 跨 message 会重复 → 前端块串流复用）
+          entry.itemId = `${block.type}-${this.blockSeq++}`
         }
         this.blocks.set(idx, entry)
         break
@@ -202,16 +222,24 @@ export class SdkPartialAggregator {
         if (!entry || !evt.delta) break
         const delta = evt.delta
         if (delta.type === 'text_delta' && typeof delta.text === 'string') {
-          const itemId = entry.itemId ?? `text-${idx}`
-          events.push({ type: 'text_delta', turnId: this.turnId, itemId, text: delta.text })
+          // itemId 在 content_block_start 时已赋值；缺失则跳过（协议上不会发生）
+          if (entry.itemId) {
+            events.push({
+              type: 'text_delta',
+              turnId: this.turnId,
+              itemId: entry.itemId,
+              text: delta.text,
+            })
+          }
         } else if (delta.type === 'thinking_delta' && typeof delta.thinking === 'string') {
-          const itemId = entry.itemId ?? `thinking-${idx}`
-          events.push({
-            type: 'reasoning_delta',
-            turnId: this.turnId,
-            itemId,
-            text: delta.thinking,
-          })
+          if (entry.itemId) {
+            events.push({
+              type: 'reasoning_delta',
+              turnId: this.turnId,
+              itemId: entry.itemId,
+              text: delta.thinking,
+            })
+          }
         } else if (delta.type === 'input_json_delta' && typeof delta.partial_json === 'string') {
           if (entry.toolInputBuffer !== undefined) {
             entry.toolInputBuffer += delta.partial_json

@@ -98,14 +98,15 @@
           </span>
 
           <!--
-            发送 / 停止按钮——统一灰阶（primary token），不使用红色 destructive。
+            发送 / 停止按钮——方形带圆角（非纯圆）。
             黑白灰主题下用图标形态区分语义：发送=上箭头，停止=实心方块。
-            日间夜间模式都通过 --primary / --primary-foreground 自动适配。
+            发送按钮可点击时反相为 foreground/background（夜间白底黑箭头，日间黑底白箭头），
+            禁用时保持弱化的 primary 灰阶。
           -->
           <Button
             v-if="messageStore.isRunning"
             size="icon"
-            class="h-7 w-7 rounded-full"
+            class="h-7 w-7 rounded-md"
             title="停止"
             @click="onInterrupt"
           >
@@ -114,7 +115,8 @@
           <Button
             v-else
             size="icon"
-            class="h-7 w-7 rounded-full"
+            class="h-7 w-7 rounded-md"
+            :class="canSend ? 'bg-foreground text-background hover:bg-foreground/90' : ''"
             :disabled="!canSend"
             title="发送 (Enter)"
             @click="onSend"
