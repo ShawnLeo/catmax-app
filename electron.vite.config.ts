@@ -16,14 +16,9 @@ export default defineConfig({
     },
     build: {
       rollupOptions: {
-        // 多入口：index 是 Electron 主进程入口（不变），
-        // mcp-server 是独立 Node 脚本入口——被 claude CLI 通过 --mcp-config spawn 起，
-        // 处理 --permission-prompt-tool 的权限请求。打成独立 chunk 是因为这个脚本
-        // 必须能在 ELECTRON_RUN_AS_NODE=1 模式下单独跑（不能 import 'electron'）。
-        input: {
-          index: resolve(__dirname, 'src/main/index.ts'),
-          'mcp-server': resolve(__dirname, 'src/main/backend/claude/mcp/server.ts'),
-        },
+        // 单入口：index 是 Electron 主进程入口。
+        // （迁移到 Agent SDK 后，mcp-server 独立入口已删除——权限改由 SDK 的
+        // canUseTool 进程内回调处理，不再需要单独 spawn MCP server 子进程。）
       },
     },
   },

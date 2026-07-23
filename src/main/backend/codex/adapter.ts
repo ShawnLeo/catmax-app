@@ -130,6 +130,7 @@ export class CodexAdapter implements AgentBackend {
       'bypassPermissions',
     ],
     supportedEfforts: ['low', 'medium', 'high'],
+    supportsHotSwap: false,
   }
 
   private opts: CodexAdapterOptions

@@ -33,12 +33,18 @@
         :title="isMaximized ? '还原' : '最大化'"
         @click="windowMaximize"
       >
-        <svg v-if="!isMaximized" class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <rect x="3" y="3" width="18" height="18" rx="2" stroke-width="2"/>
+        <svg
+          v-if="!isMaximized"
+          class="w-4 h-4"
+          fill="none"
+          stroke="currentColor"
+          viewBox="0 0 24 24"
+        >
+          <rect x="3" y="3" width="18" height="18" rx="2" stroke-width="2" />
         </svg>
         <svg v-else class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <rect x="3" y="3" width="14" height="14" rx="2" stroke-width="2"/>
-          <rect x="11" y="11" width="10" height="10" rx="2" stroke-width="2"/>
+          <rect x="3" y="3" width="14" height="14" rx="2" stroke-width="2" />
+          <rect x="11" y="11" width="10" height="10" rx="2" stroke-width="2" />
         </svg>
       </button>
       <button
@@ -53,8 +59,8 @@
 </template>
 
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
 import { MinusIcon, XIcon } from 'lucide-vue-next'
+import { onMounted, ref } from 'vue'
 
 const platform = ref<'darwin' | 'win32' | 'linux'>('darwin')
 const isMaximized = ref(false)

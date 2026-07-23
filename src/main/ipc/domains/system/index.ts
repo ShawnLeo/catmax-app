@@ -21,8 +21,14 @@ export function registerSystemHandlers(): void {
   handleRendererRequest<SystemHandlers, 'system.openDialog'>('system.openDialog', openDialog)
   handleRendererRequest<SystemHandlers, 'system.openExternal'>('system.openExternal', openExternal)
   handleRendererRequest<SystemHandlers, 'system.detectProxy'>('system.detectProxy', detectProxy)
-  handleRendererRequest<SystemHandlers, 'system.windowMinimize'>('system.windowMinimize', windowMinimize)
-  handleRendererRequest<SystemHandlers, 'system.windowMaximize'>('system.windowMaximize', windowMaximize)
+  handleRendererRequest<SystemHandlers, 'system.windowMinimize'>(
+    'system.windowMinimize',
+    windowMinimize,
+  )
+  handleRendererRequest<SystemHandlers, 'system.windowMaximize'>(
+    'system.windowMaximize',
+    windowMaximize,
+  )
   handleRendererRequest<SystemHandlers, 'system.windowClose'>('system.windowClose', windowClose)
   handleRendererRequest<SystemHandlers, 'system.windowIsMaximized'>(
     'system.windowIsMaximized',

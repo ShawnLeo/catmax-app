@@ -16,6 +16,12 @@ files:
 asarUnpack:
   - resources/**
   - '**/*.{node,dll}'
+  # Agent SDK 的平台 binary（243MB claude 可执行文件）必须 unpack 到真实磁盘路径，
+  # 否则 child_process.spawn 无法从 ASAR 虚拟 FS 执行二进制。
+  # adapter.ts 的 resolveSdkBinaryPath() 会在 packaged 模式下通过
+  # pathToClaudeCodeExecutable 指向这个 unpacked 路径。
+  # 详见 docs/Agent SDK Electron 打包 PoC 验证报告.md
+  - '**/node_modules/@anthropic-ai/claude-agent-sdk-*/claude'
 
 # macOS
 mac:
