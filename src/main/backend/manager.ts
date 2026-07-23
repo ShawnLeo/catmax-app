@@ -14,6 +14,7 @@ import { ctx } from '@main/context'
 import { logger } from '@main/service/logger'
 import {
   BackendError,
+  type AgentAnswer,
   type AgentBackend,
   type ApprovalDecision,
   type BackendStatus,
@@ -22,6 +23,7 @@ import {
   type SessionSummary,
   type StartSessionArgs,
   type StartTurnArgs,
+  type TurnConfigUpdate,
   type TurnEvent,
 } from '@shared/backend/types'
 import type { BackendId } from '@shared/constants'
@@ -194,6 +196,7 @@ export class BackendManager {
           supportsPermissionMode: false,
           supportedPermissionModes: [],
           supportedEfforts: [],
+          supportsHotSwap: false,
         },
       }
     }
@@ -328,6 +331,27 @@ export class BackendManager {
   /** 响应 approval */
   async respondApproval(decision: ApprovalDecision): Promise<void> {
     return this.getCurrent().respondApproval(decision)
+  }
+
+  /** 响应 agent 的问题（ask_user 工具） */
+  async respondQuestion(args: {
+    turnId: string
+    requestId: string
+    answer: AgentAnswer
+  }): Promise<void> {
+    const adapter = this.getCurrent()
+    if (!adapter.respondQuestion) return
+    return adapter.respondQuestion(args)
+  }
+
+  /** 运行中热切换 turn 配置（model/effort/permissionMode） */
+  async updateTurnConfig(turnId: string, config: TurnConfigUpdate): Promise<void> {
+    const adapter = this.getCurrent()
+    if (!adapter.updateTurnConfig) {
+      // 当前 backend 不支持热切换，静默忽略（UI 侧应已根据 supportsHotSwap 判断）
+      return
+    }
+    return adapter.updateTurnConfig(turnId, config)
   }
 
   /**

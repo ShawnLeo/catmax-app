@@ -41,6 +41,8 @@ export const IPC = {
   BACKEND_START_TURN: 'backend.startTurn',
   BACKEND_INTERRUPT_TURN: 'backend.interruptTurn',
   BACKEND_RESPOND_APPROVAL: 'backend.respondApproval',
+  BACKEND_RESPOND_QUESTION: 'backend.respondQuestion',
+  BACKEND_UPDATE_TURN_CONFIG: 'backend.updateTurnConfig',
   // session
   SESSION_LIST: 'session.list',
   SESSION_CREATE: 'session.create',

@@ -9,8 +9,10 @@ import {
   listModels,
   refreshModels,
   respondApproval,
+  respondQuestion,
   startTurn,
   switchBackend,
+  updateTurnConfig,
 } from './handlers'
 
 export function registerBackendHandlers(): void {
@@ -30,6 +32,14 @@ export function registerBackendHandlers(): void {
   handleRendererRequest<BackendHandlers, 'backend.respondApproval'>(
     'backend.respondApproval',
     respondApproval,
+  )
+  handleRendererRequest<BackendHandlers, 'backend.respondQuestion'>(
+    'backend.respondQuestion',
+    respondQuestion,
+  )
+  handleRendererRequest<BackendHandlers, 'backend.updateTurnConfig'>(
+    'backend.updateTurnConfig',
+    updateTurnConfig,
   )
 }
 

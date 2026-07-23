@@ -31,13 +31,14 @@
       </div>
 
       <!--
-        底部交互区：有 pending 权限时显示 PermissionPanel（覆盖输入框位置，
-        让聊天记录始终可见），否则显示 Composer。
-        claude 权限（pendingClaudePermission）和 codex 权限（pendingApproval）
-        都走同一个 PermissionPanel。同一时刻只一个 backend 在跑 turn。
+        底部交互区三选一（同一时刻只一个，都覆盖 Composer 位置，让聊天记录可见）：
+        1. agent 问题（pendingAgentQuestion）→ QuestionPanel（claude 调 ask_user 工具）
+        2. 权限确认（pendingApproval / pendingClaudePermission）→ PermissionPanel
+        3. 都没有 → Composer 正常输入
       -->
+      <QuestionPanel v-if="messageStore.pendingAgentQuestion" />
       <PermissionPanel
-        v-if="messageStore.pendingApproval || messageStore.pendingClaudePermission"
+        v-else-if="messageStore.pendingApproval || messageStore.pendingClaudePermission"
       />
       <Composer
         v-else
@@ -77,6 +78,7 @@ import BottomTerminalPanel from '@renderer/components/chat/BottomTerminalPanel.v
 import Composer from '@renderer/components/chat/Composer.vue'
 import MessageList from '@renderer/components/chat/MessageList.vue'
 import PermissionPanel from '@renderer/components/chat/PermissionPanel.vue'
+import QuestionPanel from '@renderer/components/chat/QuestionPanel.vue'
 import RuntimeConfigBar from '@renderer/components/chat/RuntimeConfigBar.vue'
 import RightPanel from '@renderer/components/panel/RightPanel.vue'
 import Sidebar from '@renderer/components/sidebar/Sidebar.vue'

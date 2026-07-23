@@ -230,6 +230,35 @@ export interface ToolControlTodo {
 }
 
 /**
+ * agent 问用户的问题——自定义 ask_user MCP 工具的入参归一化。
+ * 单个问题（ask_user 一次只问一个，不像旧 AskUserQuestion 批量）。
+ */
+export interface AgentQuestion {
+  /** 完整问题文本 */
+  question: string
+  /** 短标签（≤12 字符），UI 显示为 chip */
+  header?: string
+  /** 2-4 个互斥选项；为空时纯自由文本问题 */
+  options?: AgentQuestionOption[]
+  /** 多选允许（default false） */
+  multiSelect?: boolean
+}
+
+export interface AgentQuestionOption {
+  label: string
+  description?: string
+}
+
+/**
+ * 用户对 agent 问题的回答——respondQuestion 的 payload。
+ * selectedLabels 为空 + freeText 为空 = 用户跳过（Esc），告诉模型可换问法或继续。
+ */
+export interface AgentAnswer {
+  selectedLabels: string[]
+  freeText?: string
+}
+
+/**
  * 文件编辑的结构化数据——前端 DiffView 用来渲染真正的 diff（红绿块），不是 JSON.stringify。
  *
  * 三种来源对应三种 type：
@@ -332,6 +361,18 @@ export type TurnEvent =
        * 两者都由 PermissionPanel 渲染。
        */
       source?: 'claude' | 'codex'
+    }
+  | {
+      /**
+       * agent 问用户问题——claude 调用自定义 ask_user MCP 工具时由 adapter 推送。
+       * UI 弹 QuestionPanel（覆盖 Composer 位置），用户回答后走 respondQuestion 回流。
+       * （内置 AskUserQuestion 被 isInteractive 门控，headless 下不可用，故用自定义工具替代。）
+       */
+      type: 'agent_question'
+      turnId: string
+      /** ask_user handler 的 pending id，respondQuestion 时用它定位 resolver */
+      requestId: string
+      question: AgentQuestion
     }
   | { type: 'error'; turnId: string; message: string; recoverable: boolean }
   | {
@@ -436,6 +477,8 @@ export interface AgentBackend {
 
   interrupt(turnId: string): Promise<void>
   respondApproval(decision: ApprovalDecision): Promise<void>
+  /** 响应 agent 的问题（ask_user 工具）。claude 实现；codex 无此能力可不实现。 */
+  respondQuestion?(args: { turnId: string; requestId: string; answer: AgentAnswer }): Promise<void>
   steer?(turnId: string, prompt: string): Promise<void>
   /** 运行中热切换 model/effort/permissionMode（仅 supportsHotSwap 的 backend 实现） */
   updateTurnConfig?(turnId: string, config: TurnConfigUpdate): Promise<void>

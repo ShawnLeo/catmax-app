@@ -1,5 +1,10 @@
 import { ctx } from '@main/context'
-import type { ApprovalDecision, StartTurnArgs } from '@shared/backend/types'
+import type {
+  AgentAnswer,
+  ApprovalDecision,
+  StartTurnArgs,
+  TurnConfigUpdate,
+} from '@shared/backend/types'
 import type { BackendId } from '@shared/constants'
 
 export const listBackends = async () => {
@@ -32,4 +37,16 @@ export const interruptTurn = async (args: { turnId: string }) => {
 
 export const respondApproval = async (args: ApprovalDecision) => {
   await ctx.backendManager.respondApproval(args)
+}
+
+export const respondQuestion = async (args: {
+  turnId: string
+  requestId: string
+  answer: AgentAnswer
+}) => {
+  await ctx.backendManager.respondQuestion(args)
+}
+
+export const updateTurnConfig = async (args: { turnId: string; config: TurnConfigUpdate }) => {
+  await ctx.backendManager.updateTurnConfig(args.turnId, args.config)
 }

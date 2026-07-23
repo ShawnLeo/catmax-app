@@ -33,8 +33,12 @@ export const api = {
     openDialog: requestMain<SystemHandlers, 'system.openDialog'>(IPC.SYSTEM_OPEN_DIALOG),
     openExternal: requestMain<SystemHandlers, 'system.openExternal'>(IPC.SYSTEM_OPEN_EXTERNAL),
     detectProxy: requestMain<SystemHandlers, 'system.detectProxy'>(IPC.SYSTEM_DETECT_PROXY),
-    windowMinimize: requestMain<SystemHandlers, 'system.windowMinimize'>(IPC.SYSTEM_WINDOW_MINIMIZE),
-    windowMaximize: requestMain<SystemHandlers, 'system.windowMaximize'>(IPC.SYSTEM_WINDOW_MAXIMIZE),
+    windowMinimize: requestMain<SystemHandlers, 'system.windowMinimize'>(
+      IPC.SYSTEM_WINDOW_MINIMIZE,
+    ),
+    windowMaximize: requestMain<SystemHandlers, 'system.windowMaximize'>(
+      IPC.SYSTEM_WINDOW_MAXIMIZE,
+    ),
     windowClose: requestMain<SystemHandlers, 'system.windowClose'>(IPC.SYSTEM_WINDOW_CLOSE),
     windowIsMaximized: requestMain<SystemHandlers, 'system.windowIsMaximized'>(
       IPC.SYSTEM_WINDOW_IS_MAXIMIZED,
@@ -54,6 +58,12 @@ export const api = {
     ),
     respondApproval: requestMain<BackendHandlers, 'backend.respondApproval'>(
       IPC.BACKEND_RESPOND_APPROVAL,
+    ),
+    respondQuestion: requestMain<BackendHandlers, 'backend.respondQuestion'>(
+      IPC.BACKEND_RESPOND_QUESTION,
+    ),
+    updateTurnConfig: requestMain<BackendHandlers, 'backend.updateTurnConfig'>(
+      IPC.BACKEND_UPDATE_TURN_CONFIG,
     ),
     /** 订阅 turnEvent 推送 */
     onTurnEvent: (cb: (payload: BackendPushEvents['backend:turnEvent']) => void) =>

@@ -3,10 +3,12 @@
  * 函数签名即契约——main 实现，renderer 通过 window.api 调用。
  */
 import type {
+  AgentAnswer,
   ApprovalDecision,
   BackendStatus,
   ModelOption,
   StartTurnArgs,
+  TurnConfigUpdate,
   TurnEvent,
 } from '../backend/types'
 import type { BackendId } from '../constants'
@@ -20,6 +22,14 @@ export type BackendHandlers = {
   'backend.startTurn': (args: StartTurnArgs) => Promise<{ turnId: string }>
   'backend.interruptTurn': (args: { turnId: string }) => Promise<void>
   'backend.respondApproval': (args: ApprovalDecision) => Promise<void>
+  /** 响应 agent 的问题（ask_user 工具）：把用户答案回流给阻塞中的 handler */
+  'backend.respondQuestion': (args: {
+    turnId: string
+    requestId: string
+    answer: AgentAnswer
+  }) => Promise<void>
+  /** 运行中热切换 model/effort/permissionMode（仅 supportsHotSwap 的 backend） */
+  'backend.updateTurnConfig': (args: { turnId: string; config: TurnConfigUpdate }) => Promise<void>
 }
 
 /** 主→渲染推送事件类型 */

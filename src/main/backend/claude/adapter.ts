@@ -31,6 +31,7 @@ import {
 } from '@anthropic-ai/claude-agent-sdk'
 import {
   BackendError,
+  type AgentAnswer,
   type AgentBackend,
   type ApprovalDecision,
   type BackendCapabilities,
@@ -47,6 +48,7 @@ import { app } from 'electron'
 
 import { logger } from '../../service/logger'
 
+import { createAskUserServer } from './ask-user-server'
 import {
   listClaudeSessionsFromDisk,
   readHistoryFromJsonl,
@@ -67,6 +69,17 @@ import {
 } from './sdk-mapping'
 
 const log = logger.domain('claude-adapter')
+
+/**
+ * ask_user 工具的 system prompt 引导语——追加到 Claude Code 默认 system prompt 之后。
+ * 用 Options.systemPrompt: { type:'preset', preset:'claude_code', append } 注入，
+ * 不覆盖默认 prompt（保留所有工具指令）。
+ *
+ * 目的：让模型在请求模糊/需要偏好决策时主动调 ask_user 问用户，而不是直接猜。
+ */
+const ASK_USER_GUIDE = `## Asking the user questions with ask_user
+
+You have an "ask_user" tool (mcp__catmax__ask_user). When the user's request is ambiguous or a meaningful choice is involved (which library/approach/scope to use, a preference, a trade-off), do NOT guess or pick a default — call ask_user to ask ONE clarifying question first. Provide 2-4 concise, mutually exclusive options. The user can always type a free-form answer instead of choosing, so never add an "Other" option. Ask only the single most important question; if you need multiple answers, ask sequentially. After receiving the answer, proceed accordingly.`
 
 // ============ per-turn 上下文 ============
 
@@ -93,6 +106,15 @@ interface TurnContext {
   sessionId: string
   /** streaming-input 的输入控制句柄：close() 让输入迭代器结束，query 自然完成 */
   inputController: { close: () => void }
+  /**
+   * ask_user MCP server 句柄——提供 agent 问用户问题的能力。
+   * respondQuestion 用它把用户的回答 resolve 给阻塞中的 handler。
+   * rejectAll 在 turn 结束时兜底，避免 handler 永远阻塞。
+   */
+  askUser: {
+    respondQuestion: (requestId: string, answer: AgentAnswer) => boolean
+    rejectAll: () => void
+  }
 }
 
 // ============ adapter 选项 ============
@@ -318,6 +340,11 @@ export class ClaudeAdapter implements AgentBackend {
     // options 带 SDK 原生计算的友好文案（displayName/description/decisionReason/title）
     // 和 suggestions（approve_always 时作为 updatedPermissions 回传，让"本会话都允许"真生效）。
     const canUseTool: CanUseTool = async (toolName, input, options) => {
+      // ask_user 工具白名单放行——它是 agent 问用户问题的通道，走自己的 QuestionPanel，
+      // 不应触发权限面板（否则会弹错误的面板）。工具名可能是 ask_user 或 mcp__catmax__ask_user。
+      if (toolName === 'ask_user' || toolName === 'mcp__catmax__ask_user') {
+        return { behavior: 'allow', updatedInput: input } satisfies PermissionResult
+      }
       const request = claudePermissionToApprovalRequest(toolName, input, {
         displayName: options.displayName,
         description: options.description,
@@ -364,12 +391,29 @@ export class ClaudeAdapter implements AgentBackend {
       } satisfies PermissionResult
     }
 
+    // ---- ask_user MCP server：让 agent 能问用户问题（替代被 isInteractive 门控的内置 AskUserQuestion）----
+    // onQuestion 回调把问题推成 agent_question 事件给 UI；handler 在 server 内部阻塞等 respondQuestion。
+    const askUser = createAskUserServer((requestId, question) => {
+      pushEvent({
+        type: 'agent_question',
+        turnId: internalTurnId,
+        requestId,
+        question,
+      })
+    })
+
     // ---- 组装 options ----
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const options: Record<string, any> = {
       abortController,
       includePartialMessages: true, // 真正的 token 级流式（对应 CLI 的 --include-partial-messages）
       canUseTool, // 进程内权限回调，替代 CLI 的 --permission-prompt-tool + MCP + socket
+      // ask_user 工具以 in-process MCP server 注入（type:'sdk'，SDK 自行接管 transport）
+      mcpServers: {
+        catmax: { type: 'sdk', name: 'catmax', instance: askUser.server },
+      },
+      // 追加 ask_user 引导语到 Claude Code 默认 system prompt（不覆盖默认 prompt）
+      systemPrompt: { type: 'preset', preset: 'claude_code', append: ASK_USER_GUIDE },
     }
     if (spawnCwd !== undefined) options.cwd = spawnCwd
     if (canResume) options.resume = claudeSessionId
@@ -451,6 +495,10 @@ export class ClaudeAdapter implements AgentBackend {
       interrupted: false,
       sessionId: args.sessionId,
       inputController,
+      askUser: {
+        respondQuestion: askUser.respondQuestion,
+        rejectAll: askUser.rejectAll,
+      },
     }
     this.turnContexts.set(internalTurnId, ctx)
 
@@ -523,6 +571,10 @@ export class ClaudeAdapter implements AgentBackend {
       // 中断未决的权限审批，避免 promise 泄漏
       for (const [, pending] of pendingApprovals) pending.resolve('reject')
       pendingApprovals.clear()
+      // 兜底：未回答的 ask_user 问题以空答案 resolve（让 handler 返回，避免阻塞）
+      askUser.rejectAll()
+      // 关闭 ask_user MCP server（释放资源）
+      void askUser.server.close().catch((e) => log.debug('ask_user server close failed:', e))
       // 如果 generator 被提前 return/break（流还没结束），确保 abort
       if (!streamDone.value) {
         ctx.interrupted = true
@@ -690,6 +742,23 @@ export class ClaudeAdapter implements AgentBackend {
     }
     ctx.pendingApprovals.delete(decision.requestId)
     pending.resolve(decision.action)
+  }
+
+  /**
+   * 响应 agent 的问题（ask_user 工具）：把用户答案 resolve 给阻塞中的 handler，
+   * handler 把它作为 tool_result 回流给模型。turnId 用来定位 turn context。
+   */
+  async respondQuestion(args: {
+    turnId: string
+    requestId: string
+    answer: AgentAnswer
+  }): Promise<void> {
+    const ctx = this.turnContexts.get(args.turnId)
+    if (!ctx) {
+      log.warn('respondQuestion: no context for turn', args.turnId)
+      return
+    }
+    ctx.askUser.respondQuestion(args.requestId, args.answer)
   }
 
   // ============ binary 路径解析（ASAR 打包支持） ============

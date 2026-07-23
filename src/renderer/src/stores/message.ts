@@ -1,5 +1,6 @@
 import { randomUUID } from '@renderer/lib/utils'
 import type {
+  AgentQuestion,
   ContextBlock,
   NormalizedMessage,
   TokenUsage,
@@ -13,6 +14,12 @@ interface PendingApproval {
   requestId: string
   request: ApprovalRequest
   turnId: string
+}
+
+interface PendingAgentQuestion {
+  requestId: string
+  turnId: string
+  question: AgentQuestion
 }
 
 /**
@@ -32,6 +39,8 @@ interface SessionState {
   pendingApproval: PendingApproval | null
   /** claude 通过内置 MCP server 的权限请求（走 PermissionPanel） */
   pendingClaudePermission: PendingApproval | null
+  /** agent 问用户问题（claude 调 ask_user 工具，走 QuestionPanel） */
+  pendingAgentQuestion: PendingAgentQuestion | null
   lastError: string | null
   lastUsage: TokenUsage | null
   /**
@@ -64,6 +73,7 @@ function createEmptySessionState(): SessionState {
     isRunning: false,
     pendingApproval: null,
     pendingClaudePermission: null,
+    pendingAgentQuestion: null,
     lastError: null,
     lastUsage: null,
     compactTurnId: null,
@@ -137,6 +147,16 @@ export const useMessageStore = defineStore('message', () => {
       if (!id) return
       const s = cur()
       s.pendingClaudePermission = v
+    },
+  })
+
+  const pendingAgentQuestion = computed({
+    get: () => cur().pendingAgentQuestion,
+    set: (v: PendingAgentQuestion | null) => {
+      const id = currentSessionId.value
+      if (!id) return
+      const s = cur()
+      s.pendingAgentQuestion = v
     },
   })
 
@@ -273,6 +293,15 @@ export const useMessageStore = defineStore('message', () => {
         }
         break
       }
+      case 'agent_question': {
+        // agent 调 ask_user 工具问用户——UI 弹 QuestionPanel，用户回答后走 respondQuestion
+        s.pendingAgentQuestion = {
+          requestId: event.requestId,
+          turnId: event.turnId,
+          question: event.question,
+        }
+        break
+      }
       case 'error': {
         s.lastError = event.message
         // 不可恢复错误 → 兜底结束所有未完成的 reasoning（否则 header 卡在 thinking... 永远不结束）
@@ -307,9 +336,10 @@ export const useMessageStore = defineStore('message', () => {
           s.unreadActivity = true
         }
         // turn 结束时兜底清空 pending——
-        // 正常流程下 PermissionPanel 决策时已经清了，
+        // 正常流程下 PermissionPanel/QuestionPanel 决策时已经清了，
         // 这里防止面板卡住（比如 turn 因各种原因提前结束时）。
         s.pendingClaudePermission = null
+        s.pendingAgentQuestion = null
         break
       }
     }
@@ -471,6 +501,7 @@ export const useMessageStore = defineStore('message', () => {
     isRunning,
     pendingApproval,
     pendingClaudePermission,
+    pendingAgentQuestion,
     lastError,
     lastUsage,
     compactState,
