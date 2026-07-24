@@ -14,7 +14,7 @@
             v-for="mode in ['light', 'dark', 'system'] as const"
             :key="mode"
             :class="[
-              'px-3 py-1 text-xs rounded transition-colors',
+              'px-3 py-1 text-xs rounded transition-colors cursor-pointer',
               currentMode === mode
                 ? 'bg-background text-foreground shadow'
                 : 'text-muted-foreground hover:text-foreground',

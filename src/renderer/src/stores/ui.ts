@@ -3,7 +3,10 @@ import { ref } from 'vue'
 
 const DEFAULT_SIDEBAR_WIDTH = 240
 const DEFAULT_RIGHT_PANEL_WIDTH = 320
+const DEFAULT_FILE_PREVIEW_WIDTH = 520
 const DEFAULT_BOTTOM_PANEL_HEIGHT = 320
+
+export type RightPanelTab = 'git' | 'files'
 
 export const useUiStore = defineStore('ui', () => {
   const sidebarCollapsed = ref(false)
@@ -11,9 +14,12 @@ export const useUiStore = defineStore('ui', () => {
   const rightPanelVisible = ref(false)
   const bottomPanelVisible = ref(false)
   const commandPaletteVisible = ref(false)
+  const rightPanelTab = ref<RightPanelTab>('git')
 
   const sidebarWidth = ref(DEFAULT_SIDEBAR_WIDTH)
   const rightPanelWidth = ref(DEFAULT_RIGHT_PANEL_WIDTH)
+  // File Preview Layout: 预览宽度与文件树宽度分开保存，拖动组合面板时互不覆盖。
+  const filePreviewWidth = ref(DEFAULT_FILE_PREVIEW_WIDTH)
   const bottomPanelHeight = ref(DEFAULT_BOTTOM_PANEL_HEIGHT)
 
   // 拖拽 resize 期间为 true：面板关掉 transition（避免动画追赶造成卡顿），
@@ -37,6 +43,10 @@ export const useUiStore = defineStore('ui', () => {
   function setRightPanelWidth(width: number): void {
     rightPanelWidth.value = width
     if (!panelDragging.value) saveWidths()
+  }
+
+  function setFilePreviewWidth(width: number): void {
+    filePreviewWidth.value = width
   }
 
   function setBottomPanelHeight(height: number): void {
@@ -88,6 +98,19 @@ export const useUiStore = defineStore('ui', () => {
     rightPanelVisible.value = !rightPanelVisible.value
   }
 
+  function showRightPanel(tab: RightPanelTab = rightPanelTab.value): void {
+    rightPanelTab.value = tab
+    rightPanelVisible.value = true
+  }
+
+  function hideRightPanel(): void {
+    rightPanelVisible.value = false
+  }
+
+  function setRightPanelTab(tab: RightPanelTab): void {
+    rightPanelTab.value = tab
+  }
+
   function toggleBottomPanel(): void {
     bottomPanelVisible.value = !bottomPanelVisible.value
   }
@@ -110,19 +133,25 @@ export const useUiStore = defineStore('ui', () => {
     rightPanelVisible,
     bottomPanelVisible,
     commandPaletteVisible,
+    rightPanelTab,
     sidebarWidth,
     rightPanelWidth,
+    filePreviewWidth,
     bottomPanelHeight,
     panelDragging,
     startPanelDrag,
     endPanelDrag,
     setSidebarWidth,
     setRightPanelWidth,
+    setFilePreviewWidth,
     setBottomPanelHeight,
     toggleSidebar,
     openSettings,
     closeSettings,
     toggleRightPanel,
+    showRightPanel,
+    hideRightPanel,
+    setRightPanelTab,
     toggleBottomPanel,
     openCommandPalette,
     closeCommandPalette,

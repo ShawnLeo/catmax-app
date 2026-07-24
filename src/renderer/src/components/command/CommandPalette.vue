@@ -31,7 +31,7 @@
           v-for="(cmd, i) in results"
           :key="cmd.id"
           :class="[
-            'w-full flex items-center gap-3 px-4 py-2 text-left',
+            'w-full flex items-center gap-3 px-4 py-2 text-left cursor-pointer',
             i === selectedIndex ? 'bg-accent text-accent-foreground' : 'hover:bg-muted',
           ]"
           @click="run(cmd)"

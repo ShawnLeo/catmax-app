@@ -17,15 +17,27 @@
     -->
     …
   </div>
-  <div v-else ref="container" class="markdown-body" @click="onClick" v-html="rendered" />
+  <div
+    v-else
+    ref="container"
+    :class="['markdown-body', { 'markdown-body-compact': compact }]"
+    @click="onClick"
+    v-html="rendered"
+  />
 </template>
 
 <script setup lang="ts">
 import { renderMarkdown, renderMarkdownSync } from '@renderer/lib/markdown'
-import { ref, watch } from 'vue'
+import { useFilesStore } from '@renderer/stores/files'
+import { useWorkspaceStore } from '@renderer/stores/workspace'
+import { nextTick, ref, watch } from 'vue'
 
-const props = defineProps<{ text: string }>()
+const props = withDefaults(defineProps<{ text: string; compact?: boolean }>(), {
+  compact: false,
+})
 const container = ref<HTMLElement | null>(null)
+const filesStore = useFilesStore()
+const workspaceStore = useWorkspaceStore()
 
 /**
  * 渲染策略：优先同步（消除历史加载的"空白→闪现"），管线未就绪时回退异步。
@@ -56,12 +68,14 @@ watch(
     const sync = tryRenderSync(text)
     if (sync !== undefined) {
       rendered.value = sync
+      void nextTick(decorateFileReferences)
       return
     }
     // 同步未命中（管线还在初始化）→ 异步渲染
     void renderMarkdown(text)
       .then((html) => {
         rendered.value = html
+        void nextTick(decorateFileReferences)
       })
       .catch(() => {
         // fallback：直接显示转义后的纯文本
@@ -79,20 +93,59 @@ function onClick(e: MouseEvent): void {
   const target = e.target as HTMLElement | null
   if (!target) return
   const btn = target.closest('[data-action="copy-code"]') as HTMLElement | null
-  if (!btn) return
-  const wrapper = btn.closest('.code-block-wrapper')
-  const codeEl = wrapper?.querySelector('pre code')
-  const text = codeEl?.textContent ?? ''
-  void navigator.clipboard.writeText(text).then(
-    () => {
-      btn.textContent = '已复制'
-      setTimeout(() => {
-        btn.textContent = '复制'
-      }, 1500)
-    },
-    () => {
-      // 剪贴板权限被拒或不可用——保持原样
-    },
+  if (btn) {
+    const wrapper = btn.closest('.code-block-wrapper')
+    const codeEl = wrapper?.querySelector('pre code')
+    const text = codeEl?.textContent ?? ''
+    void navigator.clipboard.writeText(text).then(
+      () => {
+        btn.textContent = '已复制'
+        setTimeout(() => {
+          btn.textContent = '复制'
+        }, 1500)
+      },
+      () => {
+        // 剪贴板权限被拒或不可用——保持原样
+      },
+    )
+    return
+  }
+
+  const fileTarget = target.closest('[data-file-reference]') as HTMLElement | null
+  const reference = fileTarget?.dataset.fileReference
+  const workspaceId = workspaceStore.currentWorkspace?.id
+  if (!reference || !workspaceId) return
+  e.preventDefault()
+  e.stopPropagation()
+  void filesStore.openFileReference(workspaceId, reference)
+}
+
+// Chat File Reference: 将 inline code 和非外链锚点标记为可点击文件，但跳过代码块。
+function decorateFileReferences(): void {
+  if (!container.value) return
+  for (const code of container.value.querySelectorAll('code')) {
+    if (code.closest('pre')) continue
+    const reference = code.textContent?.trim() ?? ''
+    if (looksLikeFileReference(reference)) markFileReference(code as HTMLElement, reference)
+  }
+  for (const anchor of container.value.querySelectorAll('a')) {
+    const href = anchor.getAttribute('href') ?? ''
+    if (!href || /^(https?:|mailto:|#)/i.test(href)) continue
+    markFileReference(anchor as HTMLElement, href)
+  }
+}
+
+function markFileReference(element: HTMLElement, reference: string): void {
+  element.dataset.fileReference = reference
+  element.classList.add('file-reference')
+  element.title = `在文件面板中预览 ${reference}`
+}
+
+function looksLikeFileReference(value: string): boolean {
+  if (!value || value.length > 260 || /\s/.test(value)) return false
+  return (
+    /^(?:\.{0,2}\/|\/)/.test(value) ||
+    /(?:^|\/)[^/]+\.[a-z][a-z0-9]{0,11}(?::\d+(?::\d+)?)?$/i.test(value)
   )
 }
 </script>
@@ -104,6 +157,25 @@ function onClick(e: MouseEvent): void {
 .markdown-body {
   @apply text-[15px] leading-relaxed;
   overflow-wrap: anywhere;
+}
+
+/* File Preview Typography: 预览面板采用接近编辑器的紧凑行距，不改变聊天正文排版。 */
+.markdown-body-compact {
+  line-height: 1.45;
+}
+.markdown-body-compact :deep(p),
+.markdown-body-compact :deep(ul),
+.markdown-body-compact :deep(ol),
+.markdown-body-compact :deep(blockquote) {
+  margin-top: 0.375rem;
+  margin-bottom: 0.375rem;
+}
+.markdown-body-compact :deep(li) {
+  margin-top: 0;
+  margin-bottom: 0;
+}
+.markdown-body-compact :deep(.code-block-wrapper pre) {
+  line-height: 1.5;
 }
 
 /* ============ 标题层级（h1-h6 字号梯度） ============ */
@@ -230,6 +302,16 @@ function onClick(e: MouseEvent): void {
 .markdown-body :deep(:not(pre) > code) {
   @apply font-mono text-[13px] bg-muted px-1 py-0.5 rounded;
 }
+.markdown-body :deep(.file-reference) {
+  @apply cursor-pointer text-primary font-medium rounded-sm no-underline transition-colors;
+  padding: 0.05rem 0.2rem;
+  background-color: color-mix(in oklch, var(--color-primary) 10%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in oklch, var(--color-primary) 22%, transparent);
+}
+.markdown-body :deep(.file-reference:hover) {
+  background-color: color-mix(in oklch, var(--color-primary) 18%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in oklch, var(--color-primary) 38%, transparent);
+}
 
 /* ============ 引用 / 分隔线 / 链接 / 图片 / 删除线 ============ */
 .markdown-body :deep(blockquote) {
@@ -259,19 +341,40 @@ function onClick(e: MouseEvent): void {
  * 同时让 header / wrapper 边框 / 文字色协调到 shiki dark 系——
  * 整个代码块（header + pre）统一深灰，不出现亮色"盖头"。
  */
-[data-theme='dark'] .markdown-body :deep(.shiki),
-[data-theme='dark'] .markdown-body :deep(.shiki span) {
+</style>
+
+<style>
+[data-theme='dark'] .markdown-body .shiki,
+[data-theme='dark'] .markdown-body .shiki span {
   color: var(--shiki-dark) !important;
   background-color: var(--shiki-dark-bg) !important;
 }
+
 /* 行内 span 不需要背景，只在 <pre> 上设 bg 即可——避免每行都带深灰块 */
-[data-theme='dark'] .markdown-body :deep(.shiki span) {
+[data-theme='dark'] .markdown-body .shiki span {
   background-color: transparent !important;
 }
-/* header 用 Shiki 暗色背景的略浅版本（叠一层白 5%） */
-[data-theme='dark'] .markdown-body :deep(.code-block-header) {
+
+/* header 用 Shiki 暗色背景的略浅版本（叠一层白 8%） */
+[data-theme='dark'] .markdown-body .code-block-header {
   background-color: color-mix(in oklch, var(--shiki-dark-bg) 92%, white 8%);
-  color: oklch(0.7 0.005 250);
+  color: oklch(0.78 0.005 250);
   border-bottom-color: oklch(1 0 0 / 0.08);
+}
+
+/* Chat File Reference Contrast: 暗色背景需要更高的色块占比才能保持文件链接醒目。 */
+[data-theme='dark'] .markdown-body .file-reference {
+  color: color-mix(in oklch, var(--color-foreground) 88%, var(--color-primary) 12%) !important;
+  background-color: color-mix(in oklch, var(--color-primary) 18%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in oklch, var(--color-primary) 34%, transparent);
+}
+
+[data-theme='dark'] .markdown-body .file-reference:hover {
+  background-color: color-mix(in oklch, var(--color-primary) 28%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in oklch, var(--color-primary) 52%, transparent);
+}
+
+[data-theme='light'] .markdown-body .file-reference {
+  color: color-mix(in oklch, var(--color-primary) 76%, var(--color-foreground) 24%) !important;
 }
 </style>

@@ -7,13 +7,21 @@ import {
   pathExistsHandler,
   readDirectoryHandler,
   readFilePreviewHandler,
+  resolveFileReferenceHandler,
+  searchFilesHandler,
 } from './handlers'
 
 export function registerFsHandlers(): void {
+  // File Tree IPC: 目录、搜索、引用解析和预览必须成组注册，保持 preload 契约完整。
   handleRendererRequest<FsHandlers, 'fs.readDirectory'>('fs.readDirectory', readDirectoryHandler)
   handleRendererRequest<FsHandlers, 'fs.readFilePreview'>(
     'fs.readFilePreview',
     readFilePreviewHandler,
+  )
+  handleRendererRequest<FsHandlers, 'fs.searchFiles'>('fs.searchFiles', searchFilesHandler)
+  handleRendererRequest<FsHandlers, 'fs.resolveFileReference'>(
+    'fs.resolveFileReference',
+    resolveFileReferenceHandler,
   )
   handleRendererRequest<FsHandlers, 'fs.openInEditor'>('fs.openInEditor', openInEditorHandler)
   handleRendererRequest<FsHandlers, 'fs.pathExists'>('fs.pathExists', pathExistsHandler)

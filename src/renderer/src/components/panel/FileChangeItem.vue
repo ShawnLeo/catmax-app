@@ -1,6 +1,6 @@
 <template>
   <button
-    class="w-full flex items-center gap-2 text-xs px-2 py-1 hover:bg-muted rounded"
+    class="w-full flex items-center gap-2 text-xs px-2 py-1 hover:bg-muted rounded cursor-pointer"
     :title="file.path"
   >
     <span :class="['w-2 h-2 rounded-full flex-shrink-0', statusColor]" />

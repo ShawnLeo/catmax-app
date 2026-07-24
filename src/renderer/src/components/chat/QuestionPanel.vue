@@ -47,7 +47,7 @@
             :key="opt.label"
             type="button"
             :class="[
-              'text-left rounded-md border px-3 py-2 transition-colors',
+              'text-left rounded-md border px-3 py-2 transition-colors cursor-pointer',
               isSelected(opt.label)
                 ? 'border-primary bg-primary/10'
                 : 'border-border hover:border-primary/50 hover:bg-muted/50',

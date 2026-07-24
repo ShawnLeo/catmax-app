@@ -16,7 +16,7 @@
     <!-- header：点击切换展开/收起 -->
     <button
       type="button"
-      class="inline-flex items-center gap-1.5 px-2 py-1 rounded-md text-[12px] transition-colors hover:bg-accent/50 text-muted-foreground"
+      class="inline-flex items-center gap-1.5 px-2 py-1 rounded-md text-[12px] transition-colors hover:bg-accent/50 text-muted-foreground cursor-pointer"
       :title="streaming ? '正在思考...' : '点击展开/收起推理'"
       @click="open = !open"
     >

@@ -19,11 +19,11 @@ export async function getMarkdown(): Promise<MarkdownIt> {
       breaks: false,
     })
 
-    // Shiki 代码高亮（双主题，跟着 data-theme 切）
+    // File Preview Contrast: 高对比暗色主题同时供聊天代码块和文件预览复用。
     md.use(
       await Shiki({
         themes: {
-          dark: 'github-dark-dimmed',
+          dark: 'github-dark-high-contrast',
           light: 'github-light',
         },
       }),

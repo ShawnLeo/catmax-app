@@ -106,9 +106,14 @@ export const api = {
   git: {
     status: requestMain<GitHandlers, 'git.status'>(IPC.GIT_STATUS),
   },
+  // File Tree Bridge: renderer 的文件访问只能通过这些类型化 IPC 方法进入主进程。
   fs: {
     readDirectory: requestMain<FsHandlers, 'fs.readDirectory'>(IPC.FS_READ_DIRECTORY),
     readFilePreview: requestMain<FsHandlers, 'fs.readFilePreview'>(IPC.FS_READ_FILE_PREVIEW),
+    searchFiles: requestMain<FsHandlers, 'fs.searchFiles'>(IPC.FS_SEARCH_FILES),
+    resolveFileReference: requestMain<FsHandlers, 'fs.resolveFileReference'>(
+      IPC.FS_RESOLVE_FILE_REFERENCE,
+    ),
     openInEditor: requestMain<FsHandlers, 'fs.openInEditor'>(IPC.FS_OPEN_IN_EDITOR),
     pathExists: requestMain<FsHandlers, 'fs.pathExists'>(IPC.FS_PATH_EXISTS),
   },

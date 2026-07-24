@@ -15,7 +15,7 @@
       <span class="truncate max-w-[280px]">{{ describe(att) }}</span>
       <button
         type="button"
-        class="flex-shrink-0 p-0.5 rounded hover:bg-muted-foreground/20 hover:text-foreground transition-colors"
+        class="flex-shrink-0 p-0.5 rounded hover:bg-muted-foreground/20 hover:text-foreground transition-colors cursor-pointer"
         title="移除"
         aria-label="移除附件"
         @click="$emit('remove', i)"

@@ -12,7 +12,7 @@
     <!-- 工作区切换触发器：Catmax logo + 名字 + 下拉箭头 -->
     <button
       ref="triggerRef"
-      class="flex-1 min-w-0 flex items-center gap-2 px-2 py-1.5 rounded-md hover:bg-muted text-left interactive"
+      class="flex-1 min-w-0 flex items-center gap-2 px-2 py-1.5 rounded-md hover:bg-muted text-left interactive cursor-pointer"
       @click="showPicker = !showPicker"
     >
       <CatmaxLogo variant="plain" class="w-5 h-5 flex-shrink-0 text-foreground" />
@@ -38,7 +38,7 @@
           <button
             v-for="ws in workspaceStore.workspaces"
             :key="ws.id"
-            class="w-full flex items-center gap-2 px-3 py-2 hover:bg-muted text-left"
+            class="w-full flex items-center gap-2 px-3 py-2 hover:bg-muted text-left cursor-pointer"
             @click="selectWorkspace(ws.id)"
           >
             <FolderIcon class="w-4 h-4 flex-shrink-0 text-muted-foreground" />
@@ -49,7 +49,7 @@
           </button>
         </div>
         <button
-          class="w-full flex items-center gap-2 px-3 py-2 border-t border-border hover:bg-muted text-left text-sm"
+          class="w-full flex items-center gap-2 px-3 py-2 border-t border-border hover:bg-muted text-left text-sm cursor-pointer"
           @click="addWorkspace"
         >
           <PlusIcon class="w-4 h-4" />

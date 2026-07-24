@@ -3,17 +3,17 @@
     <!-- macOS: 红绿灯风格 -->
     <template v-if="platform === 'darwin'">
       <button
-        class="w-3.5 h-3.5 rounded-full bg-[#ff5f57] hover:bg-[#ff4b43] transition-colors"
+        class="w-3.5 h-3.5 rounded-full bg-[#ff5f57] hover:bg-[#ff4b43] transition-colors cursor-pointer"
         title="关闭"
         @click="windowClose"
       />
       <button
-        class="w-3.5 h-3.5 rounded-full bg-[#febc2e] hover:bg-[#e5a826] transition-colors"
+        class="w-3.5 h-3.5 rounded-full bg-[#febc2e] hover:bg-[#e5a826] transition-colors cursor-pointer"
         title="最小化"
         @click="windowMinimize"
       />
       <button
-        class="w-3.5 h-3.5 rounded-full bg-[#28c840] hover:bg-[#1aab2f] transition-colors"
+        class="w-3.5 h-3.5 rounded-full bg-[#28c840] hover:bg-[#1aab2f] transition-colors cursor-pointer"
         :title="isMaximized ? '还原' : '最大化'"
         @click="windowMaximize"
       />
@@ -22,14 +22,14 @@
     <!-- Windows/Linux: 标准按钮 -->
     <template v-else>
       <button
-        class="w-8 h-8 flex items-center justify-center rounded hover:bg-muted transition-colors"
+        class="w-8 h-8 flex items-center justify-center rounded hover:bg-muted transition-colors cursor-pointer"
         title="最小化"
         @click="windowMinimize"
       >
         <MinusIcon class="w-4 h-4" />
       </button>
       <button
-        class="w-8 h-8 flex items-center justify-center rounded hover:bg-muted transition-colors"
+        class="w-8 h-8 flex items-center justify-center rounded hover:bg-muted transition-colors cursor-pointer"
         :title="isMaximized ? '还原' : '最大化'"
         @click="windowMaximize"
       >
@@ -48,7 +48,7 @@
         </svg>
       </button>
       <button
-        class="w-8 h-8 flex items-center justify-center rounded hover:bg-destructive hover:text-destructive-foreground transition-colors"
+        class="w-8 h-8 flex items-center justify-center rounded hover:bg-destructive hover:text-destructive-foreground transition-colors cursor-pointer"
         title="关闭"
         @click="windowClose"
       >

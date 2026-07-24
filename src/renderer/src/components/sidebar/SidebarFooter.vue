@@ -2,7 +2,7 @@
   <div class="p-2 border-t border-sidebar-border flex items-center gap-1">
     <!-- 用户信息（预留）—— 后续接入登录态后填充头像/用户名 -->
     <button
-      class="flex-1 min-w-0 flex items-center gap-2 px-2 py-1.5 rounded-md hover:bg-muted text-left"
+      class="flex-1 min-w-0 flex items-center gap-2 px-2 py-1.5 rounded-md hover:bg-muted text-left cursor-pointer"
       :title="'用户信息（即将推出）'"
       @click="onUserClick"
     >
@@ -17,7 +17,7 @@
 
     <!-- 设置入口（纯图标） -->
     <button
-      class="p-1.5 rounded-md hover:bg-muted text-muted-foreground hover:text-foreground flex-shrink-0"
+      class="p-1.5 rounded-md hover:bg-muted text-muted-foreground hover:text-foreground flex-shrink-0 cursor-pointer"
       title="设置"
       @click="openSettings"
     >

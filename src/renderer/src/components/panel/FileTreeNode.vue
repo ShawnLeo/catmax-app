@@ -1,95 +1,93 @@
 <template>
   <div>
-    <!-- 加载子目录 -->
+    <!-- File Tree Node: 单击目录懒加载子项，单击文件在左侧预览区打开或激活 tab。 -->
     <button
-      v-for="entry in entries"
-      :key="entry.relativePath"
+      type="button"
       :class="[
-        'w-full flex items-center gap-1 text-xs hover:bg-muted rounded',
-        active(entry.relativePath) ? 'bg-muted' : '',
+        'group w-full h-7 flex items-center pr-2 rounded-md text-[13px] transition-colors',
+        active ? 'bg-primary/10 text-foreground' : 'text-foreground/85 hover:bg-muted/70',
       ]"
-      :style="{ paddingLeft: `${depth * 12 + 8}px` }"
-      @click="onClick(entry)"
+      :style="{ paddingLeft: `${depth * 14 + 6}px` }"
+      :title="entry.isSymlink ? `${entry.relativePath}（符号链接）` : entry.relativePath"
+      @click="onClick"
     >
-      <!-- 展开/折叠箭头 -->
-      <ChevronRightIcon
-        v-if="entry.isDirectory"
-        :class="[
-          'w-3 h-3 flex-shrink-0 transition-transform',
-          expanded.has(entry.relativePath) ? 'rotate-90' : '',
-        ]"
+      <span class="w-4 h-4 grid place-items-center flex-shrink-0">
+        <LoaderCircleIcon v-if="loading" class="w-3 h-3 text-muted-foreground animate-spin" />
+        <ChevronRightIcon
+          v-else-if="entry.isDirectory && !entry.isSymlink"
+          :class="[
+            'w-3.5 h-3.5 text-muted-foreground transition-transform duration-150',
+            expanded ? 'rotate-90' : '',
+          ]"
+        />
+      </span>
+      <FileTypeIcon
+        :name="entry.name"
+        :is-directory="entry.isDirectory"
+        :expanded="expanded"
+        class="w-4 h-4 flex-shrink-0 mr-1.5"
       />
-      <span v-else class="w-3 h-3 flex-shrink-0" />
-
-      <!-- 图标 -->
-      <FolderIcon v-if="entry.isDirectory" class="w-3 h-3 text-muted-foreground flex-shrink-0" />
-      <FileIcon v-else class="w-3 h-3 text-muted-foreground flex-shrink-0" />
-
-      <!-- 名字 -->
-      <span class="truncate flex-1 text-left">{{ entry.name }}</span>
+      <span class="truncate text-left">{{ entry.name }}</span>
+      <Link2Icon
+        v-if="entry.isSymlink"
+        class="w-3 h-3 ml-auto text-muted-foreground flex-shrink-0"
+      />
     </button>
 
-    <!-- 子目录递归 -->
-    <FileTreeNode
-      v-for="child of expandedChildren"
-      :key="child.relativePath"
-      :workspace-path="workspacePath"
-      :workspace-id="workspaceId"
-      :relative-path="child.relativePath"
-      :depth="depth + 1"
-    />
+    <template v-if="expanded">
+      <FileTreeNode
+        v-for="child in children"
+        :key="child.relativePath"
+        :entry="child"
+        :workspace-id="workspaceId"
+        :depth="depth + 1"
+      />
+      <div
+        v-if="error"
+        class="pr-2 py-1 text-[11px] text-danger truncate"
+        :style="{ paddingLeft: `${(depth + 1) * 14 + 26}px` }"
+        :title="error"
+      >
+        无法读取目录
+      </div>
+      <div
+        v-else-if="!loading && children.length === 0"
+        class="pr-2 py-1 text-[11px] text-muted-foreground"
+        :style="{ paddingLeft: `${(depth + 1) * 14 + 26}px` }"
+      >
+        空目录
+      </div>
+    </template>
   </div>
 </template>
 
 <script setup lang="ts">
 import { useFilesStore } from '@renderer/stores/files'
 import type { DirEntry } from '@shared/ipc/fs'
-import { ChevronRightIcon, FileIcon, FolderIcon } from 'lucide-vue-next'
-import { computed, ref, watch } from 'vue'
+import { ChevronRightIcon, Link2Icon, LoaderCircleIcon } from 'lucide-vue-next'
+import { computed } from 'vue'
+
+import FileTypeIcon from './FileTypeIcon.vue'
 
 const props = defineProps<{
-  workspacePath: string
   workspaceId: string
-  relativePath: string
+  entry: DirEntry
   depth: number
 }>()
 
 const filesStore = useFilesStore()
-const entries = ref<DirEntry[]>([])
-const expanded = ref(new Set<string>())
+// File Tree Node: 递归节点只从 store 读取共享缓存，避免每层重复发起 IPC。
+const expanded = computed(() => filesStore.expandedPaths.has(props.entry.relativePath))
+const loading = computed(() => filesStore.loadingPaths.has(props.entry.relativePath))
+const children = computed(() => filesStore.directoryCache.get(props.entry.relativePath) ?? [])
+const error = computed(() => filesStore.directoryErrors.get(props.entry.relativePath))
+const active = computed(() => filesStore.currentPreview?.relativePath === props.entry.relativePath)
 
-async function load(): Promise<void> {
-  entries.value = await filesStore.openDirectory(props.workspacePath, props.relativePath)
-}
-
-watch(
-  () => props.relativePath,
-  () => {
-    void load()
-  },
-  { immediate: true },
-)
-
-async function onClick(entry: DirEntry): Promise<void> {
-  if (entry.isDirectory) {
-    if (expanded.value.has(entry.relativePath)) {
-      expanded.value.delete(entry.relativePath)
-    } else {
-      expanded.value.add(entry.relativePath)
-    }
-    expanded.value = new Set(expanded.value)
+async function onClick(): Promise<void> {
+  if (props.entry.isDirectory) {
+    await filesStore.toggleDirectory(props.workspaceId, props.entry)
   } else {
-    // 文件：预览
-    await filesStore.previewFile(props.workspacePath, entry.relativePath)
+    await filesStore.previewFile(props.workspaceId, props.entry.relativePath)
   }
 }
-
-function active(relativePath: string): boolean {
-  return filesStore.currentPreview?.relativePath === relativePath
-}
-
-// 展开的子节点的 relativePath 列表（用于递归渲染）
-const expandedChildren = computed(() =>
-  entries.value.filter((e) => e.isDirectory && expanded.value.has(e.relativePath)),
-)
 </script>

@@ -1,20 +1,27 @@
 <template>
   <!--
-    通用"加载中"三点动画——三个点依次出现，到 3 个后整体淡出，再循环。
+    通用"加载中"三点动画——三个点依次出现（1→2→3），全亮保持一会儿，
+    然后三个点同时消失，再重新一个个出现，循环往复，像加载中 gif。
 
     复用场景：
       - ThinkingBlock header 的 "thinking" 文字后面
       - MessageList 底部的 agent working 指示器
 
-    实现：每个点是独立 span，共享同一套 keyframes（loadcycle），
-    用 animation-delay 错开各点的相位——
-      第 1 点 0s、第 2 点 0.2s、第 3 点 0.4s。
-    keyframes 一轮（1.6s）分三段：
-      0%–60% 三个点按 delay 错峰淡入放大（形成"一个个出现"）
-      60%–80% 保持全亮
-      80%–100% 同步淡出（变没），下一轮再重新一个个出现。
+    实现：每个点用各自的 @keyframes（catmax-load-dot-1/2/3），
+    不同 keyframes 让三个点"依次点亮"但"同时熄灭"——
+      dot1 在 0–20% 淡入
+      dot2 在 20–40% 淡入
+      dot3 在 40–60% 淡入
+      60–75% 三点全亮保持
+      75–90% 三点同时淡出
+      90–100% 全暗（下一轮重启前的停顿）
 
-    size / color 通过 props 控制，适配不同使用位置。
+    ⚠️ 关键：@keyframes 必须放在**非 scoped** 的 <style> 块里。
+    Vue 的 scoped style 会给 @keyframes 加 data-v 哈希重命名，但这里通过
+    inline style 的 animation 引用 keyframe 名——inline style 无法引用被重命名
+    后的名字，动画会静默失效（点完全不动）。非 scoped + 唯一前缀 catmax- 防冲突。
+
+    size / duration 通过 props 控制，适配不同使用位置。
   -->
   <span :class="['inline-flex items-center gap-[2px]', $props.class]" aria-hidden="true">
     <span
@@ -24,7 +31,7 @@
       :style="{
         width: dotSize,
         height: dotSize,
-        animation: `loadcycle ${duration}s ease-in-out ${i * step}s infinite`,
+        animation: `catmax-load-dot-${i + 1} ${duration}s ease-in-out infinite`,
       }"
     />
   </span>
@@ -46,43 +53,66 @@ const props = withDefaults(defineProps<{ dotSize?: number; duration?: number }>(
 })
 
 // 本地常量——withDefaults 的默认值在 template 里不会被类型收窄（仍可能 undefined），
-// 用 const/computed 取出保证模板里拿到的是确定的 number/string。
+// 用 computed 取出保证模板里拿到的是确定的 number/string。
 const dotSize = computed(() => `${props.dotSize}px`)
 const duration = computed(() => props.duration)
-const step = computed(() => props.duration / 8)
 </script>
 
-<style scoped>
-/*
-  单轮动画（以 duration 为周期，下面比例按 1.6s 计）：
-    0%   起点——透明 + 缩小（还没出现）
-    30%  完全淡入 + 放大到 1（"出现"动作完成）
-    60%  保持全亮（3 个点都到位的稳态期）
-    80%  开始同步淡出
-    100% 完全消失，下一轮从 0% 重新开始
-  各点的 animation-delay 让它们错开相位，视觉上呈现
-  "1 个 → 2 个 → 3 个 → 全消失 → 再 1 个..." 的循环。
-*/
-@keyframes loadcycle {
-  0% {
-    opacity: 0;
-    transform: scale(0.6);
-  }
-  30% {
-    opacity: 1;
-    transform: scale(1);
-  }
-  60% {
-    opacity: 1;
-    transform: scale(1);
-  }
-  80% {
-    opacity: 0.3;
-    transform: scale(0.9);
-  }
+<!--
+  非 scoped：keyframe 名要被 inline style 引用，scoped 会重命名导致失效。
+  用 catmax- 前缀避免全局命名冲突。
+
+  三段式周期（以一个 cycle 为 100%）：
+    0–20%   dot1 淡入（dot2/dot3 仍暗）
+    20–40%  dot2 淡入（dot1 亮，dot3 仍暗）
+    40–60%  dot3 淡入（三点全亮）
+    60–75%  保持全亮
+    75–90%  三点同时淡出
+    90–100% 全暗停顿
+  这样视觉上呈现 "1 → 2 → 3 → 全消失 → 重新 1..." 的循环。
+-->
+<style>
+@keyframes catmax-load-dot-1 {
+  0%,
+  90%,
   100% {
     opacity: 0;
     transform: scale(0.6);
+  }
+  20%,
+  75% {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@keyframes catmax-load-dot-2 {
+  0%,
+  20%,
+  90%,
+  100% {
+    opacity: 0;
+    transform: scale(0.6);
+  }
+  40%,
+  75% {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@keyframes catmax-load-dot-3 {
+  0%,
+  40%,
+  90%,
+  100% {
+    opacity: 0;
+    transform: scale(0.6);
+  }
+  60%,
+  75% {
+    opacity: 1;
+    transform: scale(1);
   }
 }
 </style>

@@ -47,7 +47,7 @@
 
     <!-- 删除按钮（hover 显示） -->
     <button
-      class="opacity-0 group-hover:opacity-100 p-1 hover:text-destructive"
+      class="opacity-0 group-hover:opacity-100 p-1 hover:text-destructive cursor-pointer"
       @click.stop="$emit('remove')"
     >
       <Trash2Icon class="w-3 h-3" />

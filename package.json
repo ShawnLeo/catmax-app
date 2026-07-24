@@ -42,6 +42,7 @@
     "fix-path": "^5.0.0",
     "ignore": "^7.0.6",
     "lucide-vue-next": "^1.0.0",
+    "material-icon-theme": "^5.37.0",
     "node-pty": "^1.1.0",
     "radix-vue": "^1.9.17",
     "simple-git": "^3.36.0",

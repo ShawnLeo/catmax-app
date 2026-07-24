@@ -27,6 +27,9 @@ describe('renderMarkdown', () => {
     expect(html).toContain('code-block-lang')
     expect(html).toContain('data-action="copy-code')
     expect(html).toContain('复制')
+    // File Preview Contrast: 双主题变量必须存在，暗色模式才能覆盖 Shiki 的浅色行内值。
+    expect(html).toContain('github-dark-high-contrast')
+    expect(html).toContain('--shiki-dark:')
   })
 
   test('无语言代码块标签显示为 text', async () => {

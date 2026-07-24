@@ -1,55 +1,50 @@
-import { existsSync, promises as fs } from 'node:fs'
-import { join } from 'node:path'
+import { existsSync } from 'node:fs'
 
 import { ctx } from '@main/context'
 import { launchInEditor } from '@main/service/editor-launcher'
-import { detectLanguage, isBinaryContent, readDirectory } from '@main/service/file-tree'
+import {
+  readDirectory,
+  readFilePreview,
+  resolveFileReference,
+  resolveWorkspaceEntry,
+  searchWorkspace,
+} from '@main/service/file-tree'
 import { DEFAULT_EDITOR } from '@shared/constants'
 import type { DirEntry, FilePreview } from '@shared/ipc/fs'
 
-const MAX_PREVIEW_BYTES = 256 * 1024
-
+// File Tree IPC: renderer 只提交 workspaceId，主进程从数据库取得可信工作区根目录。
 export const readDirectoryHandler = async (args: {
-  workspacePath: string
+  workspaceId: string
   relativePath?: string
   respectGitignore?: boolean
 }): Promise<DirEntry[]> => {
-  return readDirectory(args.workspacePath, args.relativePath ?? '', args.respectGitignore ?? true)
+  const workspace = requireWorkspace(args.workspaceId)
+  return readDirectory(workspace.path, args.relativePath ?? '', args.respectGitignore ?? true)
 }
 
 export const readFilePreviewHandler = async (args: {
-  workspacePath: string
+  workspaceId: string
   relativePath: string
 }): Promise<FilePreview> => {
-  const absPath = join(args.workspacePath, args.relativePath)
-  if (!existsSync(absPath)) {
-    throw new Error(`file does not exist: ${args.relativePath}`)
-  }
+  const workspace = requireWorkspace(args.workspaceId)
+  return readFilePreview(workspace.path, args.relativePath)
+}
 
-  const stat = await fs.stat(absPath)
-  const buffer = await fs.readFile(absPath)
-  const binary = isBinaryContent(buffer)
-  const truncated = buffer.length > MAX_PREVIEW_BYTES
-  const sliced = truncated ? buffer.subarray(0, MAX_PREVIEW_BYTES) : buffer
+export const searchFilesHandler = async (args: {
+  workspaceId: string
+  query: string
+  limit?: number
+}): Promise<DirEntry[]> => {
+  const workspace = requireWorkspace(args.workspaceId)
+  return searchWorkspace(workspace.path, args.query, args.limit)
+}
 
-  let content: string | null = null
-  let language: string | null = null
-  if (!binary) {
-    content = sliced.toString('utf-8')
-    language = detectLanguage(args.relativePath)
-  }
-
-  return {
-    relativePath: args.relativePath,
-    absolutePath: absPath,
-    size: stat.size,
-    mimeType: binary ? 'application/octet-stream' : 'text/plain',
-    isBinary: binary,
-    content,
-    language,
-    truncated,
-    encoding: binary ? 'binary' : 'utf-8',
-  }
+export const resolveFileReferenceHandler = async (args: {
+  workspaceId: string
+  reference: string
+}): Promise<{ relativePath: string; line?: number; column?: number } | null> => {
+  const workspace = requireWorkspace(args.workspaceId)
+  return resolveFileReference(workspace.path, args.reference)
 }
 
 export const openInEditorHandler = async (args: {
@@ -62,6 +57,11 @@ export const openInEditorHandler = async (args: {
   if (!ws) {
     return { launched: false, editor: null, error: 'workspace not found' }
   }
+  try {
+    await resolveWorkspaceEntry(ws.path, args.relativePath)
+  } catch {
+    return { launched: false, editor: null, error: 'file is outside the workspace or unavailable' }
+  }
   const editor = ws.preferredEditor ?? DEFAULT_EDITOR
   return launchInEditor(editor, {
     workspacePath: ws.path,
@@ -73,4 +73,11 @@ export const openInEditorHandler = async (args: {
 
 export const pathExistsHandler = async (args: { absolutePath: string }): Promise<boolean> => {
   return existsSync(args.absolutePath)
+}
+
+// File Tree IPC: 所有文件树、搜索和预览入口共享同一套工作区存在性校验。
+function requireWorkspace(workspaceId: string) {
+  const workspace = ctx.db.findWorkspaceById(workspaceId)
+  if (!workspace) throw new Error('workspace not found')
+  return workspace
 }

@@ -64,12 +64,12 @@
     <ResizeHandle
       v-if="uiStore.rightPanelVisible"
       side="right"
-      :min="RIGHT_PANEL_MIN"
+      :min="rightPanelMin"
       :max="rightPanelMax"
-      :current="uiStore.rightPanelWidth"
-      @resize="uiStore.setRightPanelWidth"
+      :current="rightPanelCurrent"
+      @resize="resizeRightPanel"
     />
-    <RightPanel v-if="uiStore.rightPanelVisible" />
+    <RightPanel />
   </div>
 </template>
 
@@ -86,6 +86,7 @@ import ResizeHandle from '@renderer/components/ui/ResizeHandle.vue'
 import { useStreamMessage } from '@renderer/composables/useStreamMessage'
 import { randomUUID } from '@renderer/lib/utils'
 import { useBackendStore } from '@renderer/stores/backend'
+import { useFilesStore } from '@renderer/stores/files'
 import { useGitStore } from '@renderer/stores/git'
 import { useMessageStore } from '@renderer/stores/message'
 import { useSessionStore } from '@renderer/stores/session'
@@ -106,6 +107,7 @@ import { useRouter } from 'vue-router'
 const router = useRouter()
 const workspaceStore = useWorkspaceStore()
 const backendStore = useBackendStore()
+const filesStore = useFilesStore()
 const sessionStore = useSessionStore()
 const messageStore = useMessageStore()
 const gitStore = useGitStore()
@@ -115,6 +117,7 @@ useStreamMessage()
 // 侧栏可拖拽宽度--min 为当前默认宽度，max 为容器一半（即最大 1:1 与聊天区同宽）
 const SIDEBAR_MIN = 280
 const RIGHT_PANEL_MIN = 320
+const FILE_PREVIEW_MIN = 360
 // 底部终端面板可拖拽高度——min 保证终端至少能显示几行，max 不超过容器 70%（留空间给聊天区）
 const BOTTOM_PANEL_MIN = 120
 const containerRef = ref<HTMLElement | null>(null)
@@ -122,8 +125,21 @@ const containerWidth = ref(Number.POSITIVE_INFINITY)
 const containerHeight = ref(Number.POSITIVE_INFINITY)
 
 const sidebarMax = computed(() => Math.max(SIDEBAR_MIN, Math.floor(containerWidth.value / 2)))
+
+// File Preview Layout: 右侧拖拽目标是“预览 + 文件树”的组合宽度。
+const filePreviewOpen = computed(
+  () => uiStore.rightPanelTab === 'files' && filesStore.previewTabs.length > 0,
+)
+const rightPanelCurrent = computed(() =>
+  filePreviewOpen.value
+    ? uiStore.rightPanelWidth + uiStore.filePreviewWidth
+    : uiStore.rightPanelWidth,
+)
+const rightPanelMin = computed(() =>
+  filePreviewOpen.value ? uiStore.rightPanelWidth + FILE_PREVIEW_MIN : RIGHT_PANEL_MIN,
+)
 const rightPanelMax = computed(() =>
-  Math.max(RIGHT_PANEL_MIN, Math.floor(containerWidth.value / 2)),
+  Math.max(rightPanelMin.value, Math.floor(containerWidth.value * 0.78)),
 )
 const bottomPanelMax = computed(() =>
   Math.max(BOTTOM_PANEL_MIN, Math.floor(containerHeight.value * 0.7)),
@@ -146,6 +162,21 @@ onMounted(() => {
 onUnmounted(() => {
   resizeObserver?.disconnect()
   resizeObserver = null
+})
+
+function resizeRightPanel(width: number): void {
+  // File Preview Layout: 文件树宽度保持稳定，预览打开时只调整它左侧的预览区域。
+  if (filePreviewOpen.value) {
+    uiStore.setFilePreviewWidth(width - uiStore.rightPanelWidth)
+  } else {
+    uiStore.setRightPanelWidth(width)
+  }
+}
+
+watch([filePreviewOpen, rightPanelMax], ([previewOpen, maxWidth]) => {
+  if (previewOpen && rightPanelCurrent.value > maxWidth) {
+    uiStore.setFilePreviewWidth(Math.max(FILE_PREVIEW_MIN, maxWidth - uiStore.rightPanelWidth))
+  }
 })
 
 // 工作区切换时刷新 git status

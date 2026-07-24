@@ -16,21 +16,43 @@ export interface DirEntry {
   modifiedAt: number
 }
 
+// File Preview Contract: kind 决定 renderer 使用代码、媒体、表格或占位预览器。
+export type FilePreviewKind =
+  | 'text'
+  | 'markdown'
+  | 'table'
+  | 'image'
+  | 'pdf'
+  | 'audio'
+  | 'video'
+  | 'document'
+  | 'archive'
+  | 'binary'
+
 export interface FilePreview {
   relativePath: string
   absolutePath: string
+  name: string
   size: number
   mimeType: string
+  kind: FilePreviewKind
   isBinary: boolean
   content: string | null
+  dataUrl: string | null
   language: string | null
   truncated: boolean
   encoding: 'utf-8' | 'binary'
+  modifiedAt: number
 }
 
-// stub 参数名以 `_` 前缀避免 unused 报错；参数类型从 typeof 派生不受影响。
+// File Tree IPC Contract: stub 参数名以 `_` 前缀避免 unused，签名由 main/preload 共用。
 export async function readDirectory(_args: {
-  workspacePath: string
+  workspaceId: string
+  /**
+   * 仅用于兼容开发时 renderer 已热更新、main/preload 尚未重启的旧进程。
+   * 新版 main 始终通过 workspaceId 从数据库解析可信路径。
+   */
+  workspacePath?: string
   relativePath?: string
   respectGitignore?: boolean
 }): Promise<DirEntry[]> {
@@ -38,9 +60,30 @@ export async function readDirectory(_args: {
 }
 
 export async function readFilePreview(_args: {
-  workspacePath: string
+  workspaceId: string
+  /** @see readDirectory 的 workspacePath 兼容说明。 */
+  workspacePath?: string
   relativePath: string
 }): Promise<FilePreview> {
+  throw new Error('implemented in main')
+}
+
+export async function searchFiles(_args: {
+  workspaceId: string
+  /** @see readDirectory 的 workspacePath 兼容说明。 */
+  workspacePath?: string
+  query: string
+  limit?: number
+}): Promise<DirEntry[]> {
+  throw new Error('implemented in main')
+}
+
+export async function resolveFileReference(_args: {
+  workspaceId: string
+  /** @see readDirectory 的 workspacePath 兼容说明。 */
+  workspacePath?: string
+  reference: string
+}): Promise<{ relativePath: string; line?: number; column?: number } | null> {
   throw new Error('implemented in main')
 }
 
@@ -61,6 +104,8 @@ export async function pathExists(_args: { absolutePath: string }): Promise<boole
 export type FsHandlers = {
   'fs.readDirectory': typeof readDirectory
   'fs.readFilePreview': typeof readFilePreview
+  'fs.searchFiles': typeof searchFiles
+  'fs.resolveFileReference': typeof resolveFileReference
   'fs.openInEditor': typeof openInEditor
   'fs.pathExists': typeof pathExists
 }

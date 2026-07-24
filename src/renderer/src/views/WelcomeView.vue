@@ -34,7 +34,7 @@
           <button
             v-for="ws in recentWorkspaces"
             :key="ws.id"
-            class="text-left p-3 rounded-md hover:bg-muted transition-colors"
+            class="text-left p-3 rounded-md hover:bg-muted transition-colors cursor-pointer"
             @click="openWorkspace(ws.id)"
           >
             <div class="font-medium text-foreground">{{ ws.name }}</div>

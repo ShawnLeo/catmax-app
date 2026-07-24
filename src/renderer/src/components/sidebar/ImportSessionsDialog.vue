@@ -25,7 +25,7 @@
           </p>
         </div>
         <button
-          class="p-1.5 rounded-md hover:bg-muted text-muted-foreground hover:text-foreground"
+          class="p-1.5 rounded-md hover:bg-muted text-muted-foreground hover:text-foreground cursor-pointer"
           title="关闭"
           @click="onClose"
         >
@@ -105,7 +105,7 @@
               <!-- 反推路径没匹配上 workspace 时，在行内加一个"创建工作区"快捷入口 -->
               <template v-if="needsCreateWorkspace(sess, idx)" #hint>
                 <button
-                  class="text-xs text-primary hover:underline"
+                  class="text-xs text-primary hover:underline cursor-pointer"
                   @click="createWorkspaceFromCwd(sess.cwd!)"
                 >
                   + 用此路径新建工作区
@@ -119,7 +119,7 @@
       <!-- 底部操作 -->
       <div class="p-4 border-t border-border flex items-center justify-between gap-2">
         <button
-          class="text-xs text-muted-foreground hover:text-foreground flex items-center gap-1"
+          class="text-xs text-muted-foreground hover:text-foreground flex items-center gap-1 cursor-pointer"
           :disabled="scanning"
           @click="rescan"
         >

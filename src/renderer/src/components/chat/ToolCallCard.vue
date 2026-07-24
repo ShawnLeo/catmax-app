@@ -19,15 +19,22 @@
     ]"
   >
     <!-- 标题行：点击在 preview ↔ expanded 之间切换 -->
-    <button class="w-full flex items-center gap-2 px-3 py-1.5 text-left" @click="toggleExpand">
+    <button
+      class="w-full flex items-center gap-2 px-3 py-1.5 text-left cursor-pointer"
+      @click="toggleExpand"
+    >
       <component
         :is="iconForKind(tool.info.kind)"
         class="w-3.5 h-3.5 text-muted-foreground flex-shrink-0"
       />
       <span class="text-[12px] font-medium text-foreground flex-shrink-0">{{ typeName }}</span>
       <span
-        class="text-[12px] text-muted-foreground font-mono truncate flex-1 min-w-0"
+        :class="[
+          'text-[12px] text-muted-foreground font-mono truncate flex-1 min-w-0',
+          isFileTool ? 'hover:text-primary hover:underline' : '',
+        ]"
         :title="displayPathTooltip"
+        @click="openFilePreview"
         >{{ displayPath }}</span
       >
 
@@ -116,6 +123,8 @@
 
 <script setup lang="ts">
 import { basename } from '@renderer/lib/path'
+import { useFilesStore } from '@renderer/stores/files'
+import { useWorkspaceStore } from '@renderer/stores/workspace'
 import type { NormalizedMessage } from '@shared/backend/types'
 import {
   BotIcon,
@@ -144,6 +153,8 @@ const props = defineProps<{
   /** 是否显示思考块（透传给子 agent） */
   showThinking?: boolean
 }>()
+const filesStore = useFilesStore()
+const workspaceStore = useWorkspaceStore()
 
 /**
  * 三态：collapsed / preview / expanded
@@ -292,4 +303,17 @@ const displayPathTooltip = computed(() => {
   }
   return undefined
 })
+
+const isFileTool = computed(
+  () => props.tool.info.kind === 'file_edit' || props.tool.info.kind === 'file_read',
+)
+
+// Chat File Reference: Read/Edit 工具标题中的路径直接复用文件预览引用解析器。
+async function openFilePreview(event: MouseEvent): Promise<void> {
+  if (!isFileTool.value || !fullPath.value) return
+  event.stopPropagation()
+  const workspaceId = workspaceStore.currentWorkspace?.id
+  if (!workspaceId) return
+  await filesStore.openFileReference(workspaceId, fullPath.value)
+}
 </script>

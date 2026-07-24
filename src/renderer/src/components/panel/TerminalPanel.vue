@@ -18,7 +18,7 @@
           v-for="t in terminalStore.terminals"
           :key="t.id"
           :class="[
-            'group flex items-center gap-1.5 pl-3 pr-2 py-1 rounded-md text-sm whitespace-nowrap transition-colors shrink-0',
+            'group flex items-center gap-1.5 pl-3 pr-2 py-1 rounded-md text-sm whitespace-nowrap transition-colors shrink-0 cursor-pointer',
             terminalStore.activeId === t.id
               ? 'bg-background text-foreground'
               : 'text-muted-foreground hover:text-foreground hover:bg-muted/50',
@@ -49,7 +49,7 @@
 
           <!-- 关闭按钮（hover 显示） -->
           <button
-            class="opacity-0 group-hover:opacity-100 p-0.5 rounded hover:bg-muted text-muted-foreground hover:text-foreground transition-opacity"
+            class="opacity-0 group-hover:opacity-100 p-0.5 rounded hover:bg-muted text-muted-foreground hover:text-foreground transition-opacity cursor-pointer"
             title="关闭终端"
             @click.stop="terminalStore.kill(t.id)"
           >
@@ -60,7 +60,7 @@
 
       <!-- 新建终端按钮 -->
       <button
-        class="p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted shrink-0"
+        class="p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted shrink-0 cursor-pointer"
         title="新建终端"
         @click="createTerminal"
       >
@@ -69,7 +69,7 @@
 
       <!-- 关闭终端面板 -->
       <button
-        class="p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted shrink-0"
+        class="p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted shrink-0 cursor-pointer"
         title="关闭终端面板"
         @click="uiStore.toggleBottomPanel()"
       >

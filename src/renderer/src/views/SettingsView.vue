@@ -19,7 +19,7 @@
           v-for="item in navItems"
           :key="item.id"
           :class="[
-            'flex items-center gap-2.5 px-3 py-2 rounded-md text-sm text-left transition-colors interactive',
+            'flex items-center gap-2.5 px-3 py-2 rounded-md text-sm text-left transition-colors interactive cursor-pointer',
             activeSection === item.id
               ? 'bg-accent text-accent-foreground font-medium'
               : 'text-muted-foreground hover:bg-muted hover:text-foreground',

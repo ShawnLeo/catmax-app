@@ -58,9 +58,11 @@ export const IPC = {
   SESSION_SET_LAST_RUNTIME_CONFIG: 'session.setLastRuntimeConfig',
   // git
   GIT_STATUS: 'git.status',
-  // fs
+  // File Tree IPC Channels: 目录、搜索、引用解析、预览和外部编辑器入口。
   FS_READ_DIRECTORY: 'fs.readDirectory',
   FS_READ_FILE_PREVIEW: 'fs.readFilePreview',
+  FS_SEARCH_FILES: 'fs.searchFiles',
+  FS_RESOLVE_FILE_REFERENCE: 'fs.resolveFileReference',
   FS_OPEN_IN_EDITOR: 'fs.openInEditor',
   FS_PATH_EXISTS: 'fs.pathExists',
   // pty

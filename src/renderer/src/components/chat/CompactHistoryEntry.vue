@@ -18,7 +18,7 @@
     <div v-if="summary" class="mt-2">
       <button
         type="button"
-        class="flex items-center gap-1.5 text-[12px] text-muted-foreground hover:text-foreground transition-colors w-full text-left"
+        class="flex items-center gap-1.5 text-[12px] text-muted-foreground hover:text-foreground transition-colors w-full text-left cursor-pointer"
         @click="expanded = !expanded"
       >
         <ChevronDownIcon
