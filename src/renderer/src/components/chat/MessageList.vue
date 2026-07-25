@@ -27,17 +27,25 @@
         2xl ≥1536px   → 1440px（终极上限，超宽屏不会再变宽）
       mx-auto 居中。Composer 用同样的 class 保持对齐。
     -->
-    <div
-      v-else
-      class="mx-auto px-6 py-4 flex flex-col gap-6 max-w-3xl lg:max-w-screen-lg xl:max-w-[1280px] 2xl:max-w-[1440px]"
-    >
-      <MessageItem
-        v-for="message in messageStore.messages"
-        :key="message.id"
-        :message="message"
+    <div v-else :class="conversationClass">
+      <component
+        :is="backendConversationRenderer"
+        v-if="backendConversationRenderer"
+        :messages="messageStore.messages"
         :show-thinking="showThinking"
         :cwd="cwd"
+        :running="messageStore.isRunning"
+        :current-turn-id="messageStore.currentTurnId"
       />
+      <template v-else>
+        <MessageItem
+          v-for="message in messageStore.messages"
+          :key="message.id"
+          :message="message"
+          :show-thinking="showThinking"
+          :cwd="cwd"
+        />
+      </template>
 
       <!--
         /compact 分隔线：用户发 /compact 时不展示 /compact 消息气泡，
@@ -61,7 +69,7 @@
         样式跟 assistant 消息的时间轴一致：左侧竖线 + 色点（绿色脉冲 = running），
         让它视觉上属于 assistant 侧的对话流，而不是一个突兀的浮层。
       -->
-      <div v-if="agentWorking" class="flex gap-3 flex-row">
+      <div v-if="agentWorking && !backendConversationRenderer" class="flex gap-3 flex-row">
         <div class="min-w-0 flex-1">
           <div class="relative pl-6 border-l border-border/40">
             <span
@@ -120,11 +128,13 @@
 </template>
 
 <script setup lang="ts">
+import { useBackendStore } from '@renderer/stores/backend'
 import { useMessageStore } from '@renderer/stores/message'
 import { useWorkspaceStore } from '@renderer/stores/workspace'
 import { AlertCircleIcon, ArrowDownIcon, Loader2Icon } from 'lucide-vue-next'
 import { onMounted, ref, watch, nextTick, computed } from 'vue'
 
+import { getBackendConversationRenderer } from './blocks/plugin-registry'
 import CompactDivider from './CompactDivider.vue'
 import LoadingDots from './LoadingDots.vue'
 import MessageItem from './MessageItem.vue'
@@ -135,12 +145,22 @@ const props = defineProps<{
 }>()
 const showThinking = computed(() => props.showThinking ?? true)
 const workspaceStore = useWorkspaceStore()
+const backendStore = useBackendStore()
 
 /** 工作区目录--子 agent 读 jsonl 需要 */
 const cwd = computed(() => workspaceStore.currentWorkspace?.path ?? '')
 
 const messageStore = useMessageStore()
 const container = ref<HTMLElement | null>(null)
+
+const backendConversationRenderer = computed(() =>
+  getBackendConversationRenderer(backendStore.currentId),
+)
+const conversationClass = computed(() =>
+  backendConversationRenderer.value
+    ? 'mx-auto flex w-full max-w-3xl flex-col px-4 py-4'
+    : 'mx-auto flex flex-col gap-6 px-6 py-4 max-w-3xl lg:max-w-screen-lg xl:max-w-[1280px] 2xl:max-w-[1440px]',
+)
 
 /**
  * 是否显示底部"agent 正在干活"指示器。

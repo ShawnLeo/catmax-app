@@ -40,4 +40,15 @@ export type SystemHandlers = {
   'system.windowMaximize': () => Promise<void>
   'system.windowClose': () => Promise<void>
   'system.windowIsMaximized': () => Promise<boolean>
+  /**
+   * 把 data:URL 或 http(s) URL 的图片保存到用户选择的路径。
+   * 返回最终保存路径；用户取消返回 null。
+   * Image Preview Overlay: 顶部下载按钮通过它落盘本地图片。
+   */
+  'system.saveImage': (args: {
+    /** 图片源：data:URL 或 http(s) URL */
+    url: string
+    /** 建议的文件名（不含目录） */
+    suggestedName?: string
+  }) => Promise<string | null>
 }

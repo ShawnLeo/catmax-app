@@ -3,7 +3,10 @@ import {
   codexApprovalToRequest,
   codexCommandToOutput,
   codexFileChangeToOutput,
+  codexItemToActivityBlock,
+  codexItemToContentBlock,
   codexItemToToolCallInfo,
+  diffStats,
 } from '@main/backend/codex/mapping'
 import { describe, expect, test } from 'vitest'
 
@@ -88,12 +91,62 @@ describe('codexItemToToolCallInfo', () => {
     expect(info).toBeNull()
   })
 
+  test('agentMessage 保留 commentary/final_answer phase', () => {
+    expect(
+      codexItemToContentBlock({
+        type: 'agentMessage',
+        id: 'msg_1',
+        text: '先检查一下',
+        phase: 'commentary',
+      }),
+    ).toEqual({
+      id: 'msg_1-text',
+      type: 'text',
+      text: '先检查一下',
+      phase: 'commentary',
+    })
+  })
+
   test('未知 item 类型返回 null', () => {
     const info = codexItemToToolCallInfo({
       type: 'unknown_future_type',
       id: 'x_1',
     })
     expect(info).toBeNull()
+  })
+})
+
+describe('codexItemToActivityBlock', () => {
+  test('使用 commandActions 区分读取、搜索与普通命令', () => {
+    const block = codexItemToActivityBlock({
+      type: 'commandExecution',
+      id: 'cmd_1',
+      command: 'sed -n 1,20p a.ts; rg foo src; pnpm test',
+      cwd: '/repo',
+      status: 'completed',
+      commandActions: [
+        { type: 'read', command: 'sed -n 1,20p a.ts', name: 'a.ts', path: '/repo/a.ts' },
+        { type: 'search', command: 'rg foo src', query: 'foo', path: '/repo/src' },
+        { type: 'unknown', command: 'pnpm test' },
+      ],
+      aggregatedOutput: null,
+      exitCode: 0,
+      durationMs: 1200,
+    })
+
+    expect(block?.activities.map((activity) => activity.kind)).toEqual([
+      'file_read',
+      'search',
+      'command',
+    ])
+    expect(block?.status).toBe('completed')
+  })
+
+  test('统计 unified diff 墆删行', () => {
+    expect(diffStats('--- a/a.ts\n+++ b/a.ts\n@@ -1 +1,2 @@\n-old\n+new\n+next')).toEqual({
+      additions: 2,
+      deletions: 1,
+    })
   })
 })
 

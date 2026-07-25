@@ -4,7 +4,7 @@
  */
 import { z } from 'zod'
 
-import { BACKEND_IDS, DEFAULT_FONT_SIZE, DEFAULT_THEME_MODE, EDITOR_IDS } from './constants'
+import { DEFAULT_FONT_SIZE, DEFAULT_THEME_MODE, EDITOR_IDS } from './constants'
 
 export const themeModeSchema = z.enum(['light', 'dark', 'system'])
 export type ThemeMode = z.infer<typeof themeModeSchema>
@@ -49,12 +49,16 @@ const backendRuntimeDefaultsSchema = z.object({
 export type BackendRuntimeDefaults = z.infer<typeof backendRuntimeDefaultsSchema>
 
 export const appSettingsSchema = z.object({
-  defaultBackend: z.enum(BACKEND_IDS).default('codex'),
+  defaultBackend: z
+    .string()
+    .regex(/^[a-z0-9][a-z0-9._-]*$/)
+    .default('codex'),
   backendPaths: z
     .object({
       codex: z.string().nullable().default(null),
       claude: z.string().nullable().default(null),
     })
+    .catchall(z.string().nullable())
     .default({ codex: null, claude: null }),
   /**
    * 默认运行时配置——仅在无 last-used 时兜底（last-used 优先）。
@@ -65,6 +69,7 @@ export const appSettingsSchema = z.object({
       codex: backendRuntimeDefaultsSchema.default({}),
       claude: backendRuntimeDefaultsSchema.default({}),
     })
+    .catchall(backendRuntimeDefaultsSchema)
     .default({ codex: {}, claude: {} }),
   defaultEditor: z.enum(EDITOR_IDS).default('vscode'),
   theme: themeSettingsSchema.default({}),

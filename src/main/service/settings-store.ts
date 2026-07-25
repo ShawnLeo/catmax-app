@@ -64,23 +64,20 @@ export class SettingsStore {
   update(patch: Partial<AppSettings>): AppSettings {
     const current = this.load()
     // 嵌套对象做浅 merge
-    const merged: AppSettings = {
+    const runtimeDefaults: Record<string, unknown> = { ...current.defaultRuntimeConfig }
+    for (const [backendId, backendPatch] of Object.entries(patch.defaultRuntimeConfig ?? {})) {
+      runtimeDefaults[backendId] = {
+        ...current.defaultRuntimeConfig[backendId],
+        ...backendPatch,
+      }
+    }
+    const merged = {
       ...current,
       ...patch,
       theme: { ...current.theme, ...(patch.theme ?? {}) },
       httpProxy: { ...current.httpProxy, ...(patch.httpProxy ?? {}) },
       backendPaths: { ...current.backendPaths, ...(patch.backendPaths ?? {}) },
-      // defaultRuntimeConfig 双层 deep merge（codex / claude 各自 merge）
-      defaultRuntimeConfig: {
-        codex: {
-          ...current.defaultRuntimeConfig.codex,
-          ...(patch.defaultRuntimeConfig?.codex ?? {}),
-        },
-        claude: {
-          ...current.defaultRuntimeConfig.claude,
-          ...(patch.defaultRuntimeConfig?.claude ?? {}),
-        },
-      },
+      defaultRuntimeConfig: runtimeDefaults,
     }
     const validated = appSettingsSchema.parse(merged)
     this.cache = validated

@@ -41,7 +41,9 @@ export const useBackendStore = defineStore('backend', () => {
 
   /** 并行拉所有 backend 的模型列表（设置页进页时调） */
   async function loadAllBackendModels(): Promise<void> {
-    await Promise.all(BACKEND_IDS.map((id) => loadModelsFor(id)))
+    const ids =
+      statuses.value.length > 0 ? statuses.value.map((status) => status.id) : [...BACKEND_IDS]
+    await Promise.all(ids.map((id) => loadModelsFor(id)))
   }
 
   async function switchTo(id: BackendId): Promise<void> {

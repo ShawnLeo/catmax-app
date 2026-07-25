@@ -7,6 +7,7 @@ import {
   getPlatformInfo,
   openDialog,
   openExternal,
+  saveImage,
   windowClose,
   windowIsMaximized,
   windowMaximize,
@@ -34,6 +35,7 @@ export function registerSystemHandlers(): void {
     'system.windowIsMaximized',
     windowIsMaximized,
   )
+  handleRendererRequest<SystemHandlers, 'system.saveImage'>('system.saveImage', saveImage)
 }
 
 export type { SystemHandlers } from '@shared/ipc/system'

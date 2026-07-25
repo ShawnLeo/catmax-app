@@ -5,6 +5,7 @@
  */
 import type { BackendId } from '../constants'
 
+import type { ContentBlock } from './blocks'
 import type { ContextBlock } from './context-tag-types'
 
 // re-export：renderer/main 已经按惯例从 types.ts 引所有 NormalizedMessage 相关类型，
@@ -37,6 +38,14 @@ export interface BackendCapabilities {
   supportedEfforts: EffortLevel[]
   /** 支持 turn 进行中热切换 model/effort/permissionMode（SDK streaming-input 模式） */
   supportsHotSwap: boolean
+  /** UI 展示能力；避免 renderer 根据 backend id 猜特性。 */
+  chat: {
+    subAgents: boolean
+    compact: boolean
+    planMode: boolean
+    webTools: boolean
+    blockTypes: string[]
+  }
 }
 
 /** 运行中 turn 的配置热切换请求 */
@@ -59,6 +68,8 @@ export interface ModelOption {
 /** 后端连接状态 */
 export interface BackendStatus {
   id: BackendId
+  displayName?: string
+  pluginVersion?: string
   available: boolean
   version: string | null
   error: string | null
@@ -330,7 +341,25 @@ export interface TokenUsage {
 export type TurnEvent =
   | { type: 'turn_started'; turnId: string; sessionId: string }
   | { type: 'text_delta'; turnId: string; itemId: string; text: string }
-  | { type: 'reasoning_delta'; turnId: string; itemId: string; text: string }
+  | {
+      type: 'reasoning_delta'
+      turnId: string
+      itemId: string
+      text: string
+      completedLabel?: string
+    }
+  | { type: 'content_block_upsert'; turnId: string; block: ContentBlock }
+  | {
+      type: 'codex_activity_output_delta'
+      turnId: string
+      itemId: string
+      text: string
+    }
+  | {
+      type: 'codex_turn_diff_updated'
+      turnId: string
+      diff: string
+    }
   | {
       type: 'tool_call_started'
       turnId: string
@@ -360,7 +389,7 @@ export type TurnEvent =
        * - 'claude'：走 pendingClaudePermission（claude 通过 MCP server 的权限请求）
        * 两者都由 PermissionPanel 渲染。
        */
-      source?: 'claude' | 'codex'
+      source?: BackendId
     }
   | {
       /**
@@ -387,6 +416,11 @@ export interface NormalizedMessage {
   id: string
   role: 'user' | 'assistant' | 'tool'
   turnId: string
+  /**
+   * 新的顺序化渲染契约。迁移期仍接受下方三个旧字段；所有新 mapping 必须写 blocks。
+   * renderer 会把旧历史即时升级，数据库中已保存的数据无需迁移。
+   */
+  blocks?: ContentBlock[]
   textBlocks?: {
     id: string
     text: string

@@ -413,8 +413,8 @@ export const readSubagentHistory = async (args: {
   agentId: string
   cwd: string
 }): Promise<NormalizedMessage[]> => {
-  // 只有 claude 有子 agent（codex 返回空数组）
-  if (args.backend !== 'claude') return []
+  const status = await ctx.backendManager.getStatus(args.backend)
+  if (!status.capabilities.chat.subAgents) return []
   return readSubagentHistoryFromJsonl(args.agentId, args.cwd)
 }
 

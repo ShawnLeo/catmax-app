@@ -10,7 +10,7 @@
     <!-- 默认后端选择器——按钮组，不可用的后端禁用并 tooltip 显示原因 -->
     <div class="grid grid-cols-2 gap-2 max-w-md">
       <button
-        v-for="id in BACKEND_IDS"
+        v-for="id in backendIds"
         :key="id"
         type="button"
         :disabled="!isBackendAvailable(id)"
@@ -25,7 +25,7 @@
         @click="selectDefault(id)"
       >
         <BackendIcon :backend="id" class="w-4 h-4" />
-        {{ id }}
+        {{ backendDisplayName(id) }}
       </button>
     </div>
 
@@ -171,11 +171,12 @@ import { explainBackendError } from '@renderer/lib/backend-error'
 import { useBackendStore } from '@renderer/stores/backend'
 import { useSettingsStore } from '@renderer/stores/settings'
 import type { EffortLevel, PermissionMode } from '@shared/backend/types'
-import { BACKEND_IDS, type BackendId } from '@shared/constants'
+import type { BackendId } from '@shared/constants'
 import { computed, onMounted, ref } from 'vue'
 
 const settings = useSettingsStore()
 const backendStore = useBackendStore()
+const backendIds = computed(() => backendStore.statuses.map((status) => status.id))
 
 const defaultBackend = computed(() => settings.settings?.defaultBackend ?? 'codex')
 
@@ -254,7 +255,11 @@ async function updateRuntimeDefault(
   field: 'model' | 'effort' | 'permissionMode',
   value: string | null,
 ): Promise<void> {
-  const current = defaultRuntimeConfig.value[backend]
+  const current = defaultRuntimeConfig.value[backend] ?? {
+    model: null,
+    effort: null,
+    permissionMode: null,
+  }
   const next = {
     ...defaultRuntimeConfig.value,
     [backend]: { ...current, [field]: value },
@@ -291,6 +296,10 @@ function setStatus(msg: string, kind: 'info' | 'success' | 'error' = 'info'): vo
 
 function backendStatus(id: BackendId) {
   return backendStore.statuses.find((s) => s.id === id)
+}
+
+function backendDisplayName(id: BackendId): string {
+  return backendStatus(id)?.displayName ?? id
 }
 
 function isBackendAvailable(id: BackendId): boolean {

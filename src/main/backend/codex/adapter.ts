@@ -22,14 +22,20 @@ import { join } from 'node:path'
 import { createInterface } from 'node:readline'
 
 import { logger } from '@main/service/logger'
+import { CODEX_CAPABILITIES } from '@shared/backend/builtin-capabilities'
+import { upgradeMessageBlocks } from '@shared/backend/normalize-blocks'
 import {
   agentMessageDeltaParamsSchema,
   commandApprovalParamsSchema,
+  commandExecutionOutputDeltaParamsSchema,
   fileChangeApprovalParamsSchema,
+  fileChangePatchUpdatedParamsSchema,
   itemCompletedParamsSchema,
   itemStartedParamsSchema,
   modelListResultSchema,
+  reasoningDeltaParamsSchema,
   turnCompletedParamsSchema,
+  turnDiffUpdatedParamsSchema,
   turnStartedParamsSchema,
   type CodexItem,
   type JsonRpcNotification,
@@ -60,8 +66,8 @@ import {
 } from './history-mapping'
 import {
   codexApprovalToRequest,
-  codexCommandToOutput,
-  codexFileChangeToOutput,
+  codexItemToActivityBlock,
+  codexItemToContentBlock,
   codexItemToToolCallInfo,
   ensureItemId,
 } from './mapping'
@@ -75,11 +81,6 @@ import {
 } from './protocol'
 
 const log = logger.domain('codex-adapter')
-
-// z.union with passthrough fallback means `switch (item.type)` does NOT narrow
-// item fields. We extract the variants explicitly (same pattern as mapping.ts).
-type CommandExecutionItem = Extract<CodexItem, { type: 'command_execution' }>
-type FileChangeItem = Extract<CodexItem, { type: 'file_change' }>
 
 /** 事件 sink —— 给测试用，可以注入自定义收集器 */
 export interface TurnEventSink {
@@ -158,22 +159,7 @@ async function readModelFromRollout(
 export class CodexAdapter implements AgentBackend {
   readonly id = 'codex' as const
 
-  readonly capabilities: BackendCapabilities = {
-    supportsInterrupt: true,
-    supportsApproval: true,
-    supportsSteer: true,
-    supportsThreadFork: true,
-    supportsModelSelection: true,
-    supportsEffort: true,
-    supportsPermissionMode: true,
-    // codex 的 approvalPolicy 原生只有 3 个值（untrusted / on-failure / never），
-    // permissionToApproval 把 6 个 PermissionMode 塌缩映射到这 3 个。为避免 UI 显示
-    // 对 codex 无意义区分的选项（如 plan vs dontAsk 都映射 never），这里只声明 3 个——
-    // 对应 default→untrusted、acceptEdits→on-failure、bypassPermissions→never。
-    supportedPermissionModes: ['default', 'acceptEdits', 'bypassPermissions'],
-    supportedEfforts: ['low', 'medium', 'high'],
-    supportsHotSwap: false,
-  }
+  readonly capabilities = CODEX_CAPABILITIES
 
   private opts: CodexAdapterOptions
   private spawner: ProcessSpawner
@@ -270,6 +256,7 @@ export class CodexAdapter implements AgentBackend {
       this.proc.child.stderr?.on('data', (chunk: Buffer) => {
         // codex 的 stderr 带 ANSI 控制字符（颜色），先剥掉再处理
         const rawText = chunk.toString('utf-8').trim()
+        // eslint-disable-next-line no-control-regex
         const text = rawText.replace(/\x1B\[[0-9;]*m/g, '')
         log.warn('codex stderr:', text)
         // 监测致命的 API 错误（OpenAI 返回 400 等），立刻中断当前 turn——
@@ -598,7 +585,7 @@ export class CodexAdapter implements AgentBackend {
     const messages = codexTurnsToMessages(turns)
     const merged = mergeAssistantAndToolMessages(messages)
     log.info('history loaded', backendThreadId, merged.length, 'messages')
-    return { messages: merged }
+    return { messages: merged.map(upgradeMessageBlocks) }
   }
 
   // ============ Turn（核心） ============
@@ -850,6 +837,48 @@ export class CodexAdapter implements AgentBackend {
           text: r.data.delta,
         }
       }
+      case 'item/reasoning/summaryTextDelta':
+      case 'item/reasoning/textDelta': {
+        const r = reasoningDeltaParamsSchema.safeParse(params)
+        if (!r.success) return null
+        return {
+          type: 'reasoning_delta',
+          turnId: internalTurnId,
+          itemId: r.data.itemId,
+          text: r.data.delta,
+          completedLabel: '已处理',
+        }
+      }
+      case 'item/commandExecution/outputDelta': {
+        const r = commandExecutionOutputDeltaParamsSchema.safeParse(params)
+        if (!r.success) return null
+        return {
+          type: 'codex_activity_output_delta',
+          turnId: internalTurnId,
+          itemId: r.data.itemId,
+          text: r.data.delta,
+        }
+      }
+      case 'item/fileChange/patchUpdated': {
+        const r = fileChangePatchUpdatedParamsSchema.safeParse(params)
+        if (!r.success) return null
+        const block = codexItemToActivityBlock({
+          type: 'fileChange',
+          id: r.data.itemId,
+          status: 'inProgress',
+          changes: r.data.changes,
+        } as CodexItem)
+        return block ? { type: 'content_block_upsert', turnId: internalTurnId, block } : null
+      }
+      case 'turn/diff/updated': {
+        const r = turnDiffUpdatedParamsSchema.safeParse(params)
+        if (!r.success) return null
+        return {
+          type: 'codex_turn_diff_updated',
+          turnId: internalTurnId,
+          diff: r.data.diff,
+        }
+      }
       case 'item/started': {
         const r = itemStartedParamsSchema.safeParse(params)
         if (!r.success) return null
@@ -867,6 +896,9 @@ export class CodexAdapter implements AgentBackend {
   }
 
   private translateItemStarted(item: CodexItem, turnId: string): TurnEvent | null {
+    const block = codexItemToContentBlock(item)
+    if (block) return { type: 'content_block_upsert', turnId, block }
+
     const itemId = ensureItemId(item.id, randomUUID())
     const toolInfo = codexItemToToolCallInfo(item)
     if (toolInfo) {
@@ -881,25 +913,23 @@ export class CodexAdapter implements AgentBackend {
   }
 
   private translateItemCompleted(item: CodexItem, turnId: string): TurnEvent | null {
+    const block = codexItemToContentBlock(item)
+    if (block) return { type: 'content_block_upsert', turnId, block }
+
     const itemId = ensureItemId(item.id, randomUUID())
-    // codexItemSchema is z.union with passthrough fallback — switch on type does
-    // NOT narrow item. Cast explicitly to the extracted variant (see mapping.ts).
-    if (item.type === 'command_execution') {
-      const cmd = item as CommandExecutionItem
+    const toolInfo = codexItemToToolCallInfo(item)
+    if (toolInfo) {
+      const raw = item as CodexItem & { result?: unknown; error?: string; status?: string }
+      const ok = !raw.error && raw.status !== 'failed'
       return {
         type: 'tool_call_completed',
         turnId,
         itemId,
-        output: codexCommandToOutput(cmd),
-      }
-    }
-    if (item.type === 'file_change') {
-      const fc = item as FileChangeItem
-      return {
-        type: 'tool_call_completed',
-        turnId,
-        itemId,
-        output: codexFileChangeToOutput(fc),
+        output: {
+          ok,
+          summary: raw.error ?? raw.status ?? (ok ? 'completed' : 'failed'),
+          ...(raw.result !== undefined ? { output: JSON.stringify(raw.result, null, 2) } : {}),
+        },
       }
     }
     return null

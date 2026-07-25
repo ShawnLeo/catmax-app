@@ -33,7 +33,7 @@
 
       <!-- done：静态文案 + 耗时（如有）+ 折叠箭头 -->
       <template v-else>
-        <span>已思考</span>
+        <span>{{ completedLabel ?? '已思考' }}</span>
         <span v-if="durationLabel" class="text-muted-foreground/70 tabular-nums">{{
           durationLabel
         }}</span>
@@ -68,6 +68,8 @@ const props = defineProps<{
   streaming: boolean
   /** 思考耗时（秒）。null = 拿不到（历史消息反推无时间戳）→ 不显示 */
   durationSec?: number | null
+  /** 完成态标题；Codex 历史使用“已处理”。 */
+  completedLabel?: string | undefined
 }>()
 
 /** 折叠态——默认始终折叠（用户主动点开才看） */
@@ -77,7 +79,7 @@ const open = ref(false)
  * 耗时展示文案：
  *   - < 1s   → "<1s"（思考极快时避免显示 0s 这种尴尬值）
  *   - < 60s  → "Ns"
- *   - ≥ 60s  → "N分Ss"
+ *   - ≥ 60s  → "Nm Ns"
  * 拿不到 durationSec 时不显示（返回空串）。
  */
 const durationLabel = computed(() => {
@@ -87,7 +89,7 @@ const durationLabel = computed(() => {
   if (sec < 60) return `${Math.round(sec)}s`
   const m = Math.floor(sec / 60)
   const s = Math.round(sec % 60)
-  return `${m}分${s}s`
+  return `${m}m ${s}s`
 })
 </script>
 

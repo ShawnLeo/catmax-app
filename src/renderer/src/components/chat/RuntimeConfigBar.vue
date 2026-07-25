@@ -23,7 +23,7 @@
 
     <div class="flex-1" />
 
-<!-- 底部终端面板切换按钮（在右栏切换按钮前） -->
+    <!-- 底部终端面板切换按钮（在右栏切换按钮前） -->
     <button
       :class="[
         'p-1.5 rounded-md hover:bg-muted transition-colors',

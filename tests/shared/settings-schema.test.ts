@@ -72,8 +72,26 @@ describe('settings-schema', () => {
     expect(result.defaultEditor).toBe('vscode') // default
   })
 
-  test('无效 backend 抛错', () => {
-    expect(() => appSettingsSchema.parse({ defaultBackend: 'invalid' })).toThrow()
+  test('非法 backend id 抛错，合法插件 id 可用', () => {
+    expect(() => appSettingsSchema.parse({ defaultBackend: '../invalid' })).toThrow()
+    expect(appSettingsSchema.parse({ defaultBackend: 'acme.demo' }).defaultBackend).toBe(
+      'acme.demo',
+    )
+  })
+
+  test('保留插件 backend 的路径与默认运行配置', () => {
+    const result = appSettingsSchema.parse({
+      defaultBackend: 'acme.demo',
+      backendPaths: { codex: null, claude: null, 'acme.demo': '/bin/demo' },
+      defaultRuntimeConfig: {
+        codex: {},
+        claude: {},
+        'acme.demo': { model: 'demo-1', effort: 'low' },
+      },
+    })
+    expect(result.backendPaths['acme.demo']).toBe('/bin/demo')
+    expect(result.defaultRuntimeConfig['acme.demo']?.model).toBe('demo-1')
+    expect(result.defaultRuntimeConfig['acme.demo']?.permissionMode).toBeNull()
   })
 
   test('无效 theme mode 抛错', () => {

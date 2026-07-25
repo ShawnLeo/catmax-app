@@ -29,6 +29,7 @@ import {
   type SDKMessage,
   type SDKUserMessage,
 } from '@anthropic-ai/claude-agent-sdk'
+import { CLAUDE_CAPABILITIES } from '@shared/backend/builtin-capabilities'
 import {
   BackendError,
   type AgentAnswer,
@@ -130,26 +131,7 @@ export interface ClaudeAdapterOptions {
 export class ClaudeAdapter implements AgentBackend {
   readonly id = 'claude' as const
 
-  readonly capabilities: BackendCapabilities = {
-    supportsInterrupt: true,
-    supportsApproval: true,
-    supportsSteer: false,
-    supportsThreadFork: false,
-    supportsModelSelection: true,
-    supportsEffort: true,
-    supportsPermissionMode: true,
-    supportedPermissionModes: [
-      'default',
-      'acceptEdits',
-      'auto',
-      'plan',
-      'dontAsk',
-      'bypassPermissions',
-    ],
-    supportedEfforts: ['low', 'medium', 'high', 'xhigh', 'max'],
-    // SDK streaming-input 模式下 Query 暴露 setModel/setPermissionMode/applyFlagSettings
-    supportsHotSwap: true,
-  }
+  readonly capabilities = CLAUDE_CAPABILITIES
 
   private opts: ClaudeAdapterOptions
   /** turnId → TurnContext（支持多 turn 并发） */

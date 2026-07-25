@@ -1,6 +1,6 @@
 # 主聊天区会话展示重构方案：Content Block 架构
 
-- **状态**：Draft（待用户 review）
+- **状态**：Implemented（兼容迁移期）
 - **日期**：2026-07-25
 - **范围**：主聊天区会话消息的渲染架构、共享契约、backend 适配层
 - **目标 backend**：claude、codex（已完成），pi agent、grok build（规划中）
@@ -23,11 +23,11 @@
 
 虽然渲染层没崩，但**契约设计本身是 Claude-centric 的**，对未来扩展会越来越别扭。三类隐式耦合：
 
-| # | 问题 | 证据 |
-|---|---|---|
-| 1 | 归一化类型是"大杂烩"：claude 的 `task` / `control` / `web` / `taskStats` 概念被硬塞进共享契约 | `ToolCallInfo.edit/control/web/task` 全 optional，但实际只有 claude mapping 填 |
-| 2 | 没有"能力声明"机制：UI 不知道某 backend 是否支持子 agent / compact / plan mode | `session/handlers.ts:411` `if backend !== 'claude' return []` 是隐式判断 |
-| 3 | 没有"插件式 UI 扩展点"：新 backend 的独特展示需求无干净注入点 | 只能继续往 `ToolCallCard.vue` switch 里塞分支 |
+| #   | 问题                                                                                          | 证据                                                                           |
+| --- | --------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------ |
+| 1   | 归一化类型是"大杂烩"：claude 的 `task` / `control` / `web` / `taskStats` 概念被硬塞进共享契约 | `ToolCallInfo.edit/control/web/task` 全 optional，但实际只有 claude mapping 填 |
+| 2   | 没有"能力声明"机制：UI 不知道某 backend 是否支持子 agent / compact / plan mode                | `session/handlers.ts:411` `if backend !== 'claude' return []` 是隐式判断       |
+| 3   | 没有"插件式 UI 扩展点"：新 backend 的独特展示需求无干净注入点                                 | 只能继续往 `ToolCallCard.vue` switch 里塞分支                                  |
 
 ### 1.3 为什么现在能"统一"
 
@@ -37,12 +37,12 @@
 
 ## 2. 设计目标（已与用户确认）
 
-| 目标 | 说明 |
-|---|---|
-| **G1 扩展性** | 新 backend 接入零侵入共享契约，只做"声明 + 注册" |
-| **G2 清理 Claude 污染** | 把 claude-only 概念从共享契约抽离，共享层回归最小公共集 |
-| **G3 差异化展示** | 不同 backend 在主聊天区可以有独特区块（不只是换图标） |
-| **G4 补齐 codex** | 让 codex 能声明自己的增强 block，补齐相对 claude 缺失的展示特性 |
+| 目标                    | 说明                                                            |
+| ----------------------- | --------------------------------------------------------------- |
+| **G1 扩展性**           | 新 backend 接入零侵入共享契约，只做"声明 + 注册"                |
+| **G2 清理 Claude 污染** | 把 claude-only 概念从共享契约抽离，共享层回归最小公共集         |
+| **G3 差异化展示**       | 不同 backend 在主聊天区可以有独特区块（不只是换图标）           |
+| **G4 补齐 codex**       | 让 codex 能声明自己的增强 block，补齐相对 claude 缺失的展示特性 |
 
 ### 2.1 关键设计决定（已与用户确认）
 
@@ -97,7 +97,7 @@ Main 进程侧：
 ### 4.1 ContentBlock 联合类型
 
 ```ts
-// src/shared/backend/blocks.ts
+// src/shared/backend/blocks/{base,codex,claude,index}.ts
 
 /** 所有 block 的公共字段 */
 export interface BaseBlock {
@@ -259,8 +259,16 @@ export const CAPABILITIES: Record<BackendId, BackendCapabilities> = {
     planMode: true,
     webTools: true,
     approvalModes: ['default', 'always_allow_session'],
-    blockTypes: ['text', 'reasoning', 'tool_call', 'context',
-                 'task_summary', 'plan_mode', 'web_activity', 'compact_divider'],
+    blockTypes: [
+      'text',
+      'reasoning',
+      'tool_call',
+      'context',
+      'task_summary',
+      'plan_mode',
+      'web_activity',
+      'compact_divider',
+    ],
   },
   codex: {
     subAgents: false,
@@ -268,8 +276,7 @@ export const CAPABILITIES: Record<BackendId, BackendCapabilities> = {
     planMode: false,
     webTools: false,
     approvalModes: ['default'],
-    blockTypes: ['text', 'reasoning', 'tool_call', 'context',
-                 'shell_log', 'apply_patch'],
+    blockTypes: ['text', 'reasoning', 'tool_call', 'context', 'shell_log', 'apply_patch'],
   },
 }
 ```
@@ -331,8 +338,8 @@ export function getBlockRenderer(type: BlockType): Component {
     loadingComponent: BlockLoading,
     // 加载失败时按该 block 注册时的 fallback 策略处理
     errorComponent: reg.fallback === 'hide' ? NullBlock : BlockError,
-    delay: 0,           // 立即显示 loading，避免闪烁
-    timeout: 10000,     // 10s 超时显示 error
+    delay: 0, // 立即显示 loading，避免闪烁
+    timeout: 10000, // 10s 超时显示 error
   })
 }
 
@@ -486,7 +493,13 @@ export function claudeMessageToBlocks(msg: ClaudeSdkMessage): ContentBlock[] {
         blocks.push({ id: genId(), type: 'reasoning', text: block.thinking, createdAt: Date.now() })
         break
       case 'tool_use':
-        blocks.push({ id: genId(), type: 'tool_call', info: toolUseToInfo(block), status: 'running', createdAt: Date.now() })
+        blocks.push({
+          id: genId(),
+          type: 'tool_call',
+          info: toolUseToInfo(block),
+          status: 'running',
+          createdAt: Date.now(),
+        })
         break
       case 'tool_result':
         // 合并到对应的 tool_call block 的 output
@@ -518,7 +531,11 @@ export function claudeMessageToBlocks(msg: ClaudeSdkMessage): ContentBlock[] {
 ```ts
 import { CAPABILITIES } from '@shared/backend/capabilities'
 
-export const readSubagentHistory = async (args: { backend: BackendId; agentId: string; cwd: string }) => {
+export const readSubagentHistory = async (args: {
+  backend: BackendId
+  agentId: string
+  cwd: string
+}) => {
   if (!CAPABILITIES[args.backend].subAgents) return []
   return readSubagentHistoryFromJsonl(args.agentId, args.cwd)
 }
@@ -530,12 +547,12 @@ export const readSubagentHistory = async (args: { backend: BackendId; agentId: s
 
 ## 7. 对四个目标的覆盖验证
 
-| 目标 | 落地方式 | 验收点 |
-|---|---|---|
-| **G1 扩展性** | 新 backend 三步：①声明 block 类型 ②注册 block 组件 ③填 `CAPABILITIES` | 接入 pi agent 时 `NormalizedMessage`/`MessageItem` 零改动 |
-| **G2 清理污染** | `task/control/web/taskStats` 从 `NormalizedMessage` 抽出为独立 block | `NormalizedMessage` 只剩 `id/role/turnId/createdAt/blocks` |
-| **G3 差异化** | 每个 backend 注册独特 block（grok `BuildStepBlock`、pi `ReasoningTreeBlock`） | 主聊天区能渲染出 backend 独有区块，且未注册时优雅 fallback |
-| **G4 补齐 codex** | codex 声明 `ShellLogBlock`（增强 shell 日志）、`ApplyPatchBlock` | codex 会话展示不再只是"claude 子集"，有自己增强展示 |
+| 目标              | 落地方式                                                                      | 验收点                                                     |
+| ----------------- | ----------------------------------------------------------------------------- | ---------------------------------------------------------- |
+| **G1 扩展性**     | 新 backend 三步：①声明 block 类型 ②注册 block 组件 ③填 `CAPABILITIES`         | 接入 pi agent 时 `NormalizedMessage`/`MessageItem` 零改动  |
+| **G2 清理污染**   | `task/control/web/taskStats` 从 `NormalizedMessage` 抽出为独立 block          | `NormalizedMessage` 只剩 `id/role/turnId/createdAt/blocks` |
+| **G3 差异化**     | 每个 backend 注册独特 block（grok `BuildStepBlock`、pi `ReasoningTreeBlock`） | 主聊天区能渲染出 backend 独有区块，且未注册时优雅 fallback |
+| **G4 补齐 codex** | codex 声明 `ShellLogBlock`（增强 shell 日志）、`ApplyPatchBlock`              | codex 会话展示不再只是"claude 子集"，有自己增强展示        |
 
 ---
 
@@ -545,7 +562,7 @@ export const readSubagentHistory = async (args: { backend: BackendId; agentId: s
 
 **目标**：搭好骨架，但不动现有流量。
 
-- [ ] 新建 `src/shared/backend/blocks.ts`，定义 `ContentBlock` 联合 + 基础 block 类型
+- [x] 新建 `src/shared/backend/blocks/`，按 base/codex/claude 定义 block 类型
 - [ ] 新建 `src/shared/backend/capabilities.ts`，定义 `BackendCapabilities` + `CAPABILITIES`
 - [ ] 新建 `src/renderer/.../blocks/registry.ts` + 兜底组件（`FallbackBlock`/`BlockLoading`/`BlockError`）
 - [ ] 在 `main.ts` 加 `registerBaseBlocks()` 调用（但 `MessageItem` 还没用新结构）
@@ -600,13 +617,13 @@ export const readSubagentHistory = async (args: { backend: BackendId; agentId: s
 
 ### 9.1 单元测试（Vitest）
 
-| 测试目标 | 测试文件 | 覆盖点 |
-|---|---|---|
-| `BlockRegistry` | `tests/renderer/blocks/registry.test.ts` | 注册、查询、覆盖告警、未注册 fallback、超时 error |
-| `CAPABILITIES` 一致性 | `tests/shared/capabilities.test.ts` | 每个 backend 的 `blockTypes` 与实际 mapping 输出一致 |
-| `claudeMessageToBlocks` | `tests/main/backend/claude/mapping.test.ts` | 各种 SDK message → 正确 block 类型 |
-| `codexMessageToBlocks` | `tests/main/backend/codex/mapping.test.ts` | codex item → 正确 block，含新的 `shell_log`/`apply_patch` |
-| `messageStore.applyEvent` | `tests/renderer/stores/message.test.ts` | TurnEvent 在 `blocks` 数组上的增量更新 |
+| 测试目标                  | 测试文件                                    | 覆盖点                                                    |
+| ------------------------- | ------------------------------------------- | --------------------------------------------------------- |
+| `BlockRegistry`           | `tests/renderer/blocks/registry.test.ts`    | 注册、查询、覆盖告警、未注册 fallback、超时 error         |
+| `CAPABILITIES` 一致性     | `tests/shared/capabilities.test.ts`         | 每个 backend 的 `blockTypes` 与实际 mapping 输出一致      |
+| `claudeMessageToBlocks`   | `tests/main/backend/claude/mapping.test.ts` | 各种 SDK message → 正确 block 类型                        |
+| `codexMessageToBlocks`    | `tests/main/backend/codex/mapping.test.ts`  | codex item → 正确 block，含新的 `shell_log`/`apply_patch` |
+| `messageStore.applyEvent` | `tests/renderer/stores/message.test.ts`     | TurnEvent 在 `blocks` 数组上的增量更新                    |
 
 ### 9.2 集成/回归测试
 
@@ -630,7 +647,11 @@ export const readSubagentHistory = async (args: { backend: BackendId; agentId: s
 
 ```
 src/shared/backend/
-  blocks.ts                ← 新：ContentBlock 联合 + 基础/扩展 block 类型
+  blocks/
+    index.ts               ← ContentBlockMap 与统一导出
+    base.ts                ← 通用 block
+    codex.ts               ← Codex 专属 block
+    claude.ts              ← Claude 专属 block 入口
   capabilities.ts          ← 新：BackendCapabilities + CAPABILITIES
   types.ts                 ← 瘦身：NormalizedMessage / TurnEvent（删 claude-only 字段）
 src/renderer/src/components/chat/
@@ -666,13 +687,13 @@ src/renderer/src/
 
 ## 11. 风险与权衡
 
-| 风险 | 缓解 |
-|---|---|
-| **动态加载首屏闪烁** | `delay: 0` 立即显示 loading；基础 block 可考虑同步加载（不走 async） |
-| **Phase 4 破坏性切换** | 一次性大改，靠 TypeScript 编译错误逐一兜底；切换前确保 Phase 2/3 双轨期充分验证 |
-| **注册顺序依赖** | bootstrap 时同步调用注册，避免运行时查询时未注册 |
-| **module augmentation 扩展 ContentBlock** | 第三方/未来 backend 若要扩展联合类型，需在 shared 层声明——这是有意约束，保证契约可见 |
-| **过度设计风险** | `ShellLogBlock`/`ApplyPatchBlock` 是为补齐 codex 而设计，若实际收益不大可在 Phase 3 评估后裁剪 |
+| 风险                                      | 缓解                                                                                           |
+| ----------------------------------------- | ---------------------------------------------------------------------------------------------- |
+| **动态加载首屏闪烁**                      | `delay: 0` 立即显示 loading；基础 block 可考虑同步加载（不走 async）                           |
+| **Phase 4 破坏性切换**                    | 一次性大改，靠 TypeScript 编译错误逐一兜底；切换前确保 Phase 2/3 双轨期充分验证                |
+| **注册顺序依赖**                          | bootstrap 时同步调用注册，避免运行时查询时未注册                                               |
+| **module augmentation 扩展 ContentBlock** | 第三方/未来 backend 若要扩展联合类型，需在 shared 层声明——这是有意约束，保证契约可见           |
+| **过度设计风险**                          | `ShellLogBlock`/`ApplyPatchBlock` 是为补齐 codex 而设计，若实际收益不大可在 Phase 3 评估后裁剪 |
 
 ---
 
@@ -707,3 +728,42 @@ src/renderer/src/
 - 分 5 阶段迁移，每阶段可独立 ship，风险可控
 
 最终 `MessageItem.vue` 从 ~290 行收敛到 ~20 行，且对未来 pi agent / grok build 等新 backend 完全开放。
+
+---
+
+## 15. 实施复核（2026-07-25）
+
+实现阶段对原设计做了三项修正：
+
+1. `ContentBlock` 改为可 module augmentation 的 `ContentBlockMap`，否则“零侵入扩展”
+   与封闭联合类型互相矛盾。
+2. shell、文件修改继续使用稳定的 `tool_call` block，不复制为 `shell_log` /
+   `apply_patch`。命令输出和 diff 已由 `ToolCallInfo` 结构化表达，复制会让实时流和
+   历史回放产生两套状态机。
+3. 采用兼容读、增量写：新实时消息写 `blocks`；旧历史通过 `messageBlocks()` 纯函数
+   即时升级。旧字段暂时保留给尚未迁移的外围组件，避免一次性数据迁移。
+
+已落地：
+
+- `blocks/`：按 base/codex/claude 分层的契约与扩展 map。
+- renderer 注册表：异步加载、组件缓存、错误/未知 block 兜底。
+- `MessageItem.vue`：按顺序化 block 渲染。
+- `BackendCapabilities.chat`：sub-agent、compact、plan、web 与 block 类型声明。
+- Codex：camelCase item 兼容、reasoning delta、plan、webSearch、imageView、
+  dynamicToolCall、collabToolCall、contextCompaction。
+
+本机 `~/.codex/sessions` 扫描了 123 个 rollout（约 41 MB）。除文本/推理/命令外，
+实际还出现 MCP、custom tool、tool search、web search、patch、compaction、
+turn aborted 与 rollback。官方 app-server 文档还声明 `plan`、`dynamicToolCall`、
+`collabToolCall`、`imageView`、review mode 等类型。后续优先级：
+
+1. 为 `collabToolCall` 做独立 sub-agent 时间线与子会话入口。
+2. 为 review mode、turn plan progress、hook run 做独立 block。
+3. 为图片输入/输出做缩略图与 lightbox，而不是文本工具卡。
+4. 把外围组件迁移完后删除 `textBlocks/toolBlocks/contextBlocks` 兼容字段。
+
+Backend 插件的 manifest、main/renderer 双注册入口与示例见
+[`docs/backend-plugins.md`](../../backend-plugins.md)。
+
+Codex 工作过程折叠、活动聚合与实时 diff 规则见
+[`docs/codex-chat-blocks.md`](../../codex-chat-blocks.md)。

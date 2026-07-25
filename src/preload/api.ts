@@ -44,6 +44,7 @@ export const api = {
     windowIsMaximized: requestMain<SystemHandlers, 'system.windowIsMaximized'>(
       IPC.SYSTEM_WINDOW_IS_MAXIMIZED,
     ),
+    saveImage: requestMain<SystemHandlers, 'system.saveImage'>(IPC.SYSTEM_SAVE_IMAGE),
   },
   backend: {
     list: requestMain<BackendHandlers, 'backend.list'>(IPC.BACKEND_LIST),

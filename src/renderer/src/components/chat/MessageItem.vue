@@ -43,28 +43,23 @@
           附件 chip 区（IDE selection / opened file）：多个 chip 聚成一组，
           flex-wrap 同行排列，溢出自动折行。整组在上方，跟下方 prompt 文本分块。
         -->
-        <div
-          v-if="(message.contextBlocks?.length ?? 0) > 0"
-          class="flex flex-wrap items-center gap-x-3 gap-y-1"
-        >
-          <template v-for="(block, i) in message.contextBlocks ?? []" :key="`ctx-${i}`">
-            <component
-              :is="resolveContextComponent(block.tag)"
-              v-if="resolveContextComponent(block.tag)"
-              :data="block.data"
-            />
-          </template>
+        <div v-if="contextBlocks.length > 0" class="flex flex-wrap items-center gap-x-3 gap-y-1">
+          <component
+            :is="getBlockRenderer(block.type)"
+            v-for="block in contextBlocks"
+            :key="block.id"
+            :block="block"
+          />
         </div>
 
         <!-- 用户文本（whitespace-pre-wrap 保留换行） -->
-        <template v-for="block in message.textBlocks" :key="block.id">
-          <div
-            v-if="block.text.trim()"
-            class="leading-relaxed text-[15px] text-foreground whitespace-pre-wrap break-words"
-          >
-            {{ block.text }}
-          </div>
-        </template>
+        <component
+          :is="getBlockRenderer(block.type)"
+          v-for="block in textBlocks"
+          :key="block.id"
+          :block="block"
+          message-role="user"
+        />
 
         <!-- hover 浮出的操作行：时间 + 复制 -->
         <div
@@ -100,74 +95,41 @@
         />
 
         <!-- toolBlocks：贴竖线渲染，不各自带色点 -->
-        <div
-          v-for="(tool, i) in message.toolBlocks ?? []"
-          :key="tool.id"
-          :class="i === 0 ? 'mt-1' : 'mt-2'"
-        >
-          <!-- Read 内联渲染（file_read + title "Read: ..."） -->
-          <ToolCallInline v-if="isInlineTool(tool)" :tool="tool" />
-          <!-- 其他工具走卡片 -->
-          <ToolCallCard
-            v-else
-            :tool="tool"
-            :cwd="cwd ?? ''"
-            :show-thinking="showThinking ?? true"
-          />
-        </div>
-
-        <!--
-          textBlocks 分两路渲染：
-
-          1. reasoning 块 → ThinkingBlock（可折叠披露，对齐 Claude Code）
-             实时流式时 header 显示 "thinking..." 动画，完成态显示 "已思考 ▾"。
-             showThinking=false 时整个跳过（用户已通过 effort=none 关闭思考）。
-          2. text 块 → 原本内联渲染（保留 text-[15px] 文本样式）
-        -->
-        <ThinkingBlock
-          v-for="block in reasoningBlocks"
+        <component
+          v-for="block in assistantBlocks"
           :key="block.id"
-          :text="block.text"
-          :streaming="isReasoningStreaming(block)"
-          :duration-sec="reasoningDurationSec(block)"
+          :is="getBlockRenderer(block.type)"
+          :block="block"
+          :cwd="cwd"
+          :show-thinking="showThinking"
+          :message-role="message.role"
+          :streaming="block.type === 'reasoning' ? isReasoningStreaming(block) : undefined"
+          :duration-sec="block.type === 'reasoning' ? reasoningDurationSec(block) : undefined"
+          class="mt-2 first:mt-1"
         />
-
-        <!-- text 块：贴竖线渲染，无独立色点 -->
-        <div
-          v-for="(block, i) in textBlocks"
-          :key="block.id"
-          :class="[
-            reasoningBlocks.length > 0 || (message.toolBlocks?.length ?? 0) > 0 || i > 0
-              ? 'mt-2'
-              : '',
-          ]"
-        >
-          <MarkdownView
-            v-if="block.text.trim()"
-            :text="block.text"
-            :class="['leading-relaxed text-[15px]']"
-          />
-        </div>
       </div>
     </div>
   </article>
 </template>
 
 <script setup lang="ts">
-import { contextTagRegistry } from '@renderer/lib/context-tag-registry'
 import { formatMessageTime } from '@renderer/lib/format'
 import { useMessageStore } from '@renderer/stores/message'
+import type {
+  ContextContentBlock,
+  ReasoningContentBlock,
+  TextContentBlock,
+  ToolCallContentBlock,
+} from '@shared/backend/blocks'
+import { messageBlocks } from '@shared/backend/normalize-blocks'
 import type { NormalizedMessage } from '@shared/backend/types'
 import { CheckIcon, CopyIcon } from 'lucide-vue-next'
 import { computed, ref } from 'vue'
 
+import { getBlockRenderer } from './blocks/registry'
 import CompactHistoryEntry from './CompactHistoryEntry.vue'
-import MarkdownView from './MarkdownView.vue'
-import ThinkingBlock from './ThinkingBlock.vue'
-import ToolCallCard from './ToolCallCard.vue'
-import ToolCallInline from './ToolCallInline.vue'
 
-type TextBlock = NonNullable<NormalizedMessage['textBlocks']>[number]
+type TextBlock = ReasoningContentBlock
 
 const messageStore = useMessageStore()
 
@@ -179,10 +141,13 @@ const props = defineProps<{
   cwd?: string
 }>()
 
-/** 按 tag 名从注册表查 component。加新 tag 不用改这里。 */
-function resolveContextComponent(tag: string) {
-  return contextTagRegistry.get(tag)?.component
-}
+const blocks = computed(() => messageBlocks(props.message))
+const contextBlocks = computed(() =>
+  blocks.value.filter((block): block is ContextContentBlock => block.type === 'context'),
+)
+const assistantBlocks = computed(() =>
+  blocks.value.filter((block) => block.type !== 'context' && block.type !== 'compact_divider'),
+)
 
 /**
  * 检测这条消息是否是历史回放的 /compact 条目。
@@ -195,25 +160,23 @@ function resolveContextComponent(tag: string) {
  */
 const isCompactHistoryEntry = computed(() => {
   if (props.message.role !== 'user') return false
-  const first = props.message.textBlocks?.[0]
-  return first?.text === '/compact'
+  const first = blocks.value.find((block) => block.type === 'text')
+  return first?.type === 'text' && first.text === '/compact'
 })
 
 /** /compact 的压缩摘要原文（textBlocks[1]），无摘要时 undefined */
-const compactSummary = computed(() => props.message.textBlocks?.[1]?.text)
+const compactSummary = computed(() => {
+  const texts = blocks.value.filter((block): block is TextContentBlock => block.type === 'text')
+  return texts[1]?.text
+})
 
 /**
  * reasoning 块（kind==='reasoning'）。
  * showThinking=false 时返回空数组（effort=none 已关闭思考，UI 完全不显示）。
  */
-const reasoningBlocks = computed<TextBlock[]>(() => {
-  if (props.showThinking === false) return []
-  return (props.message.textBlocks ?? []).filter((b) => b.kind === 'reasoning' && b.text.trim())
-})
-
 /** text 块（kind==='text'）——普通正文 */
-const textBlocks = computed<TextBlock[]>(() =>
-  (props.message.textBlocks ?? []).filter((b) => b.kind === 'text'),
+const textBlocks = computed<TextContentBlock[]>(() =>
+  blocks.value.filter((block): block is TextContentBlock => block.type === 'text'),
 )
 
 /**
@@ -242,14 +205,15 @@ function isReasoningStreaming(block: TextBlock): boolean {
  * 任一字段缺失（历史消息反推时可能没有）→ 返回 null，UI 不显示时长。
  */
 function reasoningDurationSec(block: TextBlock): number | null {
+  if (block.durationMs !== undefined) return Math.max(0, block.durationMs / 1000)
   if (block.startedAt === undefined || block.endedAt === undefined) return null
   return Math.max(0, (block.endedAt - block.startedAt) / 1000)
 }
 
 /** user 消息是否至少有一个可见内容。 */
 const hasAnyUserContent = computed(() => {
-  if (props.message.contextBlocks && props.message.contextBlocks.length > 0) return true
-  return (props.message.textBlocks ?? []).some((b) => b.text.trim().length > 0)
+  if (contextBlocks.value.length > 0) return true
+  return textBlocks.value.some((b) => b.text.trim().length > 0)
 })
 
 /** user 气泡 hover 时显示的发送时间（最短化格式）。 */
@@ -261,8 +225,8 @@ let copyTimer: ReturnType<typeof setTimeout> | null = null
 
 /** 复制 user 消息正文：拼所有 text 块，用空行分隔多个 block。 */
 function onCopy(): void {
-  const text = (props.message.textBlocks ?? [])
-    .filter((b) => b.kind === 'text' && b.text.trim())
+  const text = textBlocks.value
+    .filter((b) => b.text.trim())
     .map((b) => b.text)
     .join('\n\n')
   if (!text) return
@@ -286,10 +250,6 @@ function onCopy(): void {
  * 当前规则：只有 claude Read 工具（kind=file_read + title "Read: ..."）走内联。
  * Glob / Grep 虽然也是 file_read，但 title 是 "Glob: ..."/"Grep: ..."，仍走卡片。
  */
-function isInlineTool(tool: NonNullable<NormalizedMessage['toolBlocks']>[number]): boolean {
-  return tool.info.kind === 'file_read' && /^Read:/.test(tool.info.title)
-}
-
 /**
  * assistant 起始色点的状态——按 toolBlocks 聚合：
  *   - 无 toolBlocks → 'text'（纯文本回复，灰色稳态）
@@ -298,7 +258,9 @@ function isInlineTool(tool: NonNullable<NormalizedMessage['toolBlocks']>[number]
  *   - 否则全 completed + ok → 'completed'（绿色稳态）
  */
 const assistantStatus = computed<'text' | 'running' | 'completed' | 'failed'>(() => {
-  const tools = props.message.toolBlocks ?? []
+  const tools = blocks.value.filter(
+    (block): block is ToolCallContentBlock => block.type === 'tool_call',
+  )
   if (tools.length === 0) return 'text'
   if (tools.some((t) => t.status === 'running')) return 'running'
   if (

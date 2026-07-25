@@ -28,6 +28,7 @@ import type {
 } from '@shared/backend/claude-schema'
 import { sharedContextTagExtractors } from '@shared/backend/context-tag-handlers'
 import { extractContextTags } from '@shared/backend/context-tags'
+import { upgradeMessageBlocks } from '@shared/backend/normalize-blocks'
 import type { NormalizedMessage, ToolCallInfo } from '@shared/backend/types'
 
 import { toolResultToOutput, toolUseResultToStats, toolUseToInfo } from './mapping'
@@ -289,5 +290,5 @@ export function claudeReplayToMessages(messages: ClaudeStreamMessage[]): Normali
     }
   }
 
-  return result
+  return result.map(upgradeMessageBlocks)
 }

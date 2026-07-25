@@ -1,7 +1,10 @@
+import { Buffer } from 'node:buffer'
+import { writeFileSync } from 'node:fs'
+
 import { parseSystemProxy } from '@main/backend/proxy-env'
 import { ctx } from '@main/context'
 import type { DetectedSystemProxy, OpenDialogArgs, PlatformInfo } from '@shared/ipc/system'
-import { dialog, shell } from 'electron'
+import { dialog, net, shell } from 'electron'
 
 export const getPlatformInfo = async (): Promise<PlatformInfo> => {
   return {
@@ -140,4 +143,82 @@ export const windowIsMaximized = async (): Promise<boolean> => {
   const win = ctx.getMainWindow()
   if (!win) return false
   return process.platform === 'darwin' ? win.isFullScreen() : win.isMaximized()
+}
+
+/**
+ * 保存图片到用户选择的路径。
+ *
+ * Image Preview Overlay 顶部下载按钮入口。支持两种来源：
+ * - data:URL（base64）：直接解码写盘，无网络依赖。
+ * - http(s) URL：走 Electron net 拉取再流式写盘，避免 renderer CORS / blob 大小限制。
+ *
+ * 流程：先弹 showSaveDialog 让用户选路径（默认名用 suggestedName 或从 URL 推断），
+ * 取消返回 null；保存成功返回最终路径。
+ */
+export const saveImage = async (args: {
+  url: string
+  suggestedName?: string
+}): Promise<string | null> => {
+  const win = ctx.getMainWindow()
+  const { url, suggestedName } = args
+
+  // 推断默认文件名：显式建议 > data:URL MIME > URL 路径 > 兜底 image
+  const defaultName = suggestedName || inferImageName(url)
+
+  const result = await dialog.showSaveDialog(win!, {
+    title: '保存图片',
+    defaultPath: defaultName,
+    filters: [
+      { name: '图片', extensions: ['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp'] },
+      { name: '所有文件', extensions: ['*'] },
+    ],
+  })
+  if (result.canceled || !result.filePath) return null
+
+  if (url.startsWith('data:')) {
+    // data:URL：解析 base64 payload 直接写盘（无网络依赖）
+    const parsed = parseDataUrl(url)
+    if (!parsed) throw new Error('无法解析 data:URL')
+    writeFileSync(result.filePath, parsed.data)
+    return result.filePath
+  }
+
+  // http(s) URL：走 Electron net 拉取整个 buffer 再写盘。
+  // 一次性写而不是流式——图片通常不大，省掉临时文件的复杂度。
+  const response = await net.fetch(url)
+  if (!response.ok) {
+    throw new Error(`下载失败：HTTP ${response.status}`)
+  }
+  const buffer = Buffer.from(await response.arrayBuffer())
+  writeFileSync(result.filePath, buffer)
+  return result.filePath
+}
+
+/** 从 data:URL 解析出 MIME 与二进制数据 */
+function parseDataUrl(url: string): { mime: string; data: Buffer } | null {
+  const match = /^data:([^;,]+)?(;base64)?,(.*)$/s.exec(url)
+  if (!match) return null
+  const mime = match[1] ?? 'image/png'
+  const isBase64 = Boolean(match[2])
+  const payload = match[3] ?? ''
+  const data = isBase64 ? Buffer.from(payload, 'base64') : Buffer.from(decodeURIComponent(payload))
+  return { mime, data }
+}
+
+/** 从 url / data:URL 推断图片文件名（带扩展名） */
+function inferImageName(url: string): string {
+  if (url.startsWith('data:')) {
+    const mime = /^data:([^;,]+)/.exec(url)?.[1] ?? 'image/png'
+    const ext = mime.split('/')[1]?.split('+')[0] ?? 'png'
+    return `image.${ext}`
+  }
+  try {
+    const u = new URL(url)
+    const base = u.pathname.split('/').pop()?.split('?')[0] ?? ''
+    // 有扩展名直接用，否则按常见图片兜底
+    if (/\.(png|jpe?g|gif|webp|bmp|svg)$/i.test(base)) return base
+    return `${base || 'image'}.png`
+  } catch {
+    return 'image.png'
+  }
 }

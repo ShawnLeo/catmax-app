@@ -190,6 +190,15 @@ describe('CodexAdapter', () => {
               },
             },
           })
+          pushLine(stdout, {
+            method: 'item/commandExecution/outputDelta',
+            params: {
+              itemId: 'cmd_1',
+              threadId: 'thr_1',
+              turnId: 'codex_turn_1',
+              delta: 'file1\n',
+            },
+          })
           // approval 请求（server-request）
           pushLine(stdout, {
             method: 'item/commandExecution/requestApproval',
@@ -235,6 +244,29 @@ describe('CodexAdapter', () => {
         },
       },
     })
+    pushLine(stdout, {
+      method: 'item/fileChange/patchUpdated',
+      params: {
+        itemId: 'patch_1',
+        threadId: 'thr_1',
+        turnId: 'codex_turn_1',
+        changes: [
+          {
+            path: '/tmp/a.ts',
+            kind: { type: 'update', move_path: null },
+            diff: '@@ -1 +1 @@\n-old\n+new',
+          },
+        ],
+      },
+    })
+    pushLine(stdout, {
+      method: 'turn/diff/updated',
+      params: {
+        threadId: 'thr_1',
+        turnId: 'codex_turn_1',
+        diff: '--- a/a.ts\n+++ b/a.ts\n-old\n+new',
+      },
+    })
     // 推 turn/completed 结束
     pushLine(stdout, {
       method: 'turn/completed',
@@ -244,8 +276,35 @@ describe('CodexAdapter', () => {
     const events = await collectPromise
     expect(
       events.some(
-        (e): e is Extract<TurnEvent, { type: 'tool_call_started' }> =>
-          e.type === 'tool_call_started' && e.tool.kind === 'shell_command',
+        (e): e is Extract<TurnEvent, { type: 'content_block_upsert' }> =>
+          e.type === 'content_block_upsert' &&
+          e.block.type === 'codex_activity' &&
+          e.block.status === 'running',
+      ),
+    ).toBe(true)
+    expect(
+      events.some(
+        (e): e is Extract<TurnEvent, { type: 'codex_activity_output_delta' }> =>
+          e.type === 'codex_activity_output_delta' && e.text === 'file1\n',
+      ),
+    ).toBe(true)
+    expect(
+      events.some(
+        (e): e is Extract<TurnEvent, { type: 'content_block_upsert' }> =>
+          e.type === 'content_block_upsert' &&
+          e.block.type === 'codex_activity' &&
+          e.block.activities.some(
+            (activity) =>
+              activity.kind === 'file_change' &&
+              activity.changes[0]?.stats.additions === 1 &&
+              activity.changes[0]?.stats.deletions === 1,
+          ),
+      ),
+    ).toBe(true)
+    expect(
+      events.some(
+        (e): e is Extract<TurnEvent, { type: 'codex_turn_diff_updated' }> =>
+          e.type === 'codex_turn_diff_updated',
       ),
     ).toBe(true)
     expect(
@@ -256,8 +315,10 @@ describe('CodexAdapter', () => {
     ).toBe(true)
     expect(
       events.some(
-        (e): e is Extract<TurnEvent, { type: 'tool_call_completed' }> =>
-          e.type === 'tool_call_completed' && e.output.ok === true,
+        (e): e is Extract<TurnEvent, { type: 'content_block_upsert' }> =>
+          e.type === 'content_block_upsert' &&
+          e.block.type === 'codex_activity' &&
+          e.block.status === 'completed',
       ),
     ).toBe(true)
     expect(events.some((e) => e.type === 'turn_completed')).toBe(true)

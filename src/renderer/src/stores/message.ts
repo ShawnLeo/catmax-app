@@ -1,5 +1,10 @@
 import { randomUUID } from '@renderer/lib/utils'
 import type {
+  CodexActivity,
+  CodexActivityContentBlock,
+  CodexActivityStatus,
+} from '@shared/backend/blocks'
+import type {
   AgentQuestion,
   ContextBlock,
   NormalizedMessage,
@@ -212,6 +217,15 @@ export const useMessageStore = defineStore('message', () => {
       }
       case 'text_delta': {
         const msg = findOrCreateAssistantMessage(s, event.turnId, event.itemId)
+        if (!msg.blocks) msg.blocks = []
+        const contentBlock = msg.blocks.find(
+          (block) => block.type === 'text' && block.id === `${event.itemId}-text`,
+        )
+        if (contentBlock?.type === 'text') {
+          contentBlock.text += event.text
+        } else {
+          msg.blocks.push({ id: `${event.itemId}-text`, type: 'text', text: event.text })
+        }
         if (!msg.textBlocks) msg.textBlocks = []
         const lastBlock = msg.textBlocks[msg.textBlocks.length - 1]
         if (lastBlock && lastBlock.id === `${event.itemId}-text`) {
@@ -231,6 +245,24 @@ export const useMessageStore = defineStore('message', () => {
       }
       case 'reasoning_delta': {
         const msg = findOrCreateAssistantMessage(s, event.turnId, event.itemId)
+        if (!msg.blocks) msg.blocks = []
+        const now = Date.now()
+        const contentBlock = msg.blocks.find(
+          (block) => block.type === 'reasoning' && block.id === `${event.itemId}-reasoning`,
+        )
+        if (contentBlock?.type === 'reasoning') {
+          contentBlock.text += event.text
+          if (event.completedLabel) contentBlock.completedLabel = event.completedLabel
+        } else {
+          msg.blocks.push({
+            id: `${event.itemId}-reasoning`,
+            type: 'reasoning',
+            text: event.text,
+            startedAt: now,
+            ...(event.completedLabel ? { completedLabel: event.completedLabel } : {}),
+            ...(hasTextStarted(s, event.turnId) ? { endedAt: now } : {}),
+          })
+        }
         if (!msg.textBlocks) msg.textBlocks = []
         // Bug G：reasoning_delta 必须和 text_delta 一样按 itemId 累积到同一个 block，
         // 否则每个 token delta 都被 push 成独立 block（UI 上显示成 46 个 span）。
@@ -252,8 +284,36 @@ export const useMessageStore = defineStore('message', () => {
         }
         break
       }
+      case 'content_block_upsert': {
+        if (event.block.type === 'codex_activity') {
+          upsertCodexActivityBlock(s, event.turnId, event.block)
+          break
+        }
+        const msg = findOrCreateAssistantMessage(s, event.turnId, event.block.id)
+        if (!msg.blocks) msg.blocks = []
+        const index = msg.blocks.findIndex((block) => block.id === event.block.id)
+        if (index === -1) msg.blocks.push(event.block)
+        else msg.blocks[index] = event.block
+        break
+      }
+      case 'codex_activity_output_delta': {
+        appendCodexActivityOutput(s, event.turnId, event.itemId, event.text)
+        break
+      }
+      case 'codex_turn_diff_updated': {
+        updateCodexTurnDiff(s, event.turnId, event.diff)
+        break
+      }
       case 'tool_call_started': {
         const msg = findOrCreateAssistantMessage(s, event.turnId, event.itemId)
+        if (!msg.blocks) msg.blocks = []
+        msg.blocks.push({
+          id: event.itemId,
+          type: 'tool_call',
+          info: event.tool,
+          status: 'running',
+          startedAt: Date.now(),
+        })
         if (!msg.toolBlocks) msg.toolBlocks = []
         msg.toolBlocks.push({
           id: event.itemId,
@@ -271,6 +331,14 @@ export const useMessageStore = defineStore('message', () => {
       }
       case 'tool_call_completed': {
         const msg = findMessageByItemId(s, event.turnId, event.itemId)
+        const contentBlock = msg?.blocks?.find(
+          (block) => block.type === 'tool_call' && block.id === event.itemId,
+        )
+        if (contentBlock?.type === 'tool_call') {
+          contentBlock.status = event.output.ok ? 'completed' : 'failed'
+          contentBlock.output = event.output
+          if (event.taskStats) contentBlock.taskStats = event.taskStats
+        }
         if (msg?.toolBlocks) {
           const block = msg.toolBlocks.find((b) => b.id === event.itemId)
           if (block) {
@@ -361,10 +429,15 @@ export const useMessageStore = defineStore('message', () => {
    */
   function markReasoningEnded(s: SessionState, turnId: string, now: number): void {
     for (const m of s.messages) {
-      if (m.turnId !== turnId || !m.textBlocks) continue
-      for (const b of m.textBlocks) {
-        if (b.kind === 'reasoning' && b.endedAt === undefined) {
-          b.endedAt = now
+      if (m.turnId !== turnId) continue
+      for (const block of m.blocks ?? []) {
+        if (block.type === 'reasoning' && block.endedAt === undefined) {
+          block.endedAt = now
+        }
+      }
+      for (const block of m.textBlocks ?? []) {
+        if (block.kind === 'reasoning' && block.endedAt === undefined) {
+          block.endedAt = now
         }
       }
     }
@@ -393,6 +466,7 @@ export const useMessageStore = defineStore('message', () => {
       id: itemId,
       role: 'assistant',
       turnId,
+      blocks: [],
       createdAt: Date.now(),
     }
     s.messages.push(msg)
@@ -407,6 +481,100 @@ export const useMessageStore = defineStore('message', () => {
     return s.messages.find((m) => m.turnId === turnId && m.id === itemId)
   }
 
+  function upsertCodexActivityBlock(
+    s: SessionState,
+    turnId: string,
+    incoming: CodexActivityContentBlock,
+  ): void {
+    let target: CodexActivityContentBlock | undefined
+    for (const message of s.messages) {
+      if (message.turnId !== turnId) continue
+      target = message.blocks?.find(
+        (block): block is CodexActivityContentBlock =>
+          block.type === 'codex_activity' &&
+          incoming.activities.some((activity) =>
+            block.activities.some((existing) => existing.id === activity.id),
+          ),
+      )
+      if (target) break
+    }
+
+    if (!target) {
+      const lastMessage = s.messages[s.messages.length - 1]
+      const lastBlock = lastMessage?.blocks?.[lastMessage.blocks.length - 1]
+      if (
+        lastMessage?.role === 'assistant' &&
+        lastMessage.turnId === turnId &&
+        lastBlock?.type === 'codex_activity'
+      ) {
+        target = lastBlock
+      } else {
+        const message: NormalizedMessage = {
+          id: `codex-activity-${incoming.id}`,
+          role: 'assistant',
+          turnId,
+          blocks: [incoming],
+          createdAt: Date.now(),
+        }
+        s.messages.push(message)
+        return
+      }
+    }
+
+    for (const activity of incoming.activities) {
+      const index = target.activities.findIndex((existing) => existing.id === activity.id)
+      if (index === -1) {
+        target.activities.push(activity)
+      } else {
+        target.activities[index] = mergeCodexActivity(target.activities[index]!, activity)
+      }
+    }
+    target.status = aggregateCodexActivityStatus(target.activities)
+    target.durationMs = target.activities.reduce(
+      (total, activity) => total + (activity.durationMs ?? 0),
+      0,
+    )
+    if (incoming.defaultCollapsed !== undefined) {
+      target.defaultCollapsed = incoming.defaultCollapsed
+    }
+  }
+
+  function appendCodexActivityOutput(
+    s: SessionState,
+    turnId: string,
+    itemId: string,
+    text: string,
+  ): void {
+    for (const message of s.messages) {
+      if (message.turnId !== turnId) continue
+      for (const block of message.blocks ?? []) {
+        if (block.type !== 'codex_activity') continue
+        for (const activity of block.activities) {
+          if (
+            activity.kind === 'command' &&
+            (activity.id === itemId || activity.id.startsWith(`${itemId}-`))
+          ) {
+            activity.output = (activity.output ?? '') + text
+          }
+        }
+      }
+    }
+  }
+
+  function updateCodexTurnDiff(s: SessionState, turnId: string, diff: string): void {
+    for (let messageIndex = s.messages.length - 1; messageIndex >= 0; messageIndex--) {
+      const message = s.messages[messageIndex]!
+      if (message.turnId !== turnId) continue
+      for (let blockIndex = (message.blocks?.length ?? 0) - 1; blockIndex >= 0; blockIndex--) {
+        const block = message.blocks![blockIndex]!
+        if (block.type !== 'codex_activity') continue
+        block.turnDiff = diff
+        block.turnDiffStats = countDiffStats(diff)
+        return
+      }
+    }
+  }
+
   /** 加一条用户消息到当前 session（在发 turn 之前）。
    *  contextBlocks 可选——如果传入，UI 会把对应 tag 渲染成专门的卡片
    *  （IDE selection / opened file / environment_context 等），跟气泡平级展示。 */
@@ -417,6 +585,14 @@ export const useMessageStore = defineStore('message', () => {
       id: randomUUID(),
       role: 'user',
       turnId,
+      blocks: [
+        ...(contextBlocks ?? []).map((context, index) => ({
+          id: `${turnId}-context-${index}`,
+          type: 'context' as const,
+          ...context,
+        })),
+        { id: randomUUID(), type: 'text', text },
+      ],
       textBlocks: [{ id: randomUUID(), text, kind: 'text' }],
       ...(contextBlocks && contextBlocks.length > 0 ? { contextBlocks } : {}),
       createdAt: Date.now(),
@@ -545,3 +721,24 @@ export const useMessageStore = defineStore('message', () => {
     setError,
   }
 })
+
+function mergeCodexActivity(existing: CodexActivity, incoming: CodexActivity): CodexActivity {
+  if (existing.kind !== incoming.kind) return incoming
+  return { ...existing, ...incoming } as CodexActivity
+}
+
+function aggregateCodexActivityStatus(activities: CodexActivity[]): CodexActivityStatus {
+  if (activities.some((activity) => activity.status === 'running')) return 'running'
+  if (activities.some((activity) => activity.status === 'failed')) return 'failed'
+  return 'completed'
+}
+
+function countDiffStats(diff: string): { additions: number; deletions: number } {
+  let additions = 0
+  let deletions = 0
+  for (const line of diff.split('\n')) {
+    if (line.startsWith('+') && !line.startsWith('+++')) additions++
+    if (line.startsWith('-') && !line.startsWith('---')) deletions++
+  }
+  return { additions, deletions }
+}

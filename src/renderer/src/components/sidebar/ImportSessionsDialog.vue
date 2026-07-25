@@ -166,8 +166,8 @@ const workspaceStore = useWorkspaceStore()
 const backendStore = useBackendStore()
 
 /** 当前后端显示标签——用于副标题/空结果文案。单后端模式下 badge 已无区分意义。 */
-const currentBackendLabel = computed(() =>
-  backendStore.currentId === 'codex' ? 'codex' : 'claude',
+const currentBackendLabel = computed(
+  () => backendStore.current?.displayName ?? backendStore.currentId,
 )
 
 const scanning = ref(false)

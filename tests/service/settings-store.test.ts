@@ -35,7 +35,7 @@ describe('SettingsStore', () => {
   test('load 不符合 schema 时回退到默认值', () => {
     writeFileSync(
       join(tempDir, 'settings.json'),
-      JSON.stringify({ defaultBackend: 'invalid-backend' }),
+      JSON.stringify({ defaultBackend: '../invalid-backend' }),
     )
     const settings = store.load()
     expect(settings.defaultBackend).toBe('codex') // 回退

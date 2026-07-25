@@ -3,10 +3,13 @@
     <RouterView />
 
     <CommandPalette v-model:visible="commandPaletteVisible" />
+    <!-- Image Preview Overlay: 整应用一份，由 image-preview store 驱动显隐 -->
+    <ImagePreviewOverlay />
   </div>
 </template>
 
 <script setup lang="ts">
+import ImagePreviewOverlay from '@renderer/components/chat/ImagePreviewOverlay.vue'
 import CommandPalette from '@renderer/components/command/CommandPalette.vue'
 import { useTheme } from '@renderer/composables/useTheme'
 import { useSettingsStore } from '@renderer/stores/settings'

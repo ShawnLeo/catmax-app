@@ -1,10 +1,14 @@
 import {
   agentMessageDeltaParamsSchema,
   codexItemSchema,
+  codexUserInputSchema,
   commandApprovalParamsSchema,
+  commandExecutionOutputDeltaParamsSchema,
+  fileChangePatchUpdatedParamsSchema,
   jsonRpcMessageSchema,
   turnCompletedParamsSchema,
   turnStartedParamsSchema,
+  turnDiffUpdatedParamsSchema,
 } from '@shared/backend/schema'
 import { describe, expect, test } from 'vitest'
 
@@ -45,6 +49,41 @@ describe('codex JSON-RPC schema', () => {
     expect(agentMessageDeltaParamsSchema.safeParse(params).success).toBe(true)
   })
 
+  test('agentMessage item 保留 commentary/final_answer phase', () => {
+    const result = codexItemSchema.safeParse({
+      type: 'agentMessage',
+      id: 'item_1',
+      text: 'working',
+      phase: 'commentary',
+    })
+    expect(result.success).toBe(true)
+    if (result.success && 'phase' in result.data) expect(result.data.phase).toBe('commentary')
+  })
+
+  test('Codex UserInput 支持当前五种官方输入和旧 input_* 形态', () => {
+    const inputs = [
+      { type: 'text', text: 'hello', text_elements: [] },
+      { type: 'image', url: 'https://example.com/image.png', detail: 'high' },
+      { type: 'localImage', path: '/tmp/image.png' },
+      { type: 'skill', name: 'openai-docs', path: '/tmp/SKILL.md' },
+      { type: 'mention', name: 'README.md', path: '/repo/README.md' },
+      { type: 'input_text', text: 'legacy' },
+      { type: 'input_image', image_url: 'data:image/png;base64,AAAA' },
+    ]
+    expect(inputs.every((input) => codexUserInputSchema.safeParse(input).success)).toBe(true)
+
+    const message = codexItemSchema.safeParse({
+      type: 'userMessage',
+      id: 'user-1',
+      clientId: 'client-1',
+      content: inputs,
+    })
+    expect(message.success).toBe(true)
+    if (message.success && 'content' in message.data) {
+      expect(message.data.content).toHaveLength(inputs.length)
+    }
+  })
+
   test('commandExecution item 解析', () => {
     const item = {
       type: 'command_execution',
@@ -64,6 +103,38 @@ describe('codex JSON-RPC schema', () => {
       status: 'in_progress',
     }
     expect(codexItemSchema.safeParse(item).success).toBe(true)
+  })
+
+  test('当前 app-server camelCase item 与实时 patch/diff 事件可解析', () => {
+    expect(
+      codexItemSchema.safeParse({
+        type: 'commandExecution',
+        id: 'cmd_1',
+        command: 'rg foo src',
+        cwd: '/tmp',
+        status: 'inProgress',
+        commandActions: [{ type: 'search', command: 'rg foo src', query: 'foo', path: 'src' }],
+      }).success,
+    ).toBe(true)
+    expect(
+      commandExecutionOutputDeltaParamsSchema.safeParse({
+        itemId: 'cmd_1',
+        delta: 'one line',
+      }).success,
+    ).toBe(true)
+    expect(
+      fileChangePatchUpdatedParamsSchema.safeParse({
+        itemId: 'patch_1',
+        changes: [
+          {
+            path: '/tmp/a.ts',
+            kind: { type: 'update', move_path: null },
+            diff: '@@ -1 +1 @@\n-old\n+new',
+          },
+        ],
+      }).success,
+    ).toBe(true)
+    expect(turnDiffUpdatedParamsSchema.safeParse({ diff: '+new\n-old' }).success).toBe(true)
   })
 
   test('未知 item 类型用 passthrough 接住（不阻塞流）', () => {

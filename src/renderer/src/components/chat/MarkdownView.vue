@@ -112,6 +112,19 @@ function onClick(e: MouseEvent): void {
     return
   }
 
+  // External Link: 网络链接（http(s)/mailto）不留在 App 内导航——
+  // 主进程只拦了 target="_blank" 的弹窗（setWindowOpenHandler），
+  // 同标签页的 <a href="https://..."> 会把整个窗口导航走，必须这里拦下，
+  // 唤起系统默认浏览器。其余协议（# 锚点、本地相对路径等）交给默认行为。
+  const externalAnchor = target.closest('a') as HTMLAnchorElement | null
+  const href = externalAnchor?.getAttribute('href') ?? ''
+  if (/^(https?:|mailto:)/i.test(href)) {
+    e.preventDefault()
+    e.stopPropagation()
+    void window.api.system.openExternal({ url: href })
+    return
+  }
+
   const fileTarget = target.closest('[data-file-reference]') as HTMLElement | null
   const reference = fileTarget?.dataset.fileReference
   const workspaceId = workspaceStore.currentWorkspace?.id
@@ -295,15 +308,17 @@ function markFileReference(element: HTMLElement, reference: string): void {
 .markdown-body :deep(:not(pre) > code) {
   @apply font-mono text-[13px] bg-muted px-1 py-0.5 rounded;
 }
+/* File Reference: 中性灰底胶囊，等宽字体，视觉与 inline code 同源；
+ * 点击在文件面板预览。不使用 primary 色调——保持路径像一段普通代码，
+ * 只靠 hover 的轻微背景抬升暗示可点（参考附件设计稿）。 */
 .markdown-body :deep(.file-reference) {
-  @apply cursor-pointer text-primary font-medium rounded-sm no-underline transition-colors;
-  padding: 0.05rem 0.2rem;
-  background-color: color-mix(in oklch, var(--color-primary) 10%, transparent);
-  box-shadow: inset 0 0 0 1px color-mix(in oklch, var(--color-primary) 22%, transparent);
+  @apply cursor-pointer font-mono no-underline transition-colors rounded;
+  padding: 0.05rem 0.3rem;
+  color: inherit;
+  background-color: var(--color-muted);
 }
 .markdown-body :deep(.file-reference:hover) {
-  background-color: color-mix(in oklch, var(--color-primary) 18%, transparent);
-  box-shadow: inset 0 0 0 1px color-mix(in oklch, var(--color-primary) 38%, transparent);
+  background-color: color-mix(in oklch, var(--color-muted), var(--color-foreground) 8%);
 }
 
 /* ============ 引用 / 分隔线 / 链接 / 图片 / 删除线 ============ */
@@ -355,19 +370,9 @@ function markFileReference(element: HTMLElement, reference: string): void {
   border-bottom-color: oklch(1 0 0 / 0.08);
 }
 
-/* Chat File Reference Contrast: 暗色背景需要更高的色块占比才能保持文件链接醒目。 */
-[data-theme='dark'] .markdown-body .file-reference {
-  color: color-mix(in oklch, var(--color-foreground) 88%, var(--color-primary) 12%) !important;
-  background-color: color-mix(in oklch, var(--color-primary) 18%, transparent);
-  box-shadow: inset 0 0 0 1px color-mix(in oklch, var(--color-primary) 34%, transparent);
-}
-
+/* Chat File Reference Contrast: 新的中性 muted 底已对齐主题，
+ * 仅在 hover 时给一点更亮的抬升（暗色下叠 8% 前景更明显）。 */
 [data-theme='dark'] .markdown-body .file-reference:hover {
-  background-color: color-mix(in oklch, var(--color-primary) 28%, transparent);
-  box-shadow: inset 0 0 0 1px color-mix(in oklch, var(--color-primary) 52%, transparent);
-}
-
-[data-theme='light'] .markdown-body .file-reference {
-  color: color-mix(in oklch, var(--color-primary) 76%, var(--color-foreground) 24%) !important;
+  background-color: color-mix(in oklch, var(--color-muted), var(--color-foreground) 12%);
 }
 </style>

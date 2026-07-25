@@ -107,6 +107,11 @@ export const agentMessageDeltaParamsSchema = z.object({
   delta: z.string(),
 })
 
+export const reasoningDeltaParamsSchema = z.object({
+  itemId: z.string(),
+  delta: z.string(),
+})
+
 /** item/started / item/completed 的 item 联合类型（覆盖 Plan 2 用到的几种） */
 const commandExecutionItemSchema = z.object({
   type: z.literal('command_execution'),
@@ -114,9 +119,10 @@ const commandExecutionItemSchema = z.object({
   command: z.string(),
   cwd: z.string().optional(),
   status: z.string(),
-  aggregatedOutput: z.string().optional(),
-  exitCode: z.number().optional(),
-  durationMs: z.number().optional(),
+  commandActions: z.array(z.unknown()).optional(),
+  aggregatedOutput: z.string().nullish(),
+  exitCode: z.number().nullish(),
+  durationMs: z.number().nullish(),
 })
 
 const fileChangeItemSchema = z.object({
@@ -132,10 +138,23 @@ const fileChangeItemSchema = z.object({
   status: z.string(),
 })
 
+const camelCommandExecutionItemSchema = commandExecutionItemSchema.extend({
+  type: z.literal('commandExecution'),
+})
+
+const camelFileChangeItemSchema = fileChangeItemSchema.extend({
+  type: z.literal('fileChange'),
+})
+
 const agentMessageItemSchema = z.object({
   type: z.literal('agent_message'),
   id: z.string(),
   text: z.string(),
+  phase: z.enum(['commentary', 'final_answer']).nullish(),
+})
+
+const camelAgentMessageItemSchema = agentMessageItemSchema.extend({
+  type: z.literal('agentMessage'),
 })
 
 const reasoningItemSchema = z.object({
@@ -145,10 +164,55 @@ const reasoningItemSchema = z.object({
   content: z.array(z.unknown()).default([]),
 })
 
-const userMessageItemSchema = z.object({
-  type: z.literal('user_message'),
-  id: z.string(),
-  content: z.array(z.unknown()).default([]),
+const textElementSchema = z
+  .object({
+    byteRange: z.object({ start: z.number(), end: z.number() }),
+    placeholder: z.string().nullable(),
+  })
+  .passthrough()
+
+/** 当前 App Server UserInput；input_* 两项兼容本地 rollout/旧桥接层。 */
+export const codexUserInputSchema = z.union([
+  z
+    .object({
+      type: z.literal('text'),
+      text: z.string(),
+      text_elements: z.array(textElementSchema).optional(),
+    })
+    .passthrough(),
+  z
+    .object({ type: z.literal('image'), url: z.string(), detail: z.string().optional() })
+    .passthrough(),
+  z
+    .object({ type: z.literal('localImage'), path: z.string(), detail: z.string().optional() })
+    .passthrough(),
+  z.object({ type: z.literal('skill'), name: z.string(), path: z.string() }).passthrough(),
+  z.object({ type: z.literal('mention'), name: z.string(), path: z.string() }).passthrough(),
+  z.object({ type: z.literal('input_text'), text: z.string() }).passthrough(),
+  z
+    .object({
+      type: z.literal('input_image'),
+      image_url: z.string(),
+      detail: z.string().optional(),
+    })
+    .passthrough(),
+])
+
+const userMessageContentSchema = z.union([
+  z.string(),
+  z.array(z.union([codexUserInputSchema, z.unknown()])),
+])
+
+const userMessageItemSchema = z
+  .object({
+    type: z.literal('user_message'),
+    id: z.string(),
+    content: userMessageContentSchema.default([]),
+  })
+  .passthrough()
+
+const camelUserMessageItemSchema = userMessageItemSchema.extend({
+  type: z.literal('userMessage'),
 })
 
 const mcpToolCallItemSchema = z.object({
@@ -162,14 +226,23 @@ const mcpToolCallItemSchema = z.object({
   error: z.string().optional(),
 })
 
+const camelMcpToolCallItemSchema = mcpToolCallItemSchema.extend({
+  type: z.literal('mcpToolCall'),
+})
+
 /** codex item 联合（新增类型时在这里加） */
 export const codexItemSchema = z.union([
   commandExecutionItemSchema,
+  camelCommandExecutionItemSchema,
   fileChangeItemSchema,
+  camelFileChangeItemSchema,
   agentMessageItemSchema,
+  camelAgentMessageItemSchema,
   reasoningItemSchema,
   userMessageItemSchema,
+  camelUserMessageItemSchema,
   mcpToolCallItemSchema,
+  camelMcpToolCallItemSchema,
   // 未知 item 类型用 passthrough 接住（不阻塞流）
   z.object({ type: z.string(), id: z.string() }).passthrough(),
 ])
@@ -184,6 +257,32 @@ export const itemCompletedParamsSchema = z.object({
   threadId: z.string().optional(),
   itemId: z.string().optional(),
   item: codexItemSchema,
+})
+
+export const commandExecutionOutputDeltaParamsSchema = z.object({
+  threadId: z.string().optional(),
+  turnId: z.string().optional(),
+  itemId: z.string(),
+  delta: z.string(),
+})
+
+export const fileChangePatchUpdatedParamsSchema = z.object({
+  threadId: z.string().optional(),
+  turnId: z.string().optional(),
+  itemId: z.string(),
+  changes: z.array(
+    z.object({
+      path: z.string(),
+      kind: z.unknown(),
+      diff: z.string().optional(),
+    }),
+  ),
+})
+
+export const turnDiffUpdatedParamsSchema = z.object({
+  threadId: z.string().optional(),
+  turnId: z.string().optional(),
+  diff: z.string(),
 })
 
 // ============ model/list ============

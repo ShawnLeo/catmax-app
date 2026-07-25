@@ -29,14 +29,18 @@ import {
 import type { BackendId } from '@shared/constants'
 import type { AppSettings } from '@shared/settings-schema'
 
-import { ClaudeAdapter } from './claude/adapter'
-import { CodexAdapter } from './codex/adapter'
-import { proxySettingsToEnv } from './proxy-env'
+import { registerMainBackendPlugins } from './plugin-loader'
+import {
+  getBackendPlugins,
+  type BackendPluginContext,
+  type MainBackendPlugin,
+} from './plugin-registry'
 
 const log = logger.domain('backend-manager')
 
 export class BackendManager {
   private adapters = new Map<BackendId, AgentBackend>()
+  private plugins = new Map<BackendId, MainBackendPlugin>()
   private currentBackendId: BackendId = 'codex'
   /**
    * claude 内部 sessionId（startSession 生成的占位 UUID）→ claude 真实 session_id 的映射。
@@ -45,27 +49,41 @@ export class BackendManager {
    */
   private claudeSessionIdMap = new Map<string, string>()
 
-  constructor() {
-    this.adapters.set('codex', new CodexAdapter())
-    this.adapters.set(
-      'claude',
-      new ClaudeAdapter({
-        // 拿到 claude 真实 session_id 时把 db 里 session.backend_thread_id 从占位 UUID
-        // 更新成真实 id。这样重启应用后用户点历史会话时，getHistory 调 claude --resume
-        // 才能真的找到会话。
-        onRealSessionId: (internalId, realSessionId) => {
-          // 记映射——refreshClaudeSessionTitle 用得到
-          this.claudeSessionIdMap.set(internalId, realSessionId)
-          if (internalId === realSessionId) return // 没变化（续接已有会话时）
-          try {
-            ctx.db.updateSessionBackendThreadId('claude', internalId, realSessionId)
-            log.info('persisted claude real session_id', internalId, '→', realSessionId)
-          } catch (e) {
-            log.warn('failed to persist claude real session_id:', e)
-          }
-        },
-      }),
-    )
+  constructor(plugins?: MainBackendPlugin[]) {
+    registerMainBackendPlugins()
+    const context: BackendPluginContext = {
+      onBackendThreadIdResolved: (backendId, internalId, realId) => {
+        if (backendId === 'claude') this.claudeSessionIdMap.set(internalId, realId)
+        if (internalId === realId) return
+        try {
+          ctx.db.updateSessionBackendThreadId(backendId, internalId, realId)
+          log.info('persisted backend real session id', backendId, internalId, '→', realId)
+        } catch (error) {
+          log.warn('failed to persist backend real session id:', error)
+        }
+      },
+    }
+    for (const plugin of plugins ?? getBackendPlugins()) {
+      const adapter = plugin.createAdapter(context)
+      if (adapter.id !== plugin.manifest.id) {
+        throw new Error(
+          `backend plugin "${plugin.manifest.id}" created adapter with id "${adapter.id}"`,
+        )
+      }
+      const undeclaredBlocks = adapter.capabilities.chat.blockTypes.filter(
+        (type) => !plugin.manifest.blockTypes.includes(type),
+      )
+      if (undeclaredBlocks.length > 0) {
+        throw new Error(
+          `backend plugin "${plugin.manifest.id}" adapter emits undeclared blocks: ${undeclaredBlocks.join(', ')}`,
+        )
+      }
+      this.plugins.set(plugin.manifest.id, plugin)
+      this.adapters.set(plugin.manifest.id, adapter)
+    }
+    if (!this.adapters.has(this.currentBackendId)) {
+      this.currentBackendId = this.adapters.keys().next().value ?? 'codex'
+    }
   }
 
   /**
@@ -79,36 +97,9 @@ export class BackendManager {
    * 这里不应该覆盖（但 settings 是启动时加载的，所以正常顺序下不会有冲突）。
    */
   applySettings(settings: AppSettings): void {
-    // 注入 binaryPath —— 路径变了的话同时清模型缓存，因为新 binary 可能是不同版本，
-    // 支持的模型列表可能不一样（比如 codex 升级后多了 gpt-5.3-codex）。
-    const codexAdapter = this.adapters.get('codex')
-    if (codexAdapter instanceof CodexAdapter && settings.backendPaths.codex) {
-      const pathChanged = codexAdapter.getBinaryPath() !== settings.backendPaths.codex
-      codexAdapter.setBinaryPath(settings.backendPaths.codex)
-      if (pathChanged) codexAdapter.invalidateModelsCache()
-    }
-    const claudeAdapter = this.adapters.get('claude')
-    if (claudeAdapter instanceof ClaudeAdapter && settings.backendPaths.claude) {
-      claudeAdapter.setBinaryPath(settings.backendPaths.claude)
-    }
-
-    // 把代理设置转成 env 注入到所有 adapter —— codex/claude CLI 调 LLM API 时
-    // 都靠 HTTPS_PROXY 环境变量走代理（macOS 系统代理不会自动传给子进程）。
-    const proxyEnv = proxySettingsToEnv(settings.httpProxy)
-    if (Object.keys(proxyEnv).length > 0) {
-      for (const adapter of this.adapters.values()) {
-        if (adapter instanceof CodexAdapter || adapter instanceof ClaudeAdapter) {
-          adapter.setExtraEnv(proxyEnv)
-        }
-      }
-      log.info('applied proxy env to adapters:', Object.keys(proxyEnv))
-    } else {
-      // 用户关了代理——清掉之前注入的 env
-      for (const adapter of this.adapters.values()) {
-        if (adapter instanceof CodexAdapter || adapter instanceof ClaudeAdapter) {
-          adapter.setExtraEnv({})
-        }
-      }
+    for (const [id, plugin] of this.plugins) {
+      const adapter = this.adapters.get(id)
+      if (adapter) plugin.applySettings?.(adapter, settings)
     }
 
     // 应用 defaultBackend（仅当当前还是初始默认值时——避免覆盖运行时的 switchBackend）
@@ -165,9 +156,13 @@ export class BackendManager {
     return Promise.all(
       Array.from(this.adapters.keys()).map(async (id) => {
         const adapter = this.adapters.get(id)!
+        const manifest = this.plugins.get(id)?.manifest
         const health = await adapter.healthCheck()
         return {
           id,
+          ...(manifest
+            ? { displayName: manifest.displayName, pluginVersion: manifest.version }
+            : {}),
           available: health.ok,
           version: health.version ?? null,
           error: health.error ?? null,
@@ -197,12 +192,21 @@ export class BackendManager {
           supportedPermissionModes: [],
           supportedEfforts: [],
           supportsHotSwap: false,
+          chat: {
+            subAgents: false,
+            compact: false,
+            planMode: false,
+            webTools: false,
+            blockTypes: ['text', 'reasoning', 'tool_call', 'context'],
+          },
         },
       }
     }
     const health = await adapter.healthCheck()
+    const manifest = this.plugins.get(id)?.manifest
     return {
       id,
+      ...(manifest ? { displayName: manifest.displayName, pluginVersion: manifest.version } : {}),
       available: health.ok,
       version: health.version ?? null,
       error: health.error ?? null,

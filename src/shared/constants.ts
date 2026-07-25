@@ -5,7 +5,9 @@
 
 /** 后端标识 */
 export const BACKEND_IDS = ['codex', 'claude'] as const
-export type BackendId = (typeof BACKEND_IDS)[number]
+export type BuiltinBackendId = (typeof BACKEND_IDS)[number]
+/** 插件 backend 使用自己的稳定字符串 id，例如 `acme.pi-agent`。 */
+export type BackendId = string
 
 /** 编辑器标识 */
 export const EDITOR_IDS = ['vscode', 'cursor', 'intellij', 'webstorm', 'sublime'] as const
@@ -33,6 +35,8 @@ export const IPC = {
   SYSTEM_WINDOW_MAXIMIZE: 'system.windowMaximize',
   SYSTEM_WINDOW_CLOSE: 'system.windowClose',
   SYSTEM_WINDOW_IS_MAXIMIZED: 'system.windowIsMaximized',
+  // 图片预览下载：data:URL / http(s) URL → 弹保存对话框写盘
+  SYSTEM_SAVE_IMAGE: 'system.saveImage',
   // backend
   BACKEND_LIST: 'backend.list',
   BACKEND_CURRENT: 'backend.current',
