@@ -1,7 +1,6 @@
+import { useImagePreviewStore } from '@renderer/stores/image-preview'
 import { createPinia, setActivePinia } from 'pinia'
 import { beforeEach, describe, expect, it } from 'vitest'
-
-import { useImagePreviewStore } from '@renderer/stores/image-preview'
 
 /**
  * Image Preview Overlay store: 单例状态机——open/close/next/prev/setIndex。

@@ -1,6 +1,17 @@
 <template>
   <div class="mt-5 overflow-hidden rounded-xl border border-border/70 bg-muted/20">
-    <div class="flex items-center gap-2 px-3 py-2.5 text-[13px]">
+    <!--
+      标题行整行可点击展开/收起（cursor-pointer + @click toggle），
+      不再要求用户精准点到右侧箭头。审核按钮用 @click.stop 阻断冒泡，
+      避免点审核时顺带触发收起。
+    -->
+    <div
+      class="flex cursor-pointer items-center gap-2 px-3 py-2.5 text-[13px]"
+      role="button"
+      :aria-expanded="open"
+      :aria-label="open ? '收起文件列表' : '展开文件列表'"
+      @click="open = !open"
+    >
       <FileDiffIcon class="size-4 text-muted-foreground" />
       <span>已编辑 {{ files.length }} 个文件</span>
       <span class="font-mono text-[12px] tabular-nums">
@@ -11,18 +22,15 @@
       <button
         type="button"
         class="rounded-md border border-border px-2.5 py-1 text-xs hover:bg-muted"
-        @click="review"
+        @click.stop="review"
       >
         审核
       </button>
-      <button
-        type="button"
-        class="rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground"
-        :aria-label="open ? '收起文件' : '展开文件'"
-        @click="open = !open"
-      >
-        <ChevronDownIcon class="size-4 transition-transform" :class="open ? 'rotate-180' : ''" />
-      </button>
+      <!-- 纯视觉指示：整行已承担点击，箭头不再单独绑定事件 -->
+      <ChevronDownIcon
+        class="size-4 text-muted-foreground transition-transform"
+        :class="open ? 'rotate-180' : ''"
+      />
     </div>
     <div v-if="open" class="border-t border-border/60">
       <button
