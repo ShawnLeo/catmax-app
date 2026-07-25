@@ -31,6 +31,23 @@ export const httpProxySchema = z.object({
 })
 export type HttpProxy = z.infer<typeof httpProxySchema>
 
+/**
+ * 单个 backend 的默认运行时配置（model / effort / permissionMode）。
+ *
+ * 全按 backend 分别配——codex 和 claude 的 model id 不互通、effort/permissionMode
+ * 支持的档位也不同（codex 3 档权限 / claude 6 档）。所有字段允许 null，
+ * null 表示"未配置"，由 ChatView 兜底到硬编码默认（effort='medium', permissionMode='default'）。
+ */
+const backendRuntimeDefaultsSchema = z.object({
+  model: z.string().nullable().default(null),
+  effort: z.enum(['none', 'low', 'medium', 'high', 'xhigh', 'max']).nullable().default(null),
+  permissionMode: z
+    .enum(['default', 'acceptEdits', 'auto', 'plan', 'dontAsk', 'bypassPermissions'])
+    .nullable()
+    .default(null),
+})
+export type BackendRuntimeDefaults = z.infer<typeof backendRuntimeDefaultsSchema>
+
 export const appSettingsSchema = z.object({
   defaultBackend: z.enum(BACKEND_IDS).default('codex'),
   backendPaths: z
@@ -39,6 +56,16 @@ export const appSettingsSchema = z.object({
       claude: z.string().nullable().default(null),
     })
     .default({ codex: null, claude: null }),
+  /**
+   * 默认运行时配置——仅在无 last-used 时兜底（last-used 优先）。
+   * 按 backend 分别配（codex / claude 各一组 model/effort/permissionMode）。
+   */
+  defaultRuntimeConfig: z
+    .object({
+      codex: backendRuntimeDefaultsSchema.default({}),
+      claude: backendRuntimeDefaultsSchema.default({}),
+    })
+    .default({ codex: {}, claude: {} }),
   defaultEditor: z.enum(EDITOR_IDS).default('vscode'),
   theme: themeSettingsSchema.default({}),
   httpProxy: httpProxySchema.default({}),

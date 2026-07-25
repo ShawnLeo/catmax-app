@@ -23,6 +23,10 @@ export const listModels = async () => {
   return ctx.backendManager.listModels()
 }
 
+export const listModelsFor = async (args: { id: BackendId }) => {
+  return ctx.backendManager.listModelsForBackend(args.id)
+}
+
 export const refreshModels = async () => {
   return ctx.backendManager.refreshModels()
 }

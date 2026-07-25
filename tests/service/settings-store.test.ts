@@ -48,6 +48,30 @@ describe('SettingsStore', () => {
     expect(updated.theme.fontSize).toBe(initial.theme.fontSize) // 其他字段保留
   })
 
+  test('update defaultRuntimeConfig 按 backend 双层 deep merge', () => {
+    // 先设 codex 的 model + effort
+    store.update({
+      defaultRuntimeConfig: {
+        codex: { model: 'gpt-5.6-sol', effort: 'high', permissionMode: null },
+        claude: { model: null, effort: null, permissionMode: null },
+      },
+    })
+    // 再只改 claude 的 model——codex 配置应保留（双层 deep merge）
+    const current = store.load()
+    const updated = store.update({
+      defaultRuntimeConfig: {
+        ...current.defaultRuntimeConfig,
+        claude: { ...current.defaultRuntimeConfig.claude, model: 'sonnet' },
+      },
+    })
+    // codex 配置保留
+    expect(updated.defaultRuntimeConfig.codex.model).toBe('gpt-5.6-sol')
+    expect(updated.defaultRuntimeConfig.codex.effort).toBe('high')
+    // claude 配置更新
+    expect(updated.defaultRuntimeConfig.claude.model).toBe('sonnet')
+    expect(updated.defaultRuntimeConfig.claude.effort).toBeNull()
+  })
+
   test('update 写盘后重新 load 仍能拿到值', () => {
     store.update({ defaultBackend: 'claude' })
     const newStore = new SettingsStore(join(tempDir, 'settings.json'))

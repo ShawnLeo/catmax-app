@@ -108,18 +108,30 @@ function isBackendAvailable(id: BackendId): boolean {
 
 onMounted(async () => {
   if (workspaceStore.currentWorkspace) {
-    await sessionStore.load(workspaceStore.currentWorkspace.id)
-    await sessionStore.reconcile(workspaceStore.currentWorkspace.id)
+    await sessionStore.load(workspaceStore.currentWorkspace.id, backendStore.currentId)
+    await sessionStore.reconcile(workspaceStore.currentWorkspace.id, backendStore.currentId)
   }
 })
 
-// 切工作区时重新加载
+// 切工作区时重新加载（每个工作区各自刷新成当前 backend 的会话）
 watch(
   () => workspaceStore.currentWorkspace?.id,
   async (id) => {
     if (id) {
-      await sessionStore.load(id)
-      await sessionStore.reconcile(id)
+      await sessionStore.load(id, backendStore.currentId)
+      await sessionStore.reconcile(id, backendStore.currentId)
+    }
+  },
+)
+
+// 切后端时刷新当前工作区的会话列表——只刷当前选中的工作区，
+// 用户切到别的工作区时上面的 watch workspace.id 会自动按新 backend 刷新。
+watch(
+  () => backendStore.currentId,
+  async (newBackend) => {
+    if (workspaceStore.currentWorkspace) {
+      await sessionStore.load(workspaceStore.currentWorkspace.id, newBackend)
+      await sessionStore.reconcile(workspaceStore.currentWorkspace.id, newBackend)
     }
   },
 )
@@ -140,7 +152,7 @@ async function selectSession(id: string): Promise<void> {
     // 列表可能过期（load 中、刚切 workspace、reconcile 刚改库），重拉一次再找。
     // 不静默 return——否则 currentSessionId 留在前一个状态，用户下次发消息时
     // onSend 会以为"没选 session"偷偷创建新会话（Bug B）。
-    await sessionStore.load(workspaceStore.currentWorkspace.id)
+    await sessionStore.load(workspaceStore.currentWorkspace.id, backendStore.currentId)
     session = sessionStore.sessions.find((s) => s.id === id)
   }
   if (!session) return // 重拉后还是没有——真没了（被删/被其他端改）
@@ -196,7 +208,7 @@ async function newSession(): Promise<void> {
 async function onImportDialogClose(): Promise<void> {
   importDialogOpen.value = false
   if (workspaceStore.currentWorkspace) {
-    await sessionStore.load(workspaceStore.currentWorkspace.id)
+    await sessionStore.load(workspaceStore.currentWorkspace.id, backendStore.currentId)
   }
 }
 </script>

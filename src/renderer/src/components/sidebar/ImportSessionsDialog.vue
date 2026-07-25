@@ -1,13 +1,13 @@
 <template>
   <!--
-    扫描并导入外部会话对话框。
+    扫描并导入外部会话对话框（只扫当前选中的后端）。
 
-    打开时自动调 session.scanImportable() 全盘扫：
+    打开时自动调 session.scanImportable() 扫当前 backend：
       - claude：扫所有 ~/.claude/projects/*/*.jsonl
       - codex：调 thread/list 拿全部 thread
     用户勾选 + 给每条选归属 workspace，点「导入」后调 session.import。
 
-    单 backend 失败（如 codex 进程没启动）容错——只显示警告条，不影响另一个 backend 的结果。
+    当前 backend 扫描失败（如 codex 进程没启动）容错——显示警告条，不影响关闭对话框重试。
   -->
   <div
     class="fixed inset-0 z-50 flex items-center justify-center bg-black/50"
@@ -21,7 +21,7 @@
         <div>
           <h3 class="text-lg font-semibold">扫描导入会话</h3>
           <p class="text-xs text-muted-foreground mt-0.5">
-            扫描磁盘/RPC 上已存在但还没纳入 catmax 的 claude / codex 会话
+            扫描当前后端（{{ currentBackendLabel }}）磁盘/RPC 上已存在但还没纳入 catmax 的会话
           </p>
         </div>
         <button
@@ -33,7 +33,7 @@
         </button>
       </div>
 
-      <!-- 错误警告条（单 backend 失败时显示） -->
+      <!-- 错误警告条（当前后端扫描失败时显示） -->
       <div
         v-if="result?.errors.length"
         class="px-4 py-2 bg-amber-500/10 border-b border-amber-500/30 text-xs text-amber-700 dark:text-amber-400 flex items-center gap-2"
@@ -43,7 +43,7 @@
           <template v-for="err in result.errors" :key="err.backend">
             {{ err.backend }} 扫描失败：{{ err.error }}。
           </template>
-          其他后端结果仍可用。
+          请确认后端已安装并可用，关闭重试。
         </span>
       </div>
 
@@ -66,7 +66,7 @@
           <CheckCircle2Icon class="w-8 h-8 mx-auto mb-2 opacity-50" />
           <p>没有发现可导入的会话</p>
           <p class="text-xs mt-1 opacity-70">
-            已扫描 claude 项目目录和 codex 后端的所有会话，全部已纳入或为空
+            已扫描当前后端（{{ currentBackendLabel }}）的所有会话，全部已纳入或为空
           </p>
         </div>
 
@@ -142,6 +142,7 @@
 
 <script setup lang="ts">
 import { Button } from '@renderer/components/ui/button'
+import { useBackendStore } from '@renderer/stores/backend'
 import { useWorkspaceStore } from '@renderer/stores/workspace'
 import type {
   ImportableSession,
@@ -162,6 +163,12 @@ import ImportSessionRow from './ImportSessionRow.vue'
 const emit = defineEmits<{ close: [] }>()
 
 const workspaceStore = useWorkspaceStore()
+const backendStore = useBackendStore()
+
+/** 当前后端显示标签——用于副标题/空结果文案。单后端模式下 badge 已无区分意义。 */
+const currentBackendLabel = computed(() =>
+  backendStore.currentId === 'codex' ? 'codex' : 'claude',
+)
 
 const scanning = ref(false)
 const importing = ref(false)
@@ -299,26 +306,38 @@ async function onImport(): Promise<void> {
   if (selectedItems.value.size === 0) return
   importing.value = true
   try {
+    // 建 key → ImportableSession 映射，导入时把扫描拿到的 title/lastActiveAt/model
+    // 一起传给 main，避免 main 端再调 getHistory（codex 不返回 aiTitle 会 fallback 成 UUID 前缀）
+    const sessionByKey = new Map(importableSessions.value.map((s) => [itemKey(s), s]))
     const items: ImportSessionItem[] = []
     for (const key of selectedItems.value) {
       const wsId = selectedWorkspaceByItem.value[key]
       if (!wsId) continue // 防御——理论上 toggle 时已经补了默认
+      const sess = sessionByKey.get(key)
       const [backend, backendThreadId] = key.split(':') as [string, string]
-      items.push({
+      // 扫描时拿到的元数据——main 端优先用，避免 fallback 成 UUID 前缀
+      // exactOptionalPropertyTypes: true 不允许传 undefined，所以条件赋值
+      const item: ImportSessionItem = {
         backend: backend as ImportSessionItem['backend'],
         backendThreadId,
         workspaceId: wsId,
-      })
+        title: sess?.title ?? null,
+        model: sess?.model ?? null,
+      }
+      if (sess?.lastActiveAt !== undefined) item.lastActiveAt = sess.lastActiveAt
+      items.push(item)
     }
     const { imported, skipped } = await window.api.session.import({ sessions: items })
     if (skipped.length > 0) {
       console.warn('some sessions skipped during import:', skipped)
     }
-    // 关闭前刷新当前 workspace 的 session 列表
+    // 关闭前刷新当前 workspace 的 session 列表（按当前 backend 过滤）
     if (workspaceStore.currentWorkspaceId) {
       const { useSessionStore } = await import('@renderer/stores/session')
+      const { useBackendStore } = await import('@renderer/stores/backend')
       const sessionStore = useSessionStore()
-      await sessionStore.load(workspaceStore.currentWorkspaceId)
+      const backendStore = useBackendStore()
+      await sessionStore.load(workspaceStore.currentWorkspaceId, backendStore.currentId)
     }
     void imported
     emit('close')

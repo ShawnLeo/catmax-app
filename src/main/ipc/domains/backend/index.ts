@@ -7,6 +7,7 @@ import {
   interruptTurn,
   listBackends,
   listModels,
+  listModelsFor,
   refreshModels,
   respondApproval,
   respondQuestion,
@@ -20,6 +21,10 @@ export function registerBackendHandlers(): void {
   handleRendererRequest<BackendHandlers, 'backend.current'>('backend.current', getCurrentBackend)
   handleRendererRequest<BackendHandlers, 'backend.switch'>('backend.switch', switchBackend)
   handleRendererRequest<BackendHandlers, 'backend.listModels'>('backend.listModels', listModels)
+  handleRendererRequest<BackendHandlers, 'backend.listModelsFor'>(
+    'backend.listModelsFor',
+    listModelsFor,
+  )
   handleRendererRequest<BackendHandlers, 'backend.refreshModels'>(
     'backend.refreshModels',
     refreshModels,

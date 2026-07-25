@@ -57,15 +57,28 @@ export interface ScanImportableResult {
   sessions: ImportableSession[]
   /** claude 反推 cwd 无法精确匹配任何 workspace 的条数（不含 alreadyImported） */
   unmatchedCount: number
-  /** 单 backend 失败时的错误（如 codex 进程未启动） */
+  /** 当前后端扫描失败时的错误（如 codex 进程未启动）。单后端模式下最多 1 条 */
   errors: Array<{ backend: BackendId; error: string }>
 }
 
-/** 单条导入项——用户在 dialog 里勾选 + 选好 workspace 后产出 */
+/**
+ * 单条导入项——用户在 dialog 里勾选 + 选好 workspace 后产出。
+ *
+ * title / lastActiveAt / model 直接用 scanImportable 扫描时拿到的值，避免
+ * importSessions 再为每条会话调一次 getHistory（codex 的 getHistory 不返回
+ * aiTitle，会 fallback 成 UUID 前缀，导致标题错误；claude 也能省一次磁盘读）。
+ * 字段都允许 null/undefined 兜底——调用方可能没填，importSessions 会 fallback。
+ */
 export interface ImportSessionItem {
   backend: BackendId
   backendThreadId: string
   workspaceId: string
+  /** 扫描时拿到的标题（codex 的 name/preview；claude 的 jsonl 头）。null 时 fallback */
+  title?: string | null
+  /** 扫描时拿到的最后活跃时间（毫秒）。用于导入后排序正确 */
+  lastActiveAt?: number
+  /** 扫描时拿到的模型 */
+  model?: string | null
 }
 
 export interface ImportSessionArgs {
@@ -78,13 +91,31 @@ export interface ImportSessionsResult {
 }
 
 export type SessionHandlers = {
-  'session.list': (args: { workspaceId: string }) => Promise<SessionView[]>
+  /**
+   * 读取工作区会话列表——只返回指定 backend 的会话（按当前选中后端过滤）。
+   *
+   * 渲染层传 backendStore.currentId，切换后端时由 SessionList 的 watch 触发重拉，
+   * 这样列表始终只展示当前后端的会话，避免 claude / codex 混排。
+   */
+  'session.list': (args: { workspaceId: string; backend: BackendId }) => Promise<SessionView[]>
   'session.create': (args: CreateSessionArgs) => Promise<{ sessionId: string }>
   'session.remove': (args: { sessionId: string }) => Promise<void>
   'session.reconcile': (args: { workspaceId: string }) => Promise<{
     added: SessionView[]
     removed: string[]
   }>
+  /**
+   * 扫描当前后端在磁盘/RPC 上存在、但 catmax db 还未登记的会话（只扫当前 backend）。
+   *
+   * - claude：扫 ~/.claude/projects/<encoded-cwd>/*.jsonl（由当前 backend 的 adapter 决定）
+   * - codex：调 thread/list（不传 cwd，拿全部 thread）
+   *
+   * 返回每条会话 + 标记：
+   * - alreadyImported：是否已在 db（任意 workspace）
+   * - matchedWorkspaceId（claude only）：反推 cwd 精确匹配到的 workspace，没有则 undefined
+   *
+   * 单后端扫描失败时记录到 errors 数组（运行时最多 1 条），不抛错，让 dialog 降级展示。
+   */
   'session.scanImportable': () => Promise<ScanImportableResult>
   'session.import': (args: ImportSessionArgs) => Promise<ImportSessionsResult>
   'session.detail': (args: { sessionId: string }) => Promise<{

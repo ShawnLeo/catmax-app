@@ -79,3 +79,77 @@ describe('Bug B: reconcileSessions 容错', () => {
     )
   })
 })
+
+/**
+ * 跨 backend 不误标 stale 的回归测试。
+ *
+ * 场景：db 里同时有 claude 和 codex 的会话，currentBackend 切到 claude 后 reconcile。
+ * 修复前：appSessions 拉全量（含 codex），codex 的 backendThreadId 不在 claude 的真实列表里，
+ *        会被误标 stale。修复后：appSessions 也过滤成当前 backend，codex 那条不受影响。
+ */
+describe('跨 backend reconcile 不误标 stale', () => {
+  test('currentBackend=claude 时 codex 会话不进 removed', async () => {
+    const db = ctxModule.ctx.db
+    const now = Date.now()
+    db.insertWorkspace({
+      id: 'ws-cross',
+      path: mkdtempSync(join(tmpdir(), 'ws-cross-')),
+      name: 'test-ws-cross',
+      preferredEditor: null,
+      lastOpenedAt: now,
+      createdAt: now,
+    })
+
+    // db 里两条会话：一条 claude、一条 codex
+    db.insertSession({
+      id: 'sess-claude',
+      backend: 'claude',
+      backendThreadId: 'claude-thread-1',
+      workspaceId: 'ws-cross',
+      title: 'claude session',
+      model: null,
+      effort: null,
+      permissionMode: null,
+      turnCount: 1,
+      createdAt: now,
+      lastActiveAt: now,
+    })
+    db.insertSession({
+      id: 'sess-codex',
+      backend: 'codex',
+      backendThreadId: 'codex-thread-1',
+      workspaceId: 'ws-cross',
+      title: 'codex session',
+      model: null,
+      effort: null,
+      permissionMode: null,
+      turnCount: 1,
+      createdAt: now,
+      lastActiveAt: now,
+    })
+
+    // 当前 backend 是 claude，后端真实列表也只有 claude 的会话
+    const mockBackendManager = ctxModule.ctx.backendManager
+    mockBackendManager.getCurrentId.mockReturnValue('claude')
+    mockBackendManager.listSessions.mockResolvedValue([
+      {
+        backendThreadId: 'claude-thread-1',
+        title: 'claude session',
+        lastActiveAt: now,
+        model: 'claude-sonnet',
+      },
+    ])
+
+    const result = await reconcileSessions({ workspaceId: 'ws-cross' })
+
+    // claude 会话匹配上，没有 added 也没有 removed
+    expect(result.added).toEqual([])
+    // 关键断言：codex 会话不能被误标 stale
+    expect(result.removed).not.toContain('sess-codex')
+    expect(result.removed).toEqual([])
+
+    // codex 会话 db 里仍是 stale=false（没被 markSessionStale 碰过）
+    const codexSession = db.findSessionById('sess-codex')
+    expect(codexSession).not.toBeNull()
+  })
+})

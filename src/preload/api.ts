@@ -50,6 +50,9 @@ export const api = {
     current: requestMain<BackendHandlers, 'backend.current'>(IPC.BACKEND_CURRENT),
     switch: requestMain<BackendHandlers, 'backend.switch'>(IPC.BACKEND_SWITCH),
     listModels: requestMain<BackendHandlers, 'backend.listModels'>(IPC.BACKEND_LIST_MODELS),
+    listModelsFor: requestMain<BackendHandlers, 'backend.listModelsFor'>(
+      IPC.BACKEND_LIST_MODELS_FOR,
+    ),
     refreshModels: requestMain<BackendHandlers, 'backend.refreshModels'>(
       IPC.BACKEND_REFRESH_MODELS,
     ),

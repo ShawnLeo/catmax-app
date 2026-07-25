@@ -15,16 +15,6 @@
     <!-- 主信息 -->
     <div class="flex-1 min-w-0">
       <div class="flex items-center gap-2">
-        <span
-          :class="[
-            'text-[10px] px-1.5 py-0.5 rounded uppercase font-medium flex-shrink-0',
-            session.backend === 'codex'
-              ? 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-400'
-              : 'bg-orange-500/15 text-orange-700 dark:text-orange-400',
-          ]"
-        >
-          {{ session.backend }}
-        </span>
         <span class="text-sm font-medium text-foreground truncate flex-1">
           {{ session.title ?? '(无标题)' }}
         </span>

@@ -126,15 +126,17 @@ function handleClickOutside(event: MouseEvent): void {
 async function selectWorkspace(id: string): Promise<void> {
   await workspaceStore.setCurrent(id)
   showPicker.value = false
-  // 重新加载该工作区的 sessions
+  // 重新加载该工作区的 sessions（按当前 backend 过滤）
   if (workspaceStore.currentWorkspace) {
     const { useSessionStore } = await import('@renderer/stores/session')
     const { useMessageStore } = await import('@renderer/stores/message')
+    const { useBackendStore } = await import('@renderer/stores/backend')
     const sessionStore = useSessionStore()
     const messageStore = useMessageStore()
+    const backendStore = useBackendStore()
     // 切工作区彻底清空——不同工作区的 session 状态不混用
     messageStore.resetAll()
-    await sessionStore.load(workspaceStore.currentWorkspace.id)
+    await sessionStore.load(workspaceStore.currentWorkspace.id, backendStore.currentId)
   }
 }
 

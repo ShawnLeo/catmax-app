@@ -1,5 +1,5 @@
 import type { BackendStatus, ModelOption } from '@shared/backend/types'
-import type { BackendId } from '@shared/constants'
+import { BACKEND_IDS, type BackendId } from '@shared/constants'
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 
@@ -7,6 +7,9 @@ export const useBackendStore = defineStore('backend', () => {
   const statuses = ref<BackendStatus[]>([])
   const currentId = ref<BackendId>('codex')
   const models = ref<ModelOption[]>([])
+  // 按 backend 分别缓存的模型列表——设置页同时展示两个 backend 的可选模型。
+  // 进设置页时 loadAllBackendModels() 并行拉取；codex 首次会 spawn app-server。
+  const modelsByBackend = ref<Record<BackendId, ModelOption[]>>({ codex: [], claude: [] })
   const loading = ref(false)
 
   const current = computed(() => statuses.value.find((s) => s.id === currentId.value) ?? null)
@@ -21,6 +24,24 @@ export const useBackendStore = defineStore('backend', () => {
     } finally {
       loading.value = false
     }
+  }
+
+  /**
+   * 拉指定 backend 的模型列表（不切换当前 backend）。
+   * codex 不可用 / spawn 失败时静默置空，UI 显示提示。
+   */
+  async function loadModelsFor(id: BackendId): Promise<void> {
+    try {
+      modelsByBackend.value[id] = await window.api.backend.listModelsFor({ id })
+    } catch (e) {
+      console.warn(`[backend] loadModelsFor(${id}) failed:`, e)
+      modelsByBackend.value[id] = []
+    }
+  }
+
+  /** 并行拉所有 backend 的模型列表（设置页进页时调） */
+  async function loadAllBackendModels(): Promise<void> {
+    await Promise.all(BACKEND_IDS.map((id) => loadModelsFor(id)))
   }
 
   async function switchTo(id: BackendId): Promise<void> {
@@ -47,12 +68,15 @@ export const useBackendStore = defineStore('backend', () => {
     statuses,
     currentId,
     models,
+    modelsByBackend,
     loading,
     current,
     isAvailable,
     refresh,
     switchTo,
     loadModels,
+    loadModelsFor,
+    loadAllBackendModels,
     refreshModels,
   }
 })

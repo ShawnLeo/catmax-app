@@ -11,20 +11,23 @@ export const useSessionStore = defineStore('session', () => {
 
   const currentSession = computed(() => sessions.value.find((s) => s.id === currentSessionId.value))
 
-  async function load(workspaceId: string): Promise<void> {
+  async function load(workspaceId: string, backend: BackendId): Promise<void> {
     loading.value = true
     try {
-      sessions.value = await window.api.session.list({ workspaceId })
+      sessions.value = await window.api.session.list({ workspaceId, backend })
     } finally {
       loading.value = false
     }
   }
 
-  /** 与后端对账（启动时、切工作区时、切后端时调） */
-  async function reconcile(workspaceId: string): Promise<void> {
+  /**
+   * 与后端对账（启动时、切工作区时、切后端时调）。
+   * backend 决定对账完 reload 列表时按哪个 backend 过滤。
+   */
+  async function reconcile(workspaceId: string, backend: BackendId): Promise<void> {
     const { added, removed } = await window.api.session.reconcile({ workspaceId })
     if (added.length > 0 || removed.length > 0) {
-      await load(workspaceId)
+      await load(workspaceId, backend)
     }
   }
 
@@ -38,7 +41,10 @@ export const useSessionStore = defineStore('session', () => {
     initialPrompt?: string
   }): Promise<string> {
     const { sessionId } = await window.api.session.create(args)
-    await load(args.workspaceId)
+    // 创建后按 create 的 backend reload——若 args.backend 未传，main 会用当前 backend，
+    // 这里与 main 保持一致：用传入的 backend，否则 fallback 到当前 backend id。
+    const backend = args.backend ?? (await window.api.backend.current()).id
+    await load(args.workspaceId, backend)
     return sessionId
   }
 

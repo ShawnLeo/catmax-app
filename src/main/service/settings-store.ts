@@ -70,6 +70,17 @@ export class SettingsStore {
       theme: { ...current.theme, ...(patch.theme ?? {}) },
       httpProxy: { ...current.httpProxy, ...(patch.httpProxy ?? {}) },
       backendPaths: { ...current.backendPaths, ...(patch.backendPaths ?? {}) },
+      // defaultRuntimeConfig 双层 deep merge（codex / claude 各自 merge）
+      defaultRuntimeConfig: {
+        codex: {
+          ...current.defaultRuntimeConfig.codex,
+          ...(patch.defaultRuntimeConfig?.codex ?? {}),
+        },
+        claude: {
+          ...current.defaultRuntimeConfig.claude,
+          ...(patch.defaultRuntimeConfig?.claude ?? {}),
+        },
+      },
     }
     const validated = appSettingsSchema.parse(merged)
     this.cache = validated

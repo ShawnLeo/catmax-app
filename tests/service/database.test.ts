@@ -138,6 +138,46 @@ describe('DatabaseService Session', () => {
     expect(list.map((s) => s.id)).toEqual(['s2', 's3', 's1'])
   })
 
+  test('listSessions 传 backend 时只返回该 backend 的会话', () => {
+    db.insertWorkspace(makeWorkspace({ id: 'ws-1', path: '/tmp/test-ws-1' }))
+    db.insertSession(
+      makeSession({
+        id: 'c1',
+        backend: 'claude',
+        backendThreadId: 'ct1',
+        workspaceId: 'ws-1',
+        lastActiveAt: 1000,
+      }),
+    )
+    db.insertSession(
+      makeSession({
+        id: 'x1',
+        backend: 'codex',
+        backendThreadId: 'xt1',
+        workspaceId: 'ws-1',
+        lastActiveAt: 2000,
+      }),
+    )
+    db.insertSession(
+      makeSession({
+        id: 'c2',
+        backend: 'claude',
+        backendThreadId: 'ct2',
+        workspaceId: 'ws-1',
+        lastActiveAt: 3000,
+      }),
+    )
+    // 传 claude 只返回 claude 的，按 lastActiveAt 倒序
+    const claudeList = db.listSessions('ws-1', 'claude')
+    expect(claudeList.map((s) => s.id)).toEqual(['c2', 'c1'])
+    // 传 codex 只返回 codex 的
+    const codexList = db.listSessions('ws-1', 'codex')
+    expect(codexList.map((s) => s.id)).toEqual(['x1'])
+    // 不传 backend 仍返回全量（向后兼容，用于 reconcile/scanImportable）
+    const allList = db.listSessions('ws-1')
+    expect(allList.map((s) => s.id)).toEqual(['c2', 'x1', 'c1'])
+  })
+
   test('UNIQUE(backend, backend_thread_id)', () => {
     db.insertWorkspace(makeWorkspace({ id: 'ws-1', path: '/tmp/test-ws-1' }))
     db.insertSession(makeSession({ id: 's1', backendThreadId: 'dup', workspaceId: 'ws-1' }))

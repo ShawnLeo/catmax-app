@@ -90,6 +90,7 @@ import { useFilesStore } from '@renderer/stores/files'
 import { useGitStore } from '@renderer/stores/git'
 import { useMessageStore } from '@renderer/stores/message'
 import { useSessionStore } from '@renderer/stores/session'
+import { useSettingsStore } from '@renderer/stores/settings'
 import { useUiStore } from '@renderer/stores/ui'
 import { useWorkspaceStore } from '@renderer/stores/workspace'
 import { serializeContextTags } from '@shared/backend/context-tags'
@@ -112,6 +113,7 @@ const sessionStore = useSessionStore()
 const messageStore = useMessageStore()
 const gitStore = useGitStore()
 const uiStore = useUiStore()
+const settingsStore = useSettingsStore()
 useStreamMessage()
 
 // 侧栏可拖拽宽度--min 为当前默认宽度，max 为容器一半（即最大 1:1 与聊天区同宽）
@@ -223,6 +225,46 @@ const runtimeConfig = ref<RuntimeConfig>({
   permissionMode: 'default',
 })
 
+/**
+ * 从 settings 读指定 backend 的默认运行时配置（model/effort/permissionMode）。
+ * 按 backend 分别配——codex / claude 各一组。null 字段由调用方兜底到硬编码默认。
+ * 用于无 last-used 时的兜底——last-used 优先，settings 默认值仅兜底。
+ */
+function defaultsFor(b: BackendId): {
+  model: string | null
+  effort: EffortLevel | null
+  permissionMode: PermissionMode | null
+} {
+  const cfg = settingsStore.settings?.defaultRuntimeConfig?.[b]
+  return {
+    model: cfg?.model ?? null,
+    effort: cfg?.effort ?? null,
+    permissionMode: cfg?.permissionMode ?? null,
+  }
+}
+
+/**
+ * 校验 model 是否在当前 backend 的下拉列表里，不在就兜底。
+ *
+ * 兜底优先级：settings 默认值（若它也在下拉里）> backend 的 isDefault 模型 > null。
+ * 用于两处：
+ *   - onMounted 启动恢复（last-used 可能存了无效脏数据）
+ *   - 切历史会话（老会话的 model 在当前 backend 下拉里可能已不存在）
+ *
+ * 依赖 backendStore.models 已对齐到目标 backend（调用方需确保 loadModels 完成）。
+ */
+function ensureValidModel(): void {
+  const current = runtimeConfig.value.model
+  if (current === null) return
+  if (backendStore.models.some((m) => m.id === current)) return
+  // 当前 model 无效 → 兜底
+  const dft = defaultsFor(backendStore.currentId)
+  const settingsDefault =
+    dft.model && backendStore.models.some((m) => m.id === dft.model) ? dft.model : null
+  runtimeConfig.value.model =
+    settingsDefault ?? backendStore.models.find((m) => m.isDefault)?.id ?? null
+}
+
 /** 程序是否正在用 last-used 恢复 runtimeConfig——避免回写 watch 触发循环。 */
 const isRestoring = ref(false)
 
@@ -257,17 +299,38 @@ onMounted(async () => {
   }
   await backendStore.refresh()
 
-  // 从 last-used 恢复 runtimeConfig——新建会话默认从这里取。
-  // permissionMode 兜底成 'default'；backend 兜底成 currentId。
+  // 启动 backend 取值优先级：settings.defaultBackend（用户在设置里明确选的）
+  // > lastRuntimeConfig.backend（上次运行时碰巧用的）。defaultBackend 反映用户
+  // 当前对"默认用哪个后端"的明确意图，优先级最高——否则用户在设置里改了 backend，
+  // 重启后又被 last-used 覆盖回去，与预期不符（会话列表过滤也会跟着错）。
+  const defaultBackend = settingsStore.settings?.defaultBackend
+
+  // 从 last-used 恢复 runtimeConfig——last-used 优先，字段为 null 时用 settings 默认值兜底。
+  // backend 仍由 defaultBackend 覆盖（settings 里明确选的优先级最高）。
   try {
     const last = await window.api.session.getLastRuntimeConfig()
     if (last) {
       isRestoring.value = true
+      const resolvedBackend = defaultBackend ?? last.backend
+      const dft = defaultsFor(resolvedBackend)
       runtimeConfig.value = {
-        backend: last.backend,
-        model: last.model,
-        effort: last.effort,
-        permissionMode: last.permissionMode ?? 'default',
+        backend: resolvedBackend,
+        // model/effort/permissionMode：last-used 有值用它，null 时用 settings 默认值兜底
+        model: last.model ?? dft.model,
+        effort: last.effort ?? dft.effort ?? 'medium',
+        permissionMode: last.permissionMode ?? dft.permissionMode ?? 'default',
+      }
+      isRestoring.value = false
+    } else {
+      // 无 last-used，全用 settings 默认值 + 硬编码兜底
+      const b = defaultBackend ?? backendStore.currentId
+      const dft = defaultsFor(b)
+      isRestoring.value = true
+      runtimeConfig.value = {
+        backend: b,
+        model: dft.model,
+        effort: dft.effort ?? 'medium',
+        permissionMode: dft.permissionMode ?? 'default',
       }
       isRestoring.value = false
     }
@@ -275,18 +338,24 @@ onMounted(async () => {
     console.warn('[ChatView] load last runtime config failed:', e)
   }
 
-  // 若 last-used 的 backend 跟当前后端不一致，切过去。
+  // 若目标 backend 跟当前后端不一致，切过去。
+  // switchTo 不可用时（backend 未安装）兜底成 currentId，避免挂死。
   if (runtimeConfig.value.backend !== backendStore.currentId) {
     try {
       await backendStore.switchTo(runtimeConfig.value.backend)
     } catch (e) {
-      console.warn('[ChatView] switch to last-used backend failed:', e)
+      console.warn('[ChatView] switch to backend failed:', e)
       runtimeConfig.value.backend = backendStore.currentId
     }
   }
 
   await backendStore.loadModels()
-  await sessionStore.load(workspaceStore.currentWorkspace.id)
+
+  // model 有效性校验——last-used 可能存了无效值（历史脏数据，如 codex 的 model 曾被
+  // 错误存成 modelProvider 'openai'），或切 backend 后旧 model id 在新 backend 下拉里不存在。
+  ensureValidModel()
+
+  await sessionStore.load(workspaceStore.currentWorkspace.id, backendStore.currentId)
 
   // 订阅 session:titleChanged —— claude turn 完成后从 jsonl 读到 aiTitle，
   // main 回写 db + 广播，这里同步更新本地 sessions 数组让侧边栏标题刷新。
@@ -360,7 +429,29 @@ watch(
     if (session.effort) runtimeConfig.value.effort = session.effort
     if (session.permissionMode) runtimeConfig.value.permissionMode = session.permissionMode
     isRestoring.value = false
+    // 立即校验 model 有效性——覆盖「同 backend 切会话」场景（models 没变，
+    // 下面的 watch(backendStore.models) 不会触发）。老会话的 model 可能是脏值
+    // （如 'openai'）或已下线，这里兜底到 settings 默认值。
+    // 注意：若切会话伴随 backend 切换，此处 backendStore.models 可能还是旧列表，
+    // 校验可能不准——但 models 更新后 watch(backendStore.models) 会再校验一次兜底。
+    ensureValidModel()
   },
+)
+
+/**
+ * backend 模型列表更新后，校验当前 runtimeConfig.model 是否仍有效。
+ *
+ * 触发场景：切 backend 后 loadModels 完成 / 切历史会话后 models 刷新。
+ * 老会话的 model 可能在当前 backend 下拉里已不存在（如 codex 旧 model 'gpt-5.2-codex'
+ * 已下线），此时兜底到 settings 默认值或 backend 默认模型。
+ */
+watch(
+  () => backendStore.models,
+  () => {
+    if (isRestoring.value) return
+    ensureValidModel()
+  },
+  { deep: true },
 )
 
 /**

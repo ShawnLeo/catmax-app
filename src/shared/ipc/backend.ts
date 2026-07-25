@@ -18,6 +18,12 @@ export type BackendHandlers = {
   'backend.current': () => Promise<{ id: BackendId }>
   'backend.switch': (args: { id: BackendId }) => Promise<void>
   'backend.listModels': () => Promise<ModelOption[]>
+  /**
+   * 列出指定 backend 的模型（不切换当前 backend）。
+   * 用于设置页同时展示 codex / claude 两个 backend 的可选模型。
+   * 注意：codex 首次调用会 spawn app-server 子进程。
+   */
+  'backend.listModelsFor': (args: { id: BackendId }) => Promise<ModelOption[]>
   'backend.refreshModels': () => Promise<ModelOption[]>
   'backend.startTurn': (args: StartTurnArgs) => Promise<{ turnId: string }>
   'backend.interruptTurn': (args: { turnId: string }) => Promise<void>

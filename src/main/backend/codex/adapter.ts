@@ -15,9 +15,11 @@
  * - codex 协议细节（item 类型、approval 流程）在这里全部转译为 TurnEvent
  */
 import { randomUUID } from 'node:crypto'
+import { createReadStream } from 'node:fs'
 import { readdir, unlink } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
+import { createInterface } from 'node:readline'
 
 import { logger } from '@main/service/logger'
 import {
@@ -110,6 +112,49 @@ interface SinkState {
   done: boolean
 }
 
+/**
+ * 从 rollout jsonl 头部读取会话使用的具体 model id。
+ *
+ * codex RPC（thread/list / thread/read）只返回 modelProvider（如 "openai"），
+ * 不返回具体 model（如 "gpt-5.6-sol"）。具体 model 存在 rollout jsonl 的
+ * turn_context 行（payload.model），通常在文件前 ~20 行内。
+ *
+ * 流式逐行读，遇到 turn_context 立即返回，避免读完整个大文件。
+ * 文件不存在 / 解析失败 / 无 turn_context 行 → 返回 null（UI fallback 到默认 model）。
+ */
+async function readModelFromRollout(
+  rolloutPath: string | null | undefined,
+): Promise<string | null> {
+  if (!rolloutPath) return null
+  try {
+    const stream = createReadStream(rolloutPath, { encoding: 'utf-8' })
+    const rl = createInterface({ input: stream, crlfDelay: Infinity })
+    try {
+      for await (const line of rl) {
+        // turn_context 行特征：type 字段是 turn_context，payload 里有 model
+        if (!line.includes('turn_context')) continue
+        const parsed = JSON.parse(line) as {
+          type?: string
+          payload?: { model?: unknown }
+        }
+        if (parsed.type === 'turn_context' && typeof parsed.payload?.model === 'string') {
+          return parsed.payload.model
+        }
+      }
+    } finally {
+      rl.close()
+      stream.destroy()
+    }
+  } catch (e) {
+    // 文件不存在 / 权限错误 / 损坏——静默返回 null，不阻塞扫描
+    const code = (e as NodeJS.ErrnoException).code
+    if (code !== 'ENOENT') {
+      log.warn('readModelFromRollout failed', rolloutPath, e)
+    }
+  }
+  return null
+}
+
 export class CodexAdapter implements AgentBackend {
   readonly id = 'codex' as const
 
@@ -121,14 +166,11 @@ export class CodexAdapter implements AgentBackend {
     supportsModelSelection: true,
     supportsEffort: true,
     supportsPermissionMode: true,
-    supportedPermissionModes: [
-      'default',
-      'acceptEdits',
-      'auto',
-      'plan',
-      'dontAsk',
-      'bypassPermissions',
-    ],
+    // codex 的 approvalPolicy 原生只有 3 个值（untrusted / on-failure / never），
+    // permissionToApproval 把 6 个 PermissionMode 塌缩映射到这 3 个。为避免 UI 显示
+    // 对 codex 无意义区分的选项（如 plan vs dontAsk 都映射 never），这里只声明 3 个——
+    // 对应 default→untrusted、acceptEdits→on-failure、bypassPermissions→never。
+    supportedPermissionModes: ['default', 'acceptEdits', 'bypassPermissions'],
     supportedEfforts: ['low', 'medium', 'high'],
     supportsHotSwap: false,
   }
@@ -144,6 +186,16 @@ export class CodexAdapter implements AgentBackend {
   >()
   private pendingApprovals = new Map<string, PendingApproval>()
   private initialized = false
+  /**
+   * 进行中的 initialize Promise——并发去重。
+   *
+   * 多个调用者（listModels / startSession / reconcile 等）可能同时触发
+   * ensureInitialized()。没有复用时，两个调用都检查 this.initialized===false
+   * 后各自发 initialize 请求，codex 会拒绝第二个返回 "Already initialized" error，
+   * 导致进程被 rejectAllPending 杀死、所有后续 RPC 失败。
+   * 复用同一个 Promise：第一个调用 spawn+握手，其他调用 await 同一个 Promise。
+   */
+  private initializePromise: Promise<void> | null = null
 
   /**
    * model/list 缓存——避免每次 listModels() 都 RPC 往返。
@@ -186,7 +238,21 @@ export class CodexAdapter implements AgentBackend {
   // ============ 生命周期 ============
 
   async initialize(): Promise<void> {
+    // 并发去重：进行中的 initialize 复用同一个 Promise，避免重复握手。
+    // 见 initializePromise 字段注释——并发 initialize 会导致 codex 返回
+    // "Already initialized" error 并杀死进程。
     if (this.initialized) return
+    if (this.initializePromise) return this.initializePromise
+    this.initializePromise = this.doInitialize()
+    try {
+      await this.initializePromise
+    } finally {
+      // 无论成功失败都清空（失败时允许下次重试）
+      this.initializePromise = null
+    }
+  }
+
+  private async doInitialize(): Promise<void> {
     if (!this.proc) {
       const binary = this.opts.binaryPath ?? 'codex'
       // codex 0.93+ 的 app-server 默认就是 stdio，不需要 `--listen stdio://`。
@@ -416,14 +482,67 @@ export class CodexAdapter implements AgentBackend {
 
   async listSessions(cwd?: string): Promise<SessionSummary[]> {
     await this.ensureInitialized()
-    const result = await this.sendRequest('thread/list', { cwd })
-    const data = (result as { threads?: Array<Record<string, unknown>> }).threads ?? []
-    return data.map((t) => ({
-      backendThreadId: (t.id as string) ?? '',
-      title: (t.preview as string) ?? null,
-      lastActiveAt: (t.updatedAt as number) ?? Date.now(),
-      model: (t.modelProvider as string) ?? null,
-    }))
+    await this.ensureInitialized()
+    // thread/list 默认只返回 "interactive sources"（codex 桌面 app 创建的会话）。
+    // catmax 通过 app-server 协议创建的会话属于 appServer / exec 等 source kind，
+    // 不传 sourceKinds 会被默认过滤掉——历史上因此看不到 catmax 创建的 codex 会话。
+    // 这里显式传所有 sourceKind，让历史会话（无论何种来源）都能被列出。
+    const allSourceKinds = [
+      'cli',
+      'vscode',
+      'exec',
+      'appServer',
+      'subAgent',
+      'subAgentReview',
+      'subAgentCompact',
+      'subAgentThreadSpawn',
+      'subAgentOther',
+      'unknown',
+    ]
+    const params: Record<string, unknown> = { sourceKinds: allSourceKinds }
+    if (cwd !== undefined) params.cwd = cwd
+
+    // 分页：codex 返回 nextCursor，量大时一页拿不全。循环到 nextCursor 为空为止。
+    // limit 取较大值减少往返（codex 默认页大小较小）；理论上限设 500 防失控。
+    const all: SessionSummary[] = []
+    let cursor: string | null = null
+    for (let page = 0; page < 50; page++) {
+      if (cursor) params.cursor = cursor
+      const result = await this.sendRequest('thread/list', params)
+      const resp = result as {
+        data?: Array<Record<string, unknown>>
+        nextCursor?: string | null
+      }
+      const threads = resp.data ?? []
+      // 收集本页 thread 的元数据（不含 model），并行读 rollout 拿真实 model
+      const pageMeta = threads.map((t) => ({
+        id: (t.id as string) ?? '',
+        title: (t.name as string | null) ?? (t.preview as string | null) ?? null,
+        updatedAtSec: (t.updatedAt as number) ?? 0,
+        cwd: (t.cwd as string) ?? undefined,
+        rolloutPath: (t.path as string | null) ?? null,
+      }))
+      // 并行读 rollout 头部的 turn_context.model（每条只读前几行，遇到即停）
+      const models = await Promise.all(pageMeta.map((m) => readModelFromRollout(m.rolloutPath)))
+      for (let i = 0; i < pageMeta.length; i++) {
+        const m = pageMeta[i]!
+        // codex 的 updatedAt/createdAt 是秒级 Unix 时间戳，JS 用毫秒——必须 *1000，
+        // 否则 lastActiveAt 会变成 1970 年，列表排序/显示全错。
+        all.push({
+          backendThreadId: m.id,
+          title: m.title,
+          lastActiveAt: m.updatedAtSec > 0 ? m.updatedAtSec * 1000 : Date.now(),
+          // 具体 model 从 rollout jsonl 的 turn_context 行读；读不到（空会话/文件缺失）为 null，
+          // UI 会 fallback 到默认 model。注意：不用 RPC 的 modelProvider（那是 "openai" 提供商，
+          // 不是具体 model id，存了会导致下拉匹配不上显示"未选中"）
+          model: models[i] ?? null,
+          cwd: m.cwd,
+        })
+      }
+      cursor = resp.nextCursor ?? null
+      if (!cursor) break
+    }
+    return all
   }
 
   async deleteSession(backendThreadId: string): Promise<void> {

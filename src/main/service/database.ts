@@ -143,7 +143,22 @@ export class DatabaseService {
 
   // ===== Session =====
 
-  listSessions(workspaceId: string): SessionRecord[] {
+  /**
+   * 列出工作区的会话。
+   *
+   * backend 可选——传了则只返回该 backend 的会话（走 idx_sessions_backend 索引），
+   * 不传则返回所有 backend 的会话（走 idx_sessions_workspace 索引，用于 reconcile /
+   * scanImportable 等需要全量对账的场景）。
+   */
+  listSessions(workspaceId: string, backend?: BackendId): SessionRecord[] {
+    if (backend) {
+      const rows = this.db
+        .prepare(
+          'SELECT * FROM sessions WHERE workspace_id = ? AND backend = ? ORDER BY last_active_at DESC',
+        )
+        .all(workspaceId, backend) as SessionRow[]
+      return rows.map(rowToSessionRecord)
+    }
     const rows = this.db
       .prepare('SELECT * FROM sessions WHERE workspace_id = ? ORDER BY last_active_at DESC')
       .all(workspaceId) as SessionRow[]

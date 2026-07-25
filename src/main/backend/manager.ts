@@ -216,6 +216,19 @@ export class BackendManager {
   }
 
   /**
+   * 列出指定 backend 的模型（不切换当前 backend）。
+   * 直接取 adapters 里的实例，不走 getCurrent()——用于设置页同时拉两个 backend 的模型列表。
+   * 注意：codex 首次调用会触发 initialize（spawn app-server）。
+   */
+  async listModelsForBackend(id: BackendId): Promise<ModelOption[]> {
+    const adapter = this.adapters.get(id)
+    if (!adapter) {
+      throw new BackendError('not-initialized', `unknown backend: ${id}`)
+    }
+    return adapter.listModels()
+  }
+
+  /**
    * 强制刷新当前后端的模型列表——先清缓存再重新拉。
    * UI 上的"刷新模型"按钮调它。场景：用户在外面 codex login 换了账户，
    * 想立即看到新账户能用的模型，不想等下次切 backend。
