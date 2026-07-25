@@ -1,10 +1,13 @@
-import { mkdtempSync, rmSync, mkdirSync, symlinkSync, writeFileSync } from 'node:fs'
+import { mkdtempSync, realpathSync, rmSync, mkdirSync, symlinkSync, writeFileSync } from 'node:fs'
+import { homedir } from 'node:os'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
 import {
   detectLanguage,
+  expandHome,
   isBinaryContent,
+  parseLineLocation,
   readDirectory,
   readFilePreview,
   resolveFileReference,
@@ -185,6 +188,113 @@ describe('file preview and search', () => {
     writeFileSync(join(tempDir, 'b', 'index.ts'), 'b')
 
     await expect(resolveFileReference(tempDir, 'index.ts')).resolves.toBeNull()
+  })
+})
+
+// Chat File Reference Advanced: 工作区外文件（家目录/绝对路径）与高级行号语法。
+// 这些场景源自真实 claude 会话：AI 常引用 ~/.claude.json、绝对路径、带行范围的路径。
+describe('resolveFileReference 工作区外与高级路径', () => {
+  test('家目录路径 ~/ 展开为绝对路径并返回 absolutePath', async () => {
+    // 用真实 home 目录下的临时文件验证 ~/ 展开
+    const homeFile = join(homedir(), '.catmax-test-tilde.json')
+    writeFileSync(homeFile, '{"test":true}')
+    try {
+      const resolved = await resolveFileReference(tempDir, '~/.catmax-test-tilde.json')
+      expect(resolved).not.toBeNull()
+      expect(resolved!.absolutePath).toBe(homeFile)
+      expect(resolved!.relativePath).toBe('~/.catmax-test-tilde.json')
+    } finally {
+      rmSync(homeFile, { force: true })
+    }
+  })
+
+  test('绝对路径指向工作区外文件返回 absolutePath', async () => {
+    const outsideFile = join(tmpdir(), 'catmax-outside-test.txt')
+    writeFileSync(outsideFile, 'outside')
+    try {
+      const resolved = await resolveFileReference(tempDir, outsideFile)
+      expect(resolved).not.toBeNull()
+      // realpath 解析 symlink（macOS /var → /private/var），故用 realpath 比较
+      expect(resolved!.absolutePath).toBe(realpathSync(outsideFile))
+    } finally {
+      rmSync(outsideFile, { force: true })
+    }
+  })
+
+  test('绝对路径指向工作区内文件返回 relativePath（无 absolutePath）', async () => {
+    mkdirSync(join(tempDir, 'src'))
+    writeFileSync(join(tempDir, 'src', 'main.ts'), 'main')
+    const absPath = join(tempDir, 'src', 'main.ts')
+    const resolved = await resolveFileReference(tempDir, absPath)
+    expect(resolved).toEqual({ relativePath: 'src/main.ts' })
+    expect(resolved!.absolutePath).toBeUndefined()
+  })
+
+  test('行范围 foo.ts:42-50 取起始行，不残留到路径', async () => {
+    mkdirSync(join(tempDir, 'src'))
+    writeFileSync(join(tempDir, 'src', 'range.ts'), 'code')
+    const resolved = await resolveFileReference(tempDir, 'src/range.ts:42-50')
+    expect(resolved).toEqual({ relativePath: 'src/range.ts', line: 42 })
+  })
+
+  test('GitHub 锚点 foo.ts#L10 解析行号', async () => {
+    writeFileSync(join(tempDir, 'anchor.ts'), 'code')
+    const resolved = await resolveFileReference(tempDir, 'anchor.ts#L10')
+    expect(resolved).toEqual({ relativePath: 'anchor.ts', line: 10 })
+  })
+
+  test('不存在的家目录路径返回 null', async () => {
+    await expect(resolveFileReference(tempDir, '~/nonexistent-catmax-test.xyz')).resolves.toBeNull()
+  })
+})
+
+describe('expandHome', () => {
+  test('~/ 展开为家目录', () => {
+    expect(expandHome('~/foo')).toBe(join(homedir(), 'foo'))
+    expect(expandHome('~')).toBe(homedir())
+  })
+
+  test('普通路径返回 null（不含家目录前缀）', () => {
+    expect(expandHome('src/foo.ts')).toBeNull()
+    expect(expandHome('/abs/path')).toBeNull()
+    expect(expandHome('foo.ts')).toBeNull()
+  })
+})
+
+describe('parseLineLocation', () => {
+  test(':line 风格', () => {
+    expect(parseLineLocation('foo.ts:42')).toEqual({ path: 'foo.ts', line: 42 })
+    expect(parseLineLocation('foo.ts:42:5')).toEqual({ path: 'foo.ts', line: 42, column: 5 })
+  })
+
+  test(':line-endline 行范围取起始行', () => {
+    expect(parseLineLocation('foo.ts:42-50')).toEqual({ path: 'foo.ts', line: 42 })
+  })
+
+  test('#L10 GitHub 锚点', () => {
+    expect(parseLineLocation('foo.ts#L10')).toEqual({ path: 'foo.ts', line: 10 })
+    expect(parseLineLocation('foo.ts#L10C5')).toEqual({ path: 'foo.ts', line: 10, column: 5 })
+  })
+
+  test('无行号的纯路径', () => {
+    expect(parseLineLocation('foo.ts')).toEqual({ path: 'foo.ts' })
+    expect(parseLineLocation('src/foo bar.ts')).toEqual({ path: 'src/foo bar.ts' })
+  })
+
+  test('括号风格 (line) / (line,col) —— MSVC / Rust 编译错误', () => {
+    expect(parseLineLocation('foo.ts(42)')).toEqual({ path: 'foo.ts', line: 42 })
+    expect(parseLineLocation('foo.ts(42,5)')).toEqual({ path: 'foo.ts', line: 42, column: 5 })
+    expect(parseLineLocation('foo.ts(42:5)')).toEqual({ path: 'foo.ts', line: 42, column: 5 })
+  })
+
+  test('空格风格 "path line" —— 编译器输出', () => {
+    expect(parseLineLocation('foo.ts 42')).toEqual({ path: 'foo.ts', line: 42 })
+    expect(parseLineLocation('foo.ts 42:5')).toEqual({ path: 'foo.ts', line: 42, column: 5 })
+  })
+
+  test('行列范围 :line:col-colEnd', () => {
+    expect(parseLineLocation('foo.ts:42:5-78')).toEqual({ path: 'foo.ts', line: 42, column: 5 })
+    expect(parseLineLocation('foo.ts:42-50.78')).toEqual({ path: 'foo.ts', line: 42 })
   })
 })
 

@@ -25,9 +25,10 @@ export const readDirectoryHandler = async (args: {
 export const readFilePreviewHandler = async (args: {
   workspaceId: string
   relativePath: string
+  absolutePath?: string
 }): Promise<FilePreview> => {
   const workspace = requireWorkspace(args.workspaceId)
-  return readFilePreview(workspace.path, args.relativePath)
+  return readFilePreview(workspace.path, args.relativePath, args.absolutePath)
 }
 
 export const searchFilesHandler = async (args: {
@@ -50,6 +51,7 @@ export const resolveFileReferenceHandler = async (args: {
 export const openInEditorHandler = async (args: {
   workspaceId: string
   relativePath: string
+  absolutePath?: string
   line?: number
   column?: number
 }) => {
@@ -57,15 +59,23 @@ export const openInEditorHandler = async (args: {
   if (!ws) {
     return { launched: false, editor: null, error: 'workspace not found' }
   }
-  try {
-    await resolveWorkspaceEntry(ws.path, args.relativePath)
-  } catch {
-    return { launched: false, editor: null, error: 'file is outside the workspace or unavailable' }
+  // 工作区外文件（absolutePath 存在）跳过工作区边界校验，直接交由编辑器启动。
+  if (!args.absolutePath) {
+    try {
+      await resolveWorkspaceEntry(ws.path, args.relativePath)
+    } catch {
+      return {
+        launched: false,
+        editor: null,
+        error: 'file is outside the workspace or unavailable',
+      }
+    }
   }
   const editor = ws.preferredEditor ?? DEFAULT_EDITOR
   return launchInEditor(editor, {
     workspacePath: ws.path,
     relativePath: args.relativePath,
+    ...(args.absolutePath !== undefined && { absolutePath: args.absolutePath }),
     ...(args.line !== undefined && { line: args.line }),
     ...(args.column !== undefined && { column: args.column }),
   })

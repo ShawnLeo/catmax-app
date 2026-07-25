@@ -20,6 +20,9 @@ coverage/
 .agent/
 .claude/
 .agents/
+logs/
+
+
 
 # shadcn-vue
 components.json-cache

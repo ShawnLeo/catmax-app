@@ -27,6 +27,7 @@
 </template>
 
 <script setup lang="ts">
+import { looksLikeFileReference } from '@renderer/lib/file-reference'
 import { renderMarkdown, renderMarkdownSync } from '@renderer/lib/markdown'
 import { useFilesStore } from '@renderer/stores/files'
 import { useWorkspaceStore } from '@renderer/stores/workspace'
@@ -139,14 +140,6 @@ function markFileReference(element: HTMLElement, reference: string): void {
   element.dataset.fileReference = reference
   element.classList.add('file-reference')
   element.title = `在文件面板中预览 ${reference}`
-}
-
-function looksLikeFileReference(value: string): boolean {
-  if (!value || value.length > 260 || /\s/.test(value)) return false
-  return (
-    /^(?:\.{0,2}\/|\/)/.test(value) ||
-    /(?:^|\/)[^/]+\.[a-z][a-z0-9]{0,11}(?::\d+(?::\d+)?)?$/i.test(value)
-  )
 }
 </script>
 

@@ -20,6 +20,8 @@ const log = logger.domain('editor-launcher')
 export interface LaunchOptions {
   workspacePath: string
   relativePath: string
+  /** 工作区外文件的绝对路径；存在时优先使用，不走 workspacePath + relativePath 拼接。 */
+  absolutePath?: string
   line?: number
   column?: number
 }
@@ -48,7 +50,8 @@ const EDITOR_NAMES: Record<EditorId, string> = {
 
 /** 启动指定编辑器打开文件 */
 export async function launchInEditor(editor: EditorId, opts: LaunchOptions): Promise<LaunchResult> {
-  const absPath = join(opts.workspacePath, opts.relativePath)
+  // 工作区外文件优先用 absolutePath；否则按工作区相对路径拼接。
+  const absPath = opts.absolutePath ?? join(opts.workspacePath, opts.relativePath)
   if (!existsSync(absPath)) {
     return { launched: false, editor, error: `file does not exist: ${absPath}` }
   }

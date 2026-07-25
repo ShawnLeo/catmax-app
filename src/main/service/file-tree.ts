@@ -5,9 +5,10 @@
  * 搜索使用有上限的广度遍历，预览只读取需要的字节，避免大文件占满内存。
  */
 import { promises as fs, type Dirent } from 'node:fs'
-import { basename, extname, isAbsolute, relative, resolve, sep } from 'node:path'
+import { homedir } from 'node:os'
+import { basename, extname, isAbsolute, join, relative, resolve, sep } from 'node:path'
 
-import type { DirEntry, FilePreview, FilePreviewKind } from '@shared/ipc/fs'
+import type { DirEntry, FilePreview, FilePreviewKind, ResolvedFileReference } from '@shared/ipc/fs'
 import ignore, { type Ignore } from 'ignore'
 
 import { logger } from './logger'
@@ -204,12 +205,19 @@ export async function searchWorkspace(
 /**
  * File Preview Dispatch:
  * 按文件类型选择文本、媒体或不可内嵌预览，并限制读取字节数以保护主进程内存。
+ *
+ * 当 absolutePath 存在时（工作区外文件，如 `~/.claude.json`），跳过工作区边界校验，
+ * 直接按绝对路径读取。仍受常规文件校验与大小限制约束。
  */
 export async function readFilePreview(
   workspacePath: string,
   relativePath: string,
+  absolutePath?: string,
 ): Promise<FilePreview> {
-  const resolved = await resolveWorkspaceEntry(workspacePath, relativePath)
+  // File Preview Path Resolution: 工作区外文件走绝对路径直读，否则经工作区边界校验。
+  const resolved = absolutePath
+    ? { absolutePath, relativePath }
+    : await resolveWorkspaceEntry(workspacePath, relativePath)
   const stat = await fs.stat(resolved.absolutePath)
   if (!stat.isFile()) throw new Error(`not a file: ${relativePath}`)
 
@@ -287,12 +295,23 @@ export async function readFilePreview(
 
 /**
  * Chat File Reference:
- * 将聊天里的路径、file URL 和可选行列号解析为工作区内的真实文件。
+ * 将聊天里的路径、file URL 和可选行列号解析为真实文件。
+ *
+ * 解析顺序（每层只处理自己负责的形态，互不重叠）：
+ *   1. 清洗：剥离首尾标点、解码 file:// / % 编码
+ *   2. 行列号：parseLineLocation 剥离末尾 :line / #L10 等
+ *   3. 家目录展开：~/foo、$HOME/foo → 绝对路径
+ *   4. 工作区内：resolveWorkspaceEntry 校验后返回 relativePath
+ *   5. 工作区外绝对路径：stat 确认是常规文件后返回 absolutePath
+ *   6. 模糊回退：纯文件名/相对后缀在工作区内唯一命中
+ *
+ * 返回值：工作区内文件只填 relativePath；工作区外文件额外填 absolutePath，
+ * relativePath 退化为展示用的原始引用形态（如 `~/.claude.json`）。
  */
 export async function resolveFileReference(
   workspacePath: string,
   reference: string,
-): Promise<{ relativePath: string; line?: number; column?: number } | null> {
+): Promise<ResolvedFileReference | null> {
   let cleaned = reference.trim()
   const leadingPunctuation = new Set(["'", '"', '`', '(', '<', '['])
   const trailingPunctuation = new Set(["'", '"', '`', ')', '>', ']', '.', ',', ';'])
@@ -314,20 +333,44 @@ export async function resolveFileReference(
     }
   }
 
-  const location = cleaned.match(/^(.*?)(?::(\d+))?(?::(\d+))?$/)
-  const pathPart = location?.[1]?.trim()
+  // 行列号解析（替换旧的行内正则，支持 :line-col 范围与 #L10 锚点）
+  const { path: pathPart, line, column } = parseLineLocation(cleaned)
   if (!pathPart) return null
 
+  // 家目录展开：~/foo、$HOME/foo → 绝对路径，走工作区外分支
+  const expandedHome = expandHome(pathPart)
+
+  // 绝对路径分支（含展开后的家目录）：尝试工作区内定位，否则走工作区外直读
+  const absoluteInput = expandedHome ?? (isAbsolute(pathPart) ? resolve(pathPart) : null)
+  if (absoluteInput) {
+    // 先尝试作为工作区内文件（绝对路径可能恰好指向工作区内）。
+    // 注意 workspacePath 可能含 symlink（如 macOS /var → /private/var），
+    // 必须对两边都 realpath 后比较，否则词法判断会误判。
+    try {
+      const root = await fs.realpath(workspacePath)
+      const realCandidate = await fs.realpath(absoluteInput)
+      assertWithinRoot(root, realCandidate)
+      const stat = await fs.stat(realCandidate)
+      if (stat.isFile()) {
+        return resolvedFileLocation(toPosixPath(relative(root, realCandidate)), line, column)
+      }
+    } catch {
+      // 不在工作区内或文件不存在，继续尝试工作区外直读
+    }
+    // 工作区外文件：直接 stat 确认是常规文件后返回 absolutePath
+    return resolveOutsideWorkspace(absoluteInput, pathPart, line, column)
+  }
+
+  // 相对路径分支：原有工作区内解析 + 模糊回退
   try {
     const resolved = await resolveWorkspaceEntry(workspacePath, pathPart)
     const stat = await fs.stat(resolved.absolutePath)
     if (!stat.isFile()) return null
-    return resolvedFileLocation(resolved.relativePath, location?.[2], location?.[3])
+    return resolvedFileLocation(resolved.relativePath, line, column)
   } catch {
     // Claude History File Reference:
     // 历史回复常把工具路径缩写成 `FilePreview.vue` 或 `components/FilePreview.vue`。
     // 直接按工作区根目录解析会失败，此时仅在工作区内唯一命中时回退，避免同名文件误跳。
-    if (isAbsolute(pathPart)) return null
     const normalizedSuffix = toPosixPath(pathPart).replace(/^\.\//, '')
     const targetName = basename(normalizedSuffix)
     const matches = (await searchWorkspace(workspacePath, targetName, MAX_SEARCH_RESULTS)).filter(
@@ -339,19 +382,40 @@ export async function resolveFileReference(
           entry.relativePath.endsWith(`/${normalizedSuffix}`)),
     )
     if (matches.length !== 1) return null
-    return resolvedFileLocation(matches[0]!.relativePath, location?.[2], location?.[3])
+    return resolvedFileLocation(matches[0]!.relativePath, line, column)
+  }
+}
+
+/**
+ * Outside Workspace Resolution:
+ * 工作区外文件（家目录、绝对路径指向工作区外）的解析。
+ * 仅允许常规文件，拒绝目录、字符设备、管道等特殊文件。
+ */
+async function resolveOutsideWorkspace(
+  absolutePath: string,
+  displayPath: string,
+  line?: number,
+  column?: number,
+): Promise<ResolvedFileReference | null> {
+  try {
+    const real = await fs.realpath(absolutePath)
+    const stat = await fs.stat(real)
+    if (!stat.isFile()) return null
+    return resolvedFileLocation(displayPath, line, column, real)
+  } catch {
+    return null
   }
 }
 
 function resolvedFileLocation(
   relativePath: string,
-  lineValue?: string,
-  columnValue?: string,
-): { relativePath: string; line?: number; column?: number } {
-  const line = lineValue ? Number(lineValue) : undefined
-  const column = columnValue ? Number(columnValue) : undefined
+  line?: number,
+  column?: number,
+  absolutePath?: string,
+): ResolvedFileReference {
   return {
     relativePath,
+    ...(absolutePath !== undefined && { absolutePath }),
     ...(line !== undefined && { line }),
     ...(column !== undefined && { column }),
   }
@@ -450,6 +514,88 @@ function assertWithinRoot(root: string, target: string): void {
   if (pathFromRoot === '..' || pathFromRoot.startsWith(`..${sep}`) || isAbsolute(pathFromRoot)) {
     throw new Error('path is outside the workspace')
   }
+}
+
+/**
+ * Home Directory Expansion:
+ * 把 `~/foo`、`~`、`$HOME/foo` 展开为绝对路径。仅处理明确的前缀，避免误伤普通文件名。
+ * 返回 null 表示输入不含家目录前缀，调用方应按原逻辑处理。
+ *
+ * 可扩展：未来如需支持 `$VAR`、Windows `%USERPROFILE%`，在此统一扩展。
+ */
+export function expandHome(input: string): string | null {
+  if (input === '~') return homedir()
+  if (input.startsWith('~/')) return join(homedir(), input.slice(2))
+  // $HOME/foo（POSIX）——防御性处理，AI 偶尔输出这种形态
+  const homeEnv = process.env.HOME
+  if (homeEnv) {
+    if (input === '$HOME') return homeEnv
+    if (input.startsWith('$HOME/')) return join(homeEnv, input.slice(6))
+  }
+  return null
+}
+
+/**
+ * Line Location Parser:
+ * 从文件引用末尾解析行列号，返回剥离后的纯路径与位置信息。
+ *
+ * 支持形态（参考 VS Code terminalLinkParsing，按真实会话频率排序）：
+ *   foo.ts:42          → line 42
+ *   foo.ts:42:5        → line 42, column 5
+ *   foo.ts:42-50       → line 42（行范围取起始行）
+ *   foo.ts:42:5-78     → line 42, column 5（行列范围取起始）
+ *   foo.ts#L10         → line 10（GitHub 锚点风格）
+ *   foo.ts#L10C5       → line 10, column 5
+ *   foo.ts(42)         → line 42（MSVC / Rust 编译错误风格）
+ *   foo.ts(42,5)       → line 42, column 5
+ *   foo.ts 42          → line 42（空格分隔，编译错误）
+ *
+ * 不匹配则 line/column 均为 undefined，原路径原样返回。
+ */
+export function parseLineLocation(input: string): { path: string; line?: number; column?: number } {
+  // GitHub 锚点风格 #L10 / #L10C5（优先匹配，因为 # 是路径合法字符需特殊处理）
+  const anchor = input.match(/^(.*)#L(\d+)(?:C(\d+))?$/)
+  if (anchor) {
+    const [, head, lineStr, colStr] = anchor
+    return {
+      path: head!.trim(),
+      line: Number(lineStr),
+      ...(colStr !== undefined && { column: Number(colStr) }),
+    }
+  }
+  // 冒号风格 :line / :line:col / :line-endline / :line:col-colEnd（行范围取起始行）
+  // 路径段不含空格和冒号——避免贪婪匹配吞掉行号，也让含空格的归空格风格分支。
+  const colon = input.match(/^([^\s:]+):(\d+)(?::(\d+))?(?:-\d+(?:\.\d+)?)?$/)
+  if (colon) {
+    const [, head, lineStr, colStr] = colon
+    return {
+      path: head!.trim(),
+      line: Number(lineStr),
+      ...(colStr !== undefined && { column: Number(colStr) }),
+    }
+  }
+  // 括号风格 (line) / (line,col) / (line:col)——MSVC / Rust / Clang 编译错误
+  const paren = input.match(/^(.*)\((\d+)(?::(\d+)|, ?(\d+))?\)$/)
+  if (paren) {
+    const [, head, lineStr, colStr, commaColStr] = paren
+    const col = colStr ?? commaColStr
+    return {
+      path: head!.trim(),
+      line: Number(lineStr),
+      ...(col !== undefined && { column: Number(col) }),
+    }
+  }
+  // 空格风格 "path line" / "path line:col"——部分编译器/工具输出（要求路径段不含空格）
+  const space = input.match(/^(\S+) (\d+)(?::(\d+))?$/)
+  if (space) {
+    const [, head, lineStr, colStr] = space
+    return {
+      path: head!,
+      line: Number(lineStr),
+      ...(colStr !== undefined && { column: Number(colStr) }),
+    }
+  }
+  return { path: input }
 }
 
 function previewResult(

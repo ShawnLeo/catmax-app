@@ -10,6 +10,7 @@
       :style="{ paddingLeft: `${depth * 14 + 6}px` }"
       :title="entry.isSymlink ? `${entry.relativePath}（符号链接）` : entry.relativePath"
       @click="onClick"
+      @dblclick="onDoubleClick"
     >
       <span class="w-4 h-4 grid place-items-center flex-shrink-0">
         <LoaderCircleIcon v-if="loading" class="w-3 h-3 text-muted-foreground animate-spin" />
@@ -65,7 +66,7 @@
 import { useFilesStore } from '@renderer/stores/files'
 import type { DirEntry } from '@shared/ipc/fs'
 import { ChevronRightIcon, Link2Icon, LoaderCircleIcon } from 'lucide-vue-next'
-import { computed } from 'vue'
+import { computed, onBeforeUnmount } from 'vue'
 
 import FileTypeIcon from './FileTypeIcon.vue'
 
@@ -83,11 +84,43 @@ const children = computed(() => filesStore.directoryCache.get(props.entry.relati
 const error = computed(() => filesStore.directoryErrors.get(props.entry.relativePath))
 const active = computed(() => filesStore.currentPreview?.relativePath === props.entry.relativePath)
 
+// File Preview Tabs (VS Code Preview Mode): 单击打开预览态（italic、可被后续单击覆盖），
+// 双击把 tab 转正（常驻）。用定时器区分单/双击——浏览器 dblclick 前会先触发两次 click。
+// 目录切换不需要区分，立即响应，避免展开/折叠有延迟。
+let clickTimer: ReturnType<typeof setTimeout> | null = null
+const DBL_CLICK_DELAY = 250
+
 async function onClick(): Promise<void> {
   if (props.entry.isDirectory) {
     await filesStore.toggleDirectory(props.workspaceId, props.entry)
-  } else {
-    await filesStore.previewFile(props.workspaceId, props.entry.relativePath)
+    return
   }
+  if (clickTimer) {
+    clearTimeout(clickTimer)
+    clickTimer = null
+  }
+  clickTimer = setTimeout(() => {
+    clickTimer = null
+    void filesStore.previewFile(props.workspaceId, props.entry.relativePath, false, undefined, true)
+  }, DBL_CLICK_DELAY)
 }
+
+async function onDoubleClick(): Promise<void> {
+  if (props.entry.isDirectory) return
+  if (clickTimer) {
+    clearTimeout(clickTimer)
+    clickTimer = null
+  }
+  // 双击文件：作为常驻 tab 打开（asTransient=false），并立即转正。
+  await filesStore.previewFile(props.workspaceId, props.entry.relativePath)
+  filesStore.pinPreviewTab(props.entry.relativePath)
+}
+
+// 卸载时丢弃待触发的单击预览，避免在节点已销毁后还写入 store。
+onBeforeUnmount(() => {
+  if (clickTimer) {
+    clearTimeout(clickTimer)
+    clickTimer = null
+  }
+})
 </script>

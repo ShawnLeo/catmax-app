@@ -59,11 +59,30 @@ export async function readDirectory(_args: {
   throw new Error('implemented in main')
 }
 
+/**
+ * Resolved File Reference:
+ * resolveFileReference 的返回结构。工作区内文件只填 relativePath（向后兼容）；
+ * 工作区外文件（家目录、绝对路径指向工作区外）额外填 absolutePath，
+ * 此时 relativePath 退化为展示用的原始引用形态（如 `~/.claude.json`）。
+ */
+export interface ResolvedFileReference {
+  relativePath: string
+  /** 工作区外文件的真实绝对路径；存在时下游 readFilePreview/openInEditor 走绝对路径直读。 */
+  absolutePath?: string
+  line?: number
+  column?: number
+}
+
 export async function readFilePreview(_args: {
   workspaceId: string
   /** @see readDirectory 的 workspacePath 兼容说明。 */
   workspacePath?: string
   relativePath: string
+  /**
+   * 工作区外文件（如 `~/.claude.json`）的绝对路径。
+   * 存在时跳过工作区边界校验，直接按绝对路径读取（仍受常规文件 + 大小限制约束）。
+   */
+  absolutePath?: string
 }): Promise<FilePreview> {
   throw new Error('implemented in main')
 }
@@ -83,13 +102,15 @@ export async function resolveFileReference(_args: {
   /** @see readDirectory 的 workspacePath 兼容说明。 */
   workspacePath?: string
   reference: string
-}): Promise<{ relativePath: string; line?: number; column?: number } | null> {
+}): Promise<ResolvedFileReference | null> {
   throw new Error('implemented in main')
 }
 
 export async function openInEditor(_args: {
   workspaceId: string
   relativePath: string
+  /** 工作区外文件的绝对路径，存在时直接以此路径打开编辑器。 */
+  absolutePath?: string
   line?: number
   column?: number
 }): Promise<{ launched: boolean; editor: EditorId | null; error?: string }> {

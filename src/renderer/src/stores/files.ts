@@ -1,14 +1,22 @@
 import { useUiStore } from '@renderer/stores/ui'
 import { useWorkspaceStore } from '@renderer/stores/workspace'
-import type { DirEntry, FilePreview } from '@shared/ipc/fs'
+import type { DirEntry, FilePreview, ResolvedFileReference } from '@shared/ipc/fs'
 import { defineStore } from 'pinia'
 import { computed, ref } from 'vue'
 
 export interface FilePreviewTab {
   relativePath: string
+  /** 工作区外文件（如 `~/.claude.json`）的绝对路径；存在时预览/编辑走绝对路径通道。 */
+  absolutePath?: string
   preview: FilePreview | null
   loading: boolean
   error: string | null
+  /**
+   * File Preview Tabs: 是否处于"预览态"（VS Code 风格的 transient tab）。
+   * 来自文件树单击的文件为 true：在原位被后续单击的文件覆盖，双击/双击 tab 后转正。
+   * 来自聊天引用、搜索结果等其他入口的为 false，作为常驻 tab。
+   */
+  isTransient: boolean
 }
 
 export const useFilesStore = defineStore('files', () => {
@@ -81,8 +89,20 @@ export const useFilesStore = defineStore('files', () => {
     workspaceId: string,
     relativePath: string,
     force = false,
+    absolutePath?: string,
+    asTransient = false,
   ): Promise<FilePreview | null> {
-    const tab = ensurePreviewTab(relativePath)
+    // File Preview Tabs (VS Code Preview Mode): asTransient=true 时，若当前活动 tab 仍是
+    // 预览态，则用新文件原地替换它（复用同一个 tab 位），而非新增——模拟 VS Code 单击预览。
+    // 已转正（非 transient）的 tab、以及来自其他入口（asTransient=false）的不受影响。
+    if (asTransient) {
+      const active = activePreviewTab.value
+      if (active?.isTransient && active.relativePath !== relativePath) {
+        replacePreviewTab(active.relativePath, relativePath, absolutePath)
+      }
+    }
+
+    const tab = ensurePreviewTab(relativePath, absolutePath, asTransient)
     activePreviewPath.value = relativePath
     if (tab.preview && !force) return tab.preview
 
@@ -93,6 +113,7 @@ export const useFilesStore = defineStore('files', () => {
         workspaceId,
         ...workspacePathArgument(workspaceId),
         relativePath,
+        ...(absolutePath !== undefined && { absolutePath }),
       })
       tab.preview = normalizePreview(rawPreview, relativePath, directoryCache.value)
       return tab.preview
@@ -104,15 +125,19 @@ export const useFilesStore = defineStore('files', () => {
     }
   }
 
-  async function openFile(workspaceId: string, relativePath: string): Promise<void> {
+  async function openFile(
+    workspaceId: string,
+    relativePath: string,
+    absolutePath?: string,
+  ): Promise<void> {
     useUiStore().showRightPanel('files')
-    await previewFile(workspaceId, relativePath)
+    await previewFile(workspaceId, relativePath, false, absolutePath)
   }
 
   // Chat File Reference: 聊天区、工具调用和文件 pill 最终都汇聚到同一预览入口。
   async function openFileReference(workspaceId: string, reference: string): Promise<boolean> {
     const resolveReference = window.api.fs.resolveFileReference
-    let resolved: { relativePath: string; line?: number; column?: number } | null = null
+    let resolved: ResolvedFileReference | null = null
     if (typeof resolveReference === 'function') {
       try {
         resolved = await resolveReference({
@@ -130,7 +155,7 @@ export const useFilesStore = defineStore('files', () => {
       workspacePathArgument(workspaceId).workspacePath,
     )
     if (!resolved) return false
-    await openFile(workspaceId, resolved.relativePath)
+    await openFile(workspaceId, resolved.relativePath, resolved.absolutePath)
     return true
   }
 
@@ -168,7 +193,12 @@ export const useFilesStore = defineStore('files', () => {
     const paths = ['', ...expandedPaths.value]
     await Promise.all(paths.map((path) => openDirectory(workspaceId, path, true)))
     if (currentPreview.value) {
-      await previewFile(workspaceId, currentPreview.value.relativePath, true)
+      await previewFile(
+        workspaceId,
+        currentPreview.value.relativePath,
+        true,
+        activePreviewTab.value?.absolutePath,
+      )
     }
   }
 
@@ -176,10 +206,12 @@ export const useFilesStore = defineStore('files', () => {
     workspaceId: string,
     relativePath: string,
     line?: number,
+    absolutePath?: string,
   ): Promise<{ launched: boolean; error?: string }> {
     const result = await window.api.fs.openInEditor({
       workspaceId,
       relativePath,
+      ...(absolutePath !== undefined && { absolutePath }),
       ...(line !== undefined && { line }),
     })
     return {
@@ -211,6 +243,13 @@ export const useFilesStore = defineStore('files', () => {
     }
   }
 
+  function closeOthersPreviews(keepPath: string): void {
+    // File Preview Tabs: 关闭除 keepPath 外的所有 tab；活动 tab 被移除时回退到保留项。
+    if (!previewTabs.value.some((tab) => tab.relativePath === keepPath)) return
+    previewTabs.value = previewTabs.value.filter((tab) => tab.relativePath === keepPath)
+    if (activePreviewPath.value !== keepPath) activePreviewPath.value = keepPath
+  }
+
   function closeAllPreviews(): void {
     previewTabs.value = []
     activePreviewPath.value = null
@@ -227,17 +266,53 @@ export const useFilesStore = defineStore('files', () => {
     searchResults.value = []
   }
 
-  function ensurePreviewTab(relativePath: string): FilePreviewTab {
+  function ensurePreviewTab(
+    relativePath: string,
+    absolutePath?: string,
+    asTransient = false,
+  ): FilePreviewTab {
     const existing = previewTabs.value.find((tab) => tab.relativePath === relativePath)
-    if (existing) return existing
+    if (existing) {
+      // 工作区外文件的 absolutePath 可能后于 tab 创建到达，补写进去。
+      if (absolutePath !== undefined) existing.absolutePath = absolutePath
+      // 重新打开某个 tab 时，非 transient 入口不应把已转正的 tab 重新降级为预览态。
+      if (!asTransient) existing.isTransient = false
+      return existing
+    }
     const tab: FilePreviewTab = {
       relativePath,
+      ...(absolutePath !== undefined && { absolutePath }),
       preview: null,
       loading: false,
       error: null,
+      isTransient: asTransient,
     }
     previewTabs.value.push(tab)
     return previewTabs.value[previewTabs.value.length - 1]!
+  }
+
+  /**
+   * File Preview Tabs (VS Code Preview Mode): 用新路径替换旧预览 tab 的槽位。
+   * 保持顺序，丢弃旧 tab 的内容/加载态，让新文件作为新的预览态 tab。
+   */
+  function replacePreviewTab(oldPath: string, newPath: string, absolutePath?: string): void {
+    const index = previewTabs.value.findIndex((tab) => tab.relativePath === oldPath)
+    if (index === -1) return
+    previewTabs.value[index] = {
+      relativePath: newPath,
+      ...(absolutePath !== undefined && { absolutePath }),
+      preview: null,
+      loading: false,
+      error: null,
+      isTransient: true,
+    }
+    if (activePreviewPath.value === oldPath) activePreviewPath.value = newPath
+  }
+
+  /** File Preview Tabs: 把指定 tab 转为常驻（双击 tab / 双击文件树时调用）。 */
+  function pinPreviewTab(relativePath: string): void {
+    const tab = previewTabs.value.find((item) => item.relativePath === relativePath)
+    if (tab) tab.isTransient = false
   }
 
   return {
@@ -267,7 +342,9 @@ export const useFilesStore = defineStore('files', () => {
     collapseAll,
     selectPreview,
     closePreview,
+    closeOthersPreviews,
     closeAllPreviews,
+    pinPreviewTab,
     reset,
   }
 })
@@ -348,9 +425,13 @@ function searchCachedEntries(
 function resolveLegacyFileReference(
   reference: string,
   workspacePath?: string,
-): { relativePath: string; line?: number; column?: number } | null {
+): ResolvedFileReference | null {
   // Dev Runtime Compatibility: 本地解析只接受安全相对路径，最终读取仍由主进程校验。
+  // 渲染端无 homedir，家目录路径（~/、$HOME/）与绝对路径一律拒绝——
+  // 让主进程（重启后）成为权威解析者，而非在此错误跳转。
   let candidate = reference.trim().replace(/^file:\/\//, '')
+  if (candidate.startsWith('~/') || candidate === '~') return null
+  if (candidate.startsWith('$HOME/') || candidate === '$HOME') return null
   const location = candidate.match(/(?::(\d+)(?::(\d+))?|#L(\d+)(?:C(\d+))?)$/)
   if (location) candidate = candidate.slice(0, -location[0].length)
   try {

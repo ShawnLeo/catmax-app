@@ -10,18 +10,24 @@
         v-for="tab in filesStore.previewTabs"
         :key="tab.relativePath"
         :class="[
-          'group/tab min-w-0 max-w-48 shrink-0 flex items-center border-r border-border/70',
+          'group/tab min-w-0 max-w-48 shrink-0 relative flex items-center border-r border-border/70',
+          // File Preview Tabs Active State: 活动项用顶部强调条 + 实底背景，非活动项压暗文字，
+          // 让当前选中状态一眼可辨（旧样式两者都偏浅，区分度不足）。
           tab.relativePath === filesStore.activePreviewPath
-            ? 'bg-background text-foreground'
-            : 'bg-muted/20 text-muted-foreground hover:bg-muted/45 hover:text-foreground',
+            ? 'bg-background text-foreground preview-tab-active'
+            : 'bg-card/60 text-muted-foreground/70 hover:bg-muted/40 hover:text-foreground/90',
         ]"
         @mousedown.middle.prevent="filesStore.closePreview(tab.relativePath)"
+        @contextmenu.prevent="onTabContextMenu($event, tab.relativePath)"
+        @dblclick="filesStore.pinPreviewTab(tab.relativePath)"
       >
         <button
           type="button"
           role="tab"
           :aria-selected="tab.relativePath === filesStore.activePreviewPath"
-          :title="tab.relativePath"
+          :title="
+            tab.isTransient ? `${fileName(tab.relativePath)}（预览，双击常驻）` : tab.relativePath
+          "
           class="h-full min-w-0 flex-1 flex items-center gap-1.5 pl-2.5 pr-1 text-xs"
           @click="filesStore.selectPreview(tab.relativePath)"
         >
@@ -29,12 +35,20 @@
             :name="tab.preview?.name ?? fileName(tab.relativePath)"
             class="w-4 h-4 shrink-0"
           />
-          <span class="truncate">{{ tab.preview?.name ?? fileName(tab.relativePath) }}</span>
+          <!-- File Preview Tabs (VS Code Preview Mode): 预览态用斜体标题，转正后恢复常规字重。 -->
+          <span :class="['truncate', tab.isTransient ? 'italic font-normal' : 'font-medium']">
+            {{ tab.preview?.name ?? fileName(tab.relativePath) }}
+          </span>
           <LoaderCircleIcon v-if="tab.loading" class="w-3 h-3 shrink-0 animate-spin" />
         </button>
         <button
           type="button"
-          class="w-6 h-6 mr-1 grid place-items-center rounded opacity-0 group-hover/tab:opacity-100 hover:bg-muted/80 focus:opacity-100"
+          class="w-6 h-6 mr-1 grid place-items-center rounded hover:bg-muted/80 focus:opacity-100"
+          :class="
+            tab.relativePath === filesStore.activePreviewPath
+              ? 'opacity-60'
+              : 'opacity-0 group-hover/tab:opacity-60'
+          "
           :aria-label="`关闭 ${fileName(tab.relativePath)}`"
           title="关闭文件"
           @click.stop="filesStore.closePreview(tab.relativePath)"
@@ -45,15 +59,62 @@
       <div class="min-w-4 flex-1 border-b border-transparent" />
     </div>
 
+    <!-- File Preview Tabs Context Menu: 右键 tab 弹出关闭操作。
+         Teleport 到 body 并用 fixed 定位在鼠标坐标，避免被 overflow 祖先裁掉。 -->
+    <Teleport to="body">
+      <div
+        v-if="contextMenu.open && contextMenuStyle"
+        ref="contextMenuRef"
+        class="fixed z-[9999] min-w-[12rem] rounded-md border border-border bg-popover p-1 shadow-lg"
+        :style="contextMenuStyle"
+        @click.stop
+        @contextmenu.prevent
+      >
+        <button
+          type="button"
+          class="context-menu-item"
+          @click="runContextMenuAction(() => filesStore.closePreview(contextMenu.path!))"
+        >
+          <XIcon class="w-4 h-4 shrink-0" />
+          <span>关闭标签</span>
+        </button>
+        <button
+          type="button"
+          class="context-menu-item"
+          :disabled="filesStore.previewTabs.length <= 1"
+          @click="runContextMenuAction(() => filesStore.closeOthersPreviews(contextMenu.path!))"
+        >
+          <XSquareIcon class="w-4 h-4 shrink-0" />
+          <span>关闭其他</span>
+        </button>
+        <button
+          type="button"
+          class="context-menu-item"
+          :disabled="filesStore.previewTabs.length === 0"
+          @click="runContextMenuAction(() => filesStore.closeAllPreviews())"
+        >
+          <XCircleIcon class="w-4 h-4 shrink-0" />
+          <span>关闭所有</span>
+        </button>
+      </div>
+    </Teleport>
+
     <!-- File Preview Toolbar: 显示活动路径，并提供刷新与外部编辑器入口。 -->
     <div class="h-10 flex items-center gap-1.5 px-2.5 border-b border-border/70 bg-card/70">
       <FileTypeIcon v-if="preview" :name="preview.name" class="w-[18px] h-[18px] shrink-0" />
       <div class="min-w-0 flex-1 text-xs truncate" :title="fullPath">
-        <span class="text-muted-foreground"
-          >{{ workspaceStore.currentWorkspace?.name ?? '工作区' }}/</span
-        >
-        <span v-if="parentPath" class="text-muted-foreground">{{ parentPath }}/</span>
-        <span class="text-foreground">{{ pathParts[pathParts.length - 1] }}</span>
+        <template v-if="isOutsideWorkspace">
+          <!-- Outside Workspace: 工作区外文件直接显示完整路径，文件名高亮 -->
+          <span v-if="parentPath" class="text-muted-foreground">{{ parentPath }}/</span>
+          <span class="text-foreground">{{ pathParts[pathParts.length - 1] }}</span>
+        </template>
+        <template v-else>
+          <span class="text-muted-foreground"
+            >{{ workspaceStore.currentWorkspace?.name ?? '工作区' }}/</span
+          >
+          <span v-if="parentPath" class="text-muted-foreground">{{ parentPath }}/</span>
+          <span class="text-foreground">{{ pathParts[pathParts.length - 1] }}</span>
+        </template>
       </div>
       <div
         v-if="preview?.kind === 'markdown'"
@@ -241,9 +302,11 @@ import {
   LoaderCircleIcon,
   PlusIcon,
   RefreshCwIcon,
+  XCircleIcon,
   XIcon,
+  XSquareIcon,
 } from 'lucide-vue-next'
-import { computed, defineComponent, h, ref, watch } from 'vue'
+import { computed, defineComponent, h, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 
 import FileTypeIcon from './FileTypeIcon.vue'
 
@@ -252,10 +315,16 @@ const workspaceStore = useWorkspaceStore()
 const chatInput = useChatInputStore()
 const preview = computed(() => filesStore.currentPreview)
 const activePath = computed(() => filesStore.activePreviewPath ?? '')
+const activeTab = computed(() => filesStore.activePreviewTab)
+// Outside Workspace Display: 工作区外文件（如 ~/.claude.json）走绝对路径展示，
+// 不套用"工作区名/相对路径"逻辑。
+const isOutsideWorkspace = computed(() => !!activeTab.value?.absolutePath)
 const pathParts = computed(() => activePath.value.split('/'))
 const parentPath = computed(() => pathParts.value.slice(0, -1).join('/'))
-const fullPath = computed(
-  () => `${workspaceStore.currentWorkspace?.name ?? '工作区'}/${activePath.value}`,
+const fullPath = computed(() =>
+  isOutsideWorkspace.value
+    ? (activeTab.value?.absolutePath ?? activePath.value)
+    : `${workspaceStore.currentWorkspace?.name ?? '工作区'}/${activePath.value}`,
 )
 const highlighted = ref('')
 const markdownMode = ref<'preview' | 'source'>('preview')
@@ -264,6 +333,29 @@ const selectionInfo = ref<{
   endLine: number
   text: string
 } | null>(null)
+
+// File Preview Tabs Context Menu: 状态挂在组件上，路径可能为 null（关闭时）。
+const contextMenuRef = ref<HTMLElement | null>(null)
+const contextMenu = ref<{ open: boolean; x: number; y: number; path: string | null }>({
+  open: false,
+  x: 0,
+  y: 0,
+  path: null,
+})
+
+const contextMenuStyle = computed(() => {
+  // Context Menu Position: 鼠标坐标定位，贴边时回退到视口内，避免菜单溢出屏幕。
+  if (!contextMenu.value.open) return null
+  const menuWidth = 200
+  const menuHeight = 96
+  const margin = 8
+  const maxX = window.innerWidth - menuWidth - margin
+  const maxY = window.innerHeight - menuHeight - margin
+  return {
+    top: `${Math.min(contextMenu.value.y, Math.max(margin, maxY))}px`,
+    left: `${Math.min(contextMenu.value.x, Math.max(margin, maxX))}px`,
+  }
+})
 
 const PreviewUnavailable = defineComponent<{ preview: FilePreview }>({
   props: {
@@ -322,6 +414,49 @@ watch(activePath, () => {
   markdownMode.value = 'preview'
 })
 
+function onTabContextMenu(event: MouseEvent, relativePath: string): void {
+  // 右键直接定位到鼠标点击点，并在弹出前先选中该 tab，让操作目标更直观。
+  filesStore.selectPreview(relativePath)
+  contextMenu.value = { open: true, x: event.clientX, y: event.clientY, path: relativePath }
+}
+
+function runContextMenuAction(action: () => void): void {
+  action()
+  contextMenu.value.open = false
+}
+
+// clickOutside 收起——capture 阶段抓事件，避免与菜单项自身 click 打架。
+// 跟 DropdownMenu 的实现一致（项目目前没有 v-click-outside 指令）。
+function handleContextMenuOutside(event: MouseEvent): void {
+  if (!contextMenu.value.open) return
+  if (contextMenuRef.value && !contextMenuRef.value.contains(event.target as Node)) {
+    contextMenu.value.open = false
+  }
+}
+
+// Escape / 窗口失焦也收起右键菜单，跟原生上下文菜单行为一致。
+function handleContextMenuKey(event: KeyboardEvent): void {
+  if (event.key === 'Escape' && contextMenu.value.open) contextMenu.value.open = false
+}
+
+function handleWindowBlur(): void {
+  if (contextMenu.value.open) contextMenu.value.open = false
+}
+
+onMounted(() => {
+  document.addEventListener('click', handleContextMenuOutside, true)
+  document.addEventListener('contextmenu', handleContextMenuOutside, true)
+  window.addEventListener('keydown', handleContextMenuKey)
+  window.addEventListener('blur', handleWindowBlur)
+})
+
+onBeforeUnmount(() => {
+  document.removeEventListener('click', handleContextMenuOutside, true)
+  document.removeEventListener('contextmenu', handleContextMenuOutside, true)
+  window.removeEventListener('keydown', handleContextMenuKey)
+  window.removeEventListener('blur', handleWindowBlur)
+})
+
 const tableRows = computed(() => {
   if (!preview.value?.content) return []
   const separator = preview.value.relativePath.toLowerCase().endsWith('.tsv') ? '\t' : ','
@@ -347,13 +482,23 @@ const kindLabel = computed(() => {
 async function reload(): Promise<void> {
   const workspaceId = workspaceStore.currentWorkspace?.id
   if (!workspaceId || !preview.value) return
-  await filesStore.previewFile(workspaceId, preview.value.relativePath, true)
+  await filesStore.previewFile(
+    workspaceId,
+    preview.value.relativePath,
+    true,
+    activeTab.value?.absolutePath,
+  )
 }
 
 async function openInEditor(): Promise<void> {
   const workspaceId = workspaceStore.currentWorkspace?.id
   if (!workspaceId || !preview.value) return
-  const result = await filesStore.openInEditor(workspaceId, preview.value.relativePath)
+  const result = await filesStore.openInEditor(
+    workspaceId,
+    preview.value.relativePath,
+    undefined,
+    activeTab.value?.absolutePath,
+  )
   if (!result.launched && result.error) window.alert(result.error)
 }
 
@@ -490,6 +635,24 @@ function fileName(relativePath: string): string {
 
 .preview-action {
   @apply w-7 h-7 grid place-items-center rounded text-muted-foreground hover:text-foreground hover:bg-muted transition-colors;
+}
+
+.context-menu-item {
+  @apply w-full flex items-center gap-2.5 px-3 py-2 rounded text-sm text-left transition-colors text-popover-foreground hover:bg-accent hover:text-accent-foreground disabled:opacity-40 disabled:cursor-not-allowed;
+}
+
+/* File Preview Tabs Active State: 活动项顶部 2px 强调条，贴着 tab 容器的上沿，
+ * 提供清晰的视觉锚点（非活动项没有这条线）。 */
+.preview-tab-active::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: var(--primary);
+  border-top-left-radius: 2px;
+  border-top-right-radius: 2px;
 }
 
 .markdown-mode {

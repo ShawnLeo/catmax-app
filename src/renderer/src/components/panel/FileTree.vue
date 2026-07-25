@@ -126,7 +126,7 @@
     >
       <span v-if="query.trim()">{{ filesStore.searchResults.length }} 个结果</span>
       <span v-else>{{ rootEntries.length }} 个顶层项目</span>
-      <span class="ml-auto">点击文件预览</span>
+      <span class="ml-auto">单击预览 · 双击常驻</span>
     </div>
   </div>
 </template>
@@ -145,7 +145,7 @@ import {
   SearchXIcon,
   XIcon,
 } from 'lucide-vue-next'
-import { computed, onUnmounted, ref, watch } from 'vue'
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 
 import FileTreeNode from './FileTreeNode.vue'
 import FileTypeIcon from './FileTypeIcon.vue'
@@ -160,14 +160,23 @@ const rootEntries = computed(() => filesStore.directoryCache.get('') ?? [])
 const rootLoading = computed(() => filesStore.loadingPaths.has(''))
 const rootError = computed(() => filesStore.directoryErrors.get(''))
 
+// File Tree Workspace Binding: 挂载时仅加载根目录；仅在工作区真正切换时才 reset，
+// 避免面板首次打开（FileTree 挂载）时误清空正在进行的文件预览（previewTabs）。
+// 旧实现用 { immediate: true }，会在挂载瞬间无条件 reset，与并发进行的 previewFile
+// IPC 产生竞态：readFilePreview 的 await 期间 Vue 挂载 FileTree → immediate watch 触发
+// reset() → previewTabs 被清空 → 预览面板永远无法显示（直到面板被关闭再重开）。
+onMounted(() => {
+  if (workspaceStore.currentWorkspace?.id) void loadRoot()
+})
+
 watch(
   () => workspaceStore.currentWorkspace?.id,
-  (workspaceId) => {
+  (workspaceId, prevId) => {
+    if (workspaceId === prevId) return
     filesStore.reset()
     query.value = ''
     if (workspaceId) void loadRoot()
   },
-  { immediate: true },
 )
 
 watch(query, (value) => {
