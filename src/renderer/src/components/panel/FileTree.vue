@@ -133,6 +133,7 @@
 
 <script setup lang="ts">
 import { useFilesStore } from '@renderer/stores/files'
+import { useUiStore } from '@renderer/stores/ui'
 import { useWorkspaceStore } from '@renderer/stores/workspace'
 import type { DirEntry } from '@shared/ipc/fs'
 import {
@@ -152,6 +153,7 @@ import FileTypeIcon from './FileTypeIcon.vue'
 
 const workspaceStore = useWorkspaceStore()
 const filesStore = useFilesStore()
+const uiStore = useUiStore()
 const query = ref('')
 const refreshing = ref(false)
 let searchTimer: ReturnType<typeof setTimeout> | null = null
@@ -216,6 +218,7 @@ async function openSearchResult(entry: DirEntry): Promise<void> {
     query.value = ''
     await filesStore.toggleDirectory(workspaceId, entry)
   } else {
+    uiStore.setFilePreviewVisible(true)
     await filesStore.previewFile(workspaceId, entry.relativePath)
   }
 }

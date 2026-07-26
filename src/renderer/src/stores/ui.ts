@@ -49,6 +49,8 @@ export const useUiStore = defineStore('ui', () => {
   const rightPanelWidth = ref(DEFAULT_RIGHT_PANEL_WIDTH)
   // File Preview Layout: 预览宽度与文件树宽度分开保存，拖动组合面板时互不覆盖。
   const filePreviewWidth = ref(DEFAULT_FILE_PREVIEW_WIDTH)
+  const filePreviewVisible = ref(true)
+  const fileTreeVisible = ref(true)
   const bottomPanelHeight = ref(DEFAULT_BOTTOM_PANEL_HEIGHT)
 
   // 拖拽 resize 期间为 true：面板关掉 transition（避免动画追赶造成卡顿），
@@ -76,6 +78,17 @@ export const useUiStore = defineStore('ui', () => {
 
   function setFilePreviewWidth(width: number): void {
     filePreviewWidth.value = width
+  }
+
+  function setFilePreviewVisible(visible: boolean): void {
+    // Files 面板至少保留一侧，避免关闭详情和文件树后失去恢复入口之外的内容上下文。
+    if (!visible && !fileTreeVisible.value) return
+    filePreviewVisible.value = visible
+  }
+
+  function setFileTreeVisible(visible: boolean): void {
+    if (!visible && !filePreviewVisible.value) return
+    fileTreeVisible.value = visible
   }
 
   function setBottomPanelHeight(height: number): void {
@@ -215,6 +228,9 @@ export const useUiStore = defineStore('ui', () => {
     reviewStats.value = { additions: 0, deletions: 0 }
     reviewSelectedPath.value = null
     reviewExpandedPaths.value = new Set()
+    if (rightPanelTab.value === 'review') {
+      rightPanelTab.value = 'files'
+    }
   }
 
   function setRightPanelTab(tab: RightPanelTab): void {
@@ -254,6 +270,8 @@ export const useUiStore = defineStore('ui', () => {
     sidebarWidth,
     rightPanelWidth,
     filePreviewWidth,
+    filePreviewVisible,
+    fileTreeVisible,
     bottomPanelHeight,
     panelDragging,
     startPanelDrag,
@@ -261,6 +279,8 @@ export const useUiStore = defineStore('ui', () => {
     setSidebarWidth,
     setRightPanelWidth,
     setFilePreviewWidth,
+    setFilePreviewVisible,
+    setFileTreeVisible,
     setBottomPanelHeight,
     toggleSidebar,
     openSettings,

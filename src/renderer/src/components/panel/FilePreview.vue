@@ -11,8 +11,8 @@
         :key="tab.relativePath"
         :class="[
           'group/tab min-w-0 max-w-48 shrink-0 relative flex items-center border-r border-border/70',
-          // File Preview Tabs Active State: 活动项用顶部强调条 + 实底背景，非活动项压暗文字，
-          // 让当前选中状态一眼可辨（旧样式两者都偏浅，区分度不足）。
+          // File Preview Tabs Active State: 活动项用底部短强调条 + 实底背景，避免与主 Tab
+          // 头部的选中下划线在上下边界处交叠。
           tab.relativePath === filesStore.activePreviewPath
             ? 'bg-background text-foreground preview-tab-active'
             : 'bg-card/60 text-muted-foreground/70 hover:bg-muted/40 hover:text-foreground/90',
@@ -641,18 +641,17 @@ function fileName(relativePath: string): string {
   @apply w-full flex items-center gap-2.5 px-3 py-2 rounded text-sm text-left transition-colors text-popover-foreground hover:bg-accent hover:text-accent-foreground disabled:opacity-40 disabled:cursor-not-allowed;
 }
 
-/* File Preview Tabs Active State: 活动项顶部 2px 强调条，贴着 tab 容器的上沿，
- * 提供清晰的视觉锚点（非活动项没有这条线）。 */
+/* File Preview Tabs Active State: 底部内缩强调条与主 Tab 的下划线拉开层级，
+ * 同时避免覆盖文件 Tab 容器自身的分隔边框。 */
 .preview-tab-active::before {
   content: '';
   position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
+  bottom: 0;
+  left: 8px;
+  right: 8px;
   height: 2px;
   background: var(--primary);
-  border-top-left-radius: 2px;
-  border-top-right-radius: 2px;
+  border-radius: 2px 2px 0 0;
 }
 
 .markdown-mode {

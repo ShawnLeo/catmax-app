@@ -120,6 +120,7 @@ useStreamMessage()
 const SIDEBAR_MIN = 280
 const RIGHT_PANEL_MIN = 320
 const FILE_PREVIEW_MIN = 360
+const FILE_PREVIEW_SPLIT_HANDLE_WIDTH = 1
 // 底部终端面板可拖拽高度——min 保证终端至少能显示几行，max 不超过容器 70%（留空间给聊天区）
 const BOTTOM_PANEL_MIN = 120
 const containerRef = ref<HTMLElement | null>(null)
@@ -130,16 +131,24 @@ const sidebarMax = computed(() => Math.max(SIDEBAR_MIN, Math.floor(containerWidt
 
 // File Preview Layout: 右侧拖拽目标是“预览 + 文件树”的组合宽度。
 const filePreviewOpen = computed(
-  () => uiStore.rightPanelTab === 'files' && filesStore.previewTabs.length > 0,
+  () =>
+    uiStore.rightPanelTab === 'files' &&
+    filesStore.previewTabs.length > 0 &&
+    uiStore.filePreviewVisible,
 )
-const rightPanelCurrent = computed(() =>
-  filePreviewOpen.value
-    ? uiStore.rightPanelWidth + uiStore.filePreviewWidth
-    : uiStore.rightPanelWidth,
+const fileTreeOpen = computed(
+  () =>
+    uiStore.rightPanelTab !== 'files' ||
+    uiStore.fileTreeVisible ||
+    filesStore.previewTabs.length === 0,
 )
-const rightPanelMin = computed(() =>
-  filePreviewOpen.value ? uiStore.rightPanelWidth + FILE_PREVIEW_MIN : RIGHT_PANEL_MIN,
-)
+const rightPanelCurrent = computed(() => {
+  if (filePreviewOpen.value && fileTreeOpen.value) {
+    return uiStore.rightPanelWidth + uiStore.filePreviewWidth + FILE_PREVIEW_SPLIT_HANDLE_WIDTH
+  }
+  return filePreviewOpen.value ? uiStore.filePreviewWidth : uiStore.rightPanelWidth
+})
+const rightPanelMin = computed(() => (filePreviewOpen.value ? FILE_PREVIEW_MIN : RIGHT_PANEL_MIN))
 const rightPanelMax = computed(() =>
   Math.max(rightPanelMin.value, Math.floor(containerWidth.value * 0.78)),
 )
@@ -168,8 +177,10 @@ onUnmounted(() => {
 
 function resizeRightPanel(width: number): void {
   // File Preview Layout: 文件树宽度保持稳定，预览打开时只调整它左侧的预览区域。
-  if (filePreviewOpen.value) {
-    uiStore.setFilePreviewWidth(width - uiStore.rightPanelWidth)
+  if (filePreviewOpen.value && fileTreeOpen.value) {
+    uiStore.setFilePreviewWidth(width - uiStore.rightPanelWidth - FILE_PREVIEW_SPLIT_HANDLE_WIDTH)
+  } else if (filePreviewOpen.value) {
+    uiStore.setFilePreviewWidth(width)
   } else {
     uiStore.setRightPanelWidth(width)
   }

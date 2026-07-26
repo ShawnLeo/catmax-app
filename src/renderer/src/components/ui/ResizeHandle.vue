@@ -34,7 +34,11 @@ interface Props {
 }
 
 const props = defineProps<Props>()
-const emit = defineEmits<{ resize: [size: number] }>()
+const emit = defineEmits<{
+  resize: [size: number]
+  reachMin: []
+  reachMax: []
+}>()
 const uiStore = useUiStore()
 
 function onPointerDown(e: PointerEvent): void {
@@ -82,12 +86,16 @@ function onPointerDown(e: PointerEvent): void {
     emit('resize', clamped)
   }
   const onUp = (ev: PointerEvent): void => {
+    const delta = ev.clientX - startX
+    const next = props.side === 'left' ? startWidth + delta : startWidth - delta
     target.releasePointerCapture(ev.pointerId)
     document.removeEventListener('pointermove', onMove)
     document.removeEventListener('pointerup', onUp)
     document.body.style.userSelect = ''
     document.body.style.cursor = ''
     uiStore.endPanelDrag()
+    if (next <= props.min) emit('reachMin')
+    else if (next >= props.max) emit('reachMax')
   }
   document.addEventListener('pointermove', onMove)
   document.addEventListener('pointerup', onUp)

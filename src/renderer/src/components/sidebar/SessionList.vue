@@ -9,21 +9,35 @@
     </div>
 
     <template v-else>
-      <!-- 顶部：新建会话 + 扫描导入按钮 -->
-      <div class="flex gap-1.5 mb-2">
+      <!-- 会话操作：主按钮保持强视觉层级，导入和刷新作为紧凑的次级操作 -->
+      <div class="mb-2 flex items-center gap-1 rounded-lg bg-sidebar-accent/70 p-1">
         <button
-          class="flex-1 px-3 py-2 text-sm text-primary hover:bg-sidebar-accent rounded-md flex items-center gap-2 border border-sidebar-border cursor-pointer"
+          class="group flex min-w-0 flex-1 items-center gap-2 rounded-md px-1.5 py-1 text-sm font-medium text-sidebar-foreground transition-colors hover:bg-background/40 cursor-pointer"
           @click="newSession"
         >
-          <PlusIcon class="w-4 h-4" />
-          新建会话
+          <span
+            class="flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-foreground text-background shadow-sm transition-transform group-active:scale-95"
+          >
+            <PlusIcon class="h-3.5 w-3.5" stroke-width="2.5" />
+          </span>
+          <span class="truncate">新建会话</span>
         </button>
         <button
-          class="px-2.5 py-2 text-xs text-muted-foreground hover:text-foreground hover:bg-sidebar-accent rounded-md border border-sidebar-border cursor-pointer"
+          class="flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-background/40 hover:text-foreground cursor-pointer"
           title="扫描磁盘/RPC 上已存在但还没纳入 catmax 的 claude/codex 会话"
+          aria-label="导入会话"
           @click="importDialogOpen = true"
         >
-          <DownloadIcon class="w-4 h-4" />
+          <FileInputIcon class="w-4 h-4" />
+        </button>
+        <button
+          class="flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-background/40 hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50 cursor-pointer"
+          title="刷新当前工作区会话"
+          aria-label="刷新当前工作区会话"
+          :disabled="refreshingSessions"
+          @click="refreshSessions"
+        >
+          <RefreshCwIcon class="w-4 h-4" :class="{ 'animate-spin': refreshingSessions }" />
         </button>
       </div>
 
@@ -64,7 +78,7 @@ import { useSessionStore } from '@renderer/stores/session'
 import { useSettingsStore } from '@renderer/stores/settings'
 import { useWorkspaceStore } from '@renderer/stores/workspace'
 import { type BackendId } from '@shared/constants'
-import { DownloadIcon, PlusIcon } from 'lucide-vue-next'
+import { FileInputIcon, PlusIcon, RefreshCwIcon } from 'lucide-vue-next'
 import { onMounted, ref, watch } from 'vue'
 
 import ImportSessionsDialog from './ImportSessionsDialog.vue'
@@ -77,6 +91,7 @@ const settings = useSettingsStore()
 
 /** 「扫描导入」对话框显隐——点按钮打开，dialog 关闭时刷新会话列表 */
 const importDialogOpen = ref(false)
+const refreshingSessions = ref(false)
 const messageStore = useMessageStore()
 
 /**
@@ -198,6 +213,20 @@ async function newSession(): Promise<void> {
   }
   sessionStore.setCurrent('')
   messageStore.setCurrentSession(null)
+}
+
+/** 手动刷新当前工作区，并与当前后端的真实会话状态重新对账。 */
+async function refreshSessions(): Promise<void> {
+  const workspace = workspaceStore.currentWorkspace
+  if (!workspace || refreshingSessions.value) return
+
+  refreshingSessions.value = true
+  try {
+    await sessionStore.load(workspace.id, backendStore.currentId)
+    await sessionStore.reconcile(workspace.id, backendStore.currentId)
+  } finally {
+    refreshingSessions.value = false
+  }
 }
 
 /**

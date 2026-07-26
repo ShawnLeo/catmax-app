@@ -64,6 +64,7 @@
 
 <script setup lang="ts">
 import { useFilesStore } from '@renderer/stores/files'
+import { useUiStore } from '@renderer/stores/ui'
 import type { DirEntry } from '@shared/ipc/fs'
 import { ChevronRightIcon, Link2Icon, LoaderCircleIcon } from 'lucide-vue-next'
 import { computed, onBeforeUnmount } from 'vue'
@@ -77,6 +78,7 @@ const props = defineProps<{
 }>()
 
 const filesStore = useFilesStore()
+const uiStore = useUiStore()
 // File Tree Node: 递归节点只从 store 读取共享缓存，避免每层重复发起 IPC。
 const expanded = computed(() => filesStore.expandedPaths.has(props.entry.relativePath))
 const loading = computed(() => filesStore.loadingPaths.has(props.entry.relativePath))
@@ -99,6 +101,8 @@ async function onClick(): Promise<void> {
     clearTimeout(clickTimer)
     clickTimer = null
   }
+  // File Preview Visibility: 从文件树选择文件时，已手动关闭的详情面板也应重新出现。
+  uiStore.setFilePreviewVisible(true)
   clickTimer = setTimeout(() => {
     clickTimer = null
     void filesStore.previewFile(props.workspaceId, props.entry.relativePath, false, undefined, true)
@@ -111,6 +115,7 @@ async function onDoubleClick(): Promise<void> {
     clearTimeout(clickTimer)
     clickTimer = null
   }
+  uiStore.setFilePreviewVisible(true)
   // 双击文件：作为常驻 tab 打开（asTransient=false），并立即转正。
   await filesStore.previewFile(props.workspaceId, props.entry.relativePath)
   filesStore.pinPreviewTab(props.entry.relativePath)
