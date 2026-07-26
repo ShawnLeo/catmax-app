@@ -78,7 +78,7 @@
           <div class="flex gap-2 flex-shrink-0">
             <Button variant="outline" size="sm" @click="onReject">拒绝（Esc）</Button>
             <Button v-if="showApproveAlways" variant="secondary" size="sm" @click="onApproveAlways">
-              本会话都允许
+              {{ approveAlwaysLabel }}
             </Button>
             <Button :variant="isHighRisk ? 'destructive' : 'default'" size="sm" @click="onApprove">
               允许（Enter）
@@ -110,12 +110,22 @@ const isClaude = computed(() => messageStore.pendingClaudePermission !== null)
 const isHighRisk = computed(() => request.value.riskLevel === 'high')
 
 /**
- * "本会话都允许"显示条件：
- * - codex：approve_always → 原生 acceptForSession，非高危时显示
+ * "本会话都允许/始终允许"显示条件：
+ * - codex 普通审批：approve_always → 原生 acceptForSession，非高危时显示
+ * - MCP elicitation：只有 server 在 _meta.persist 明确声明支持时显示
  * - claude：approve_always → 回传 SDK suggestions 作为 updatedPermissions（adapter 已支持），非高危时显示
  *   （claude 协议层曾有"无 always 语义"的旧注释，SDK 下经 updatedPermissions 已可真持久化）
  */
-const showApproveAlways = computed(() => !isHighRisk.value)
+const showApproveAlways = computed(
+  () =>
+    !isHighRisk.value &&
+    (request.value.kind !== 'mcp' || (request.value.approvalPersistence?.length ?? 0) > 0),
+)
+const approveAlwaysLabel = computed(() =>
+  request.value.kind === 'mcp' && request.value.approvalPersistence?.includes('always')
+    ? '始终允许'
+    : '本会话都允许',
+)
 
 /** 没有 SDK displayName 时的兜底标签（按 kind 给中文） */
 const kindLabel = computed(() => {

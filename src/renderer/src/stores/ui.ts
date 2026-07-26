@@ -1,3 +1,4 @@
+import type { CodexDiffStats, CodexFileChange } from '@shared/backend/blocks'
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
 
@@ -5,8 +6,15 @@ const DEFAULT_SIDEBAR_WIDTH = 240
 const DEFAULT_RIGHT_PANEL_WIDTH = 320
 const DEFAULT_FILE_PREVIEW_WIDTH = 520
 const DEFAULT_BOTTOM_PANEL_HEIGHT = 320
+/**
+ * 审查 tab 的最小推荐宽度——split diff 视图需要左右两列空间，
+ * 低于这个宽度会挤；showReview 会把右栏临时撑到这个值。
+ */
+const REVIEW_PANEL_MIN_WIDTH = 760
 
-export type RightPanelTab = 'git' | 'files'
+export type RightPanelTab = 'git' | 'files' | 'review'
+/** Review Diff Mode: 统一(单列 +/- 穿插) 或 拆分(左右双列) */
+export type ReviewDiffMode = 'unified' | 'split'
 
 export const useUiStore = defineStore('ui', () => {
   const sidebarCollapsed = ref(false)
@@ -15,6 +23,20 @@ export const useUiStore = defineStore('ui', () => {
   const bottomPanelVisible = ref(false)
   const commandPaletteVisible = ref(false)
   const rightPanelTab = ref<RightPanelTab>('git')
+
+  // ===== 审查 tab 状态 =====
+  // 审查是「某一轮 codex 改动」的只读快照：files/stats 由 CodexChangesCard 传入，
+  // selectedPath/diffMode 是用户在审查面板内的交互选择。数据只活在内存，不持久化
+  // （每轮的 diff 已在消息块里，点审核时把当前轮的 files 快照塞进来即可）。
+  const reviewFiles = ref<CodexFileChange[]>([])
+  const reviewStats = ref<CodexDiffStats>({ additions: 0, deletions: 0 })
+  const reviewDiffMode = ref<ReviewDiffMode>('unified')
+  const reviewSelectedPath = ref<string | null>(null)
+  // 审查面板内文件树的宽度和显隐（可拖宽、可关闭让 diff 列表占满）
+  const reviewTreeWidth = ref(240)
+  const reviewTreeVisible = ref(true)
+  // 列表里展开的文件 path 集合——多文件可同时展开查看 diff
+  const reviewExpandedPaths = ref<Set<string>>(new Set())
 
   const sidebarWidth = ref(DEFAULT_SIDEBAR_WIDTH)
   const rightPanelWidth = ref(DEFAULT_RIGHT_PANEL_WIDTH)
@@ -107,6 +129,79 @@ export const useUiStore = defineStore('ui', () => {
     rightPanelVisible.value = false
   }
 
+  /**
+   * 打开审查 tab：把当前轮的变更文件快照塞进来。
+   *
+   * - 无 focusPath：默认展开第一个有 diff 的文件（列表里直接能看到它的 diff）。
+   * - 有 focusPath（从 CodexChangesCard 点具体文件进入）：选中该文件并展开它，
+   *   列表会滚动定位到这张卡片。
+   *
+   * split diff 视图需要足够宽度——若右栏当前太窄，临时撑到 REVIEW_PANEL_MIN_WIDTH
+   * 并持久化（拖拽时用户仍可自由调，这里只在打开时兜底，避免 split 挤成一团）。
+   */
+  function showReview(files: CodexFileChange[], stats: CodexDiffStats, focusPath?: string): void {
+    reviewFiles.value = files
+    reviewStats.value = stats
+    reviewExpandedPaths.value = new Set()
+    if (focusPath) {
+      reviewSelectedPath.value = focusPath
+      reviewExpandedPaths.value = new Set([focusPath])
+    } else {
+      // 默认展开第一个带 diff 的文件——没 diff 的展开也是占位，优先给有用的
+      const firstWithDiff = files.find((f) => Boolean(f.diff))
+      const target = firstWithDiff?.path ?? files[0]?.path ?? null
+      reviewSelectedPath.value = target
+      if (target) reviewExpandedPaths.value = new Set([target])
+    }
+    if (rightPanelWidth.value < REVIEW_PANEL_MIN_WIDTH) {
+      setRightPanelWidth(REVIEW_PANEL_MIN_WIDTH)
+      void saveWidths()
+    }
+    showRightPanel('review')
+  }
+
+  function setReviewSelectedPath(path: string): void {
+    reviewSelectedPath.value = path
+  }
+
+  function setReviewDiffMode(mode: ReviewDiffMode): void {
+    reviewDiffMode.value = mode
+  }
+
+  function setReviewTreeWidth(width: number): void {
+    reviewTreeWidth.value = width
+  }
+
+  function setReviewTreeVisible(visible: boolean): void {
+    reviewTreeVisible.value = visible
+  }
+
+  /** 切换某文件卡片的展开/收起 */
+  function toggleReviewFileExpanded(path: string): void {
+    const next = new Set(reviewExpandedPaths.value)
+    if (next.has(path)) next.delete(path)
+    else next.add(path)
+    reviewExpandedPaths.value = next
+  }
+
+  /** 显式设置某文件卡片展开/收起（树点击联动列表时用） */
+  function setReviewFileExpanded(path: string, open: boolean): void {
+    const next = new Set(reviewExpandedPaths.value)
+    if (open) next.add(path)
+    else next.delete(path)
+    reviewExpandedPaths.value = next
+  }
+
+  /** 全部展开：把所有 reviewFiles 的 path 都加入展开集合 */
+  function expandAllReviewFiles(): void {
+    reviewExpandedPaths.value = new Set(reviewFiles.value.map((f) => f.path))
+  }
+
+  /** 全部收起：清空展开集合 */
+  function collapseAllReviewFiles(): void {
+    reviewExpandedPaths.value = new Set()
+  }
+
   function setRightPanelTab(tab: RightPanelTab): void {
     rightPanelTab.value = tab
   }
@@ -134,6 +229,13 @@ export const useUiStore = defineStore('ui', () => {
     bottomPanelVisible,
     commandPaletteVisible,
     rightPanelTab,
+    reviewFiles,
+    reviewStats,
+    reviewDiffMode,
+    reviewSelectedPath,
+    reviewTreeWidth,
+    reviewTreeVisible,
+    reviewExpandedPaths,
     sidebarWidth,
     rightPanelWidth,
     filePreviewWidth,
@@ -151,6 +253,15 @@ export const useUiStore = defineStore('ui', () => {
     toggleRightPanel,
     showRightPanel,
     hideRightPanel,
+    showReview,
+    setReviewSelectedPath,
+    setReviewDiffMode,
+    setReviewTreeWidth,
+    setReviewTreeVisible,
+    toggleReviewFileExpanded,
+    setReviewFileExpanded,
+    expandAllReviewFiles,
+    collapseAllReviewFiles,
     setRightPanelTab,
     toggleBottomPanel,
     openCommandPalette,

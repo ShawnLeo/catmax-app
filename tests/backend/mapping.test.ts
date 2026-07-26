@@ -148,6 +148,52 @@ describe('codexItemToActivityBlock', () => {
       deletions: 1,
     })
   })
+
+  // V4 Patch: 现代 codex 用 apply_patch（custom_tool_call item）改文件，
+  // mapping 应把它转成 file_change 活动，每文件 diff 是 V4 子段。
+  test('custom_tool_call(apply_patch) → file_change 活动，V4 patch 切分成单文件', () => {
+    const block = codexItemToActivityBlock({
+      type: 'custom_tool_call',
+      id: 'ctc_1',
+      call_id: 'call_1',
+      name: 'apply_patch',
+      status: 'completed',
+      input: [
+        '*** Begin Patch',
+        '*** Add File: src/new.ts',
+        '+import foo',
+        '*** Update File: src/main.ts',
+        '@@',
+        ' ctx',
+        '-old',
+        '+new',
+        '*** End Patch',
+      ].join('\n'),
+    })
+    expect(block?.activities).toHaveLength(1)
+    const activity = block?.activities[0]
+    expect(activity?.kind).toBe('file_change')
+    const changes = activity?.kind === 'file_change' ? activity.changes : []
+    expect(changes.map((c) => c.path)).toEqual(['src/new.ts', 'src/main.ts'])
+    expect(changes.map((c) => c.kind)).toEqual(['add', 'update'])
+    // Update 文件的 stats 按 V4 +/- 行算
+    expect(changes[1]?.stats).toEqual({ additions: 1, deletions: 1 })
+    // diff 是各文件的 V4 子段（含头行），渲染器 extractFileFromV4Patch 能再切
+    expect(changes[1]?.diff).toContain('*** Update File: src/main.ts')
+    expect(changes[1]?.diff).toContain('-old')
+    expect(changes[1]?.diff).not.toContain('*** Add File')
+  })
+
+  test('custom_tool_call 非 apply_patch 不产生活动', () => {
+    const block = codexItemToActivityBlock({
+      type: 'custom_tool_call',
+      id: 'ctc_2',
+      name: 'exec',
+      input: 'ls',
+      status: 'completed',
+    })
+    expect(block).toBeNull()
+  })
 })
 
 describe('codexCommandToOutput', () => {

@@ -17,6 +17,7 @@ import type {
 } from '@shared/backend/blocks'
 import type { CodexItem } from '@shared/backend/schema'
 import type { ApprovalRequest, ToolCallInfo, ToolOutput } from '@shared/backend/types'
+import { v4PatchToCodexFileChanges } from '@shared/backend/v4-patch'
 
 import { assessRisk } from '../shared/assess-risk'
 
@@ -77,6 +78,26 @@ export function codexItemToToolCallInfo(item: CodexItem): ToolCallInfo | null {
         kind: 'mcp',
         title: `${mcp.server}/${mcp.tool}`,
         ...(mcp.arguments !== undefined ? { detail: JSON.stringify(mcp.arguments, null, 2) } : {}),
+      }
+    }
+    case 'custom_tool_call': {
+      // 现代 codex 的 apply_patch：把整段 V4 patch 作为 unified_diff edit 喂给 DiffView
+      // （DiffView 内部会按 filePath 切分到单文件渲染）。
+      const raw = item as RawCodexItem
+      if (raw.name !== 'apply_patch') return null
+      const input = typeof raw.input === 'string' ? raw.input : ''
+      if (!input) return null
+      const changes = v4PatchToCodexFileChanges(input)
+      const paths = changes
+        .map((c) => c.path)
+        .slice(0, 5)
+        .join(', ')
+      const summary = `${changes.length} file(s): ${paths}`
+      return {
+        kind: 'file_edit',
+        title: summary.slice(0, 80),
+        detail: input,
+        edit: { type: 'unified_diff', filePath: paths, diff: input },
       }
     }
     // 其他 item 类型（user_message、agent_message、reasoning）不算 tool call
@@ -228,6 +249,24 @@ export function codexItemToActivities(item: CodexItem): CodexActivity[] {
     const changes = Array.isArray(raw.changes)
       ? raw.changes.map((change) => normalizeFileChange(change))
       : []
+    return [
+      {
+        id: item.id,
+        kind: 'file_change',
+        status,
+        changes,
+        ...(durationMs !== undefined ? { durationMs } : {}),
+      },
+    ]
+  }
+
+  // V4 Patch: 现代 codex 用 apply_patch 工具（custom_tool_call item）改文件。
+  // 把 input 里的 V4 patch 解析成 CodexFileChange[]，伪装成 file_change 活动，
+  // 这样 CodexChangesCard / 审查 tab / DiffView 的 V4 fallback 都能正常工作。
+  if (type === 'custom_tool_call' && raw.name === 'apply_patch') {
+    const input = typeof raw.input === 'string' ? raw.input : ''
+    const changes = v4PatchToCodexFileChanges(input)
+    if (changes.length === 0) return []
     return [
       {
         id: item.id,

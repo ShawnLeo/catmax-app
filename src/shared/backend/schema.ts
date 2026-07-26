@@ -64,17 +64,29 @@ export const initializeParamsSchema = z.object({
 
 // ============ thread/start, turn/start ============
 
+const granularApprovalPolicySchema = z.object({
+  granular: z.object({
+    mcp_elicitations: z.boolean(),
+    rules: z.boolean(),
+    sandbox_approval: z.boolean(),
+    request_permissions: z.boolean().optional(),
+    skill_approval: z.boolean().optional(),
+  }),
+})
+
+const approvalPolicySchema = z.union([z.string(), granularApprovalPolicySchema])
+
 export const threadStartParamsSchema = z.object({
   cwd: z.string().optional(),
   model: z.string().optional(),
   sandbox: z.string().optional(),
-  approvalPolicy: z.string().optional(),
+  approvalPolicy: approvalPolicySchema.optional(),
 })
 
 export const turnStartParamsSchema = z.object({
   threadId: z.string(),
   input: z.union([z.string(), z.array(z.unknown())]).optional(),
-  approvalPolicy: z.string().optional(),
+  approvalPolicy: approvalPolicySchema.optional(),
   sandboxPolicy: z.unknown().optional(),
   model: z.string().optional(),
   effort: z.string().optional(),
@@ -230,6 +242,20 @@ const camelMcpToolCallItemSchema = mcpToolCallItemSchema.extend({
   type: z.literal('mcpToolCall'),
 })
 
+/**
+ * 现代 codex 的自定义工具调用 item（apply_patch / exec 等）。
+ * apply_patch 的 input 是 V4 patch 文本（*** Begin Patch...），mapping 把它转成 file_change 活动。
+ * 其他 name（exec 等）目前只接住不特殊处理。
+ */
+const customToolCallItemSchema = z.object({
+  type: z.literal('custom_tool_call'),
+  id: z.string(),
+  call_id: z.string().optional(),
+  name: z.string(),
+  input: z.string().optional(),
+  status: z.string().optional(),
+})
+
 /** codex item 联合（新增类型时在这里加） */
 export const codexItemSchema = z.union([
   commandExecutionItemSchema,
@@ -243,6 +269,7 @@ export const codexItemSchema = z.union([
   camelUserMessageItemSchema,
   mcpToolCallItemSchema,
   camelMcpToolCallItemSchema,
+  customToolCallItemSchema,
   // 未知 item 类型用 passthrough 接住（不阻塞流）
   z.object({ type: z.string(), id: z.string() }).passthrough(),
 ])
@@ -380,6 +407,49 @@ export const fileChangeApprovalParamsSchema = z.object({
   reason: z.string().optional(),
 })
 
+/**
+ * MCP elicitation 是 MCP server（例如 Computer Use）向宿主客户端发起的交互请求。
+ * `openai/form` 的 requestedSchema 对客户端是 opaque JSON，因此这里保留 unknown，
+ * 由 adapter 只提取 CatMax 能安全理解的持久授权字段。
+ */
+const mcpServerElicitationContextSchema = z.object({
+  threadId: z.string(),
+  turnId: z.string().nullable(),
+  serverName: z.string(),
+})
+
+const mcpServerElicitationPayloadSchema = z.discriminatedUnion('mode', [
+  z
+    .object({
+      mode: z.literal('form'),
+      message: z.string(),
+      requestedSchema: z.unknown(),
+      _meta: z.unknown().nullable(),
+    })
+    .passthrough(),
+  z
+    .object({
+      mode: z.literal('openai/form'),
+      message: z.string(),
+      requestedSchema: z.unknown(),
+      _meta: z.unknown().nullable(),
+    })
+    .passthrough(),
+  z
+    .object({
+      mode: z.literal('url'),
+      message: z.string(),
+      url: z.string(),
+      elicitationId: z.string(),
+      _meta: z.unknown().nullable(),
+    })
+    .passthrough(),
+])
+
+export const mcpServerElicitationRequestParamsSchema = mcpServerElicitationContextSchema.and(
+  mcpServerElicitationPayloadSchema,
+)
+
 // ============ Type 导出 ============
 
 export type JsonRpcMessage = z.infer<typeof jsonRpcMessageSchema>
@@ -388,3 +458,6 @@ export type JsonRpcResponse = z.infer<typeof jsonRpcResponseSchema>
 export type JsonRpcNotification = z.infer<typeof jsonRpcNotificationSchema>
 export type CodexItem = z.infer<typeof codexItemSchema>
 export type ModelListResult = z.infer<typeof modelListResultSchema>
+export type McpServerElicitationRequestParams = z.infer<
+  typeof mcpServerElicitationRequestParamsSchema
+>

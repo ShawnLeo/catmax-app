@@ -7,7 +7,8 @@
     - full_content（claude Write）：空 oldContent + newContent → 整块绿色（新增）
     - unified_diff（codex）：直接把 unified diff 文本作为 hunk 传进去（库原生支持）
 
-    渲染模式：Unified（行级穿插，跟 Claude Code 一致），不用 Split（side-by-side 太宽）。
+    渲染模式：默认 Unified（行级穿插）；通过 mode prop 可切到 Split（左右双列 side-by-side）。
+    buildSplitDiffLines/buildUnifiedDiffLines 两者都预构建过，切模式只换 :diff-view-mode 绑定值。
     主题跟随 catmax 的 [data-theme]——light/dark 联动。
 
     语法高亮：用 lowlight 包自带的 highlighter 实例（基于 highlight.js，纯 JS 无 wasm，
@@ -16,7 +17,7 @@
   <div v-if="diffFile" class="diff-view-wrapper text-[12px]">
     <DiffView
       :diff-file="diffFile"
-      :diff-view-mode="DiffModeEnum.Unified"
+      :diff-view-mode="diffModeEnum"
       :diff-view-theme="theme"
       :diff-view-highlight="true"
       :diff-view-font-size="12"
@@ -35,11 +36,25 @@ import { DiffFile, generateDiffFile } from '@git-diff-view/file'
 // lowlight 包自带已注册的 highlighter 实例——直接 import 用，不用自己 init
 import { highlighter as lowlightHighlighter } from '@git-diff-view/lowlight'
 import { DiffModeEnum, DiffView } from '@git-diff-view/vue'
+import {
+  extractFileFromV4Patch,
+  parseUnifiedDiffHunks,
+  parseV4Patch,
+} from '@renderer/lib/codex-patch'
 import type { ToolEditInfo } from '@shared/backend/types'
 import '@git-diff-view/vue/styles/diff-view.css'
 import { computed, onMounted, onUnmounted, ref, shallowRef, watch } from 'vue'
 
-const props = defineProps<{ edit: ToolEditInfo }>()
+const props = withDefaults(
+  defineProps<{ edit: ToolEditInfo; mode?: 'unified' | 'split' }>(),
+  // 默认 unified：向后兼容现有 ToolCallCard 的调用（不传 mode 时行为不变）
+  { mode: 'unified' },
+)
+
+// mode prop → DiffModeEnum。Split 用库的通用 Split（GitHub 风），SplitGitHub/SplitGitLab 是其变体。
+const diffModeEnum = computed(() =>
+  props.mode === 'split' ? DiffModeEnum.Split : DiffModeEnum.Unified,
+)
 
 // ============ DiffFile 构建 ============
 const diffFile = shallowRef<DiffFile | null>(null)
@@ -65,9 +80,8 @@ function buildDiffFile() {
         file = generateDiffFile(edit.filePath, '', edit.filePath, content, lang, lang)
       }
     } else if (edit.type === 'unified_diff' && edit.diff) {
-      // codex：直接把 unified diff 文本作为 hunk 数组传给构造器
-      // 库会 parse +/- 行并渲染
-      file = new DiffFile(edit.filePath, '', edit.filePath, '', [edit.diff], lang, lang)
+      // codex：先把 diff 文本原样喂给库（兼容标准 unified diff）。
+      file = buildFromUnifiedDiff(edit.filePath, edit.diff, lang)
     }
 
     if (file) {
@@ -75,7 +89,13 @@ function buildDiffFile() {
       file.init()
       file.buildSplitDiffLines()
       file.buildUnifiedDiffLines()
-      diffFile.value = file
+      // unified_diff 兜底：解析后若仍是 0 行（极少见，V4 fallback 也失败的极端情况），
+      // 走纯文本 fallback，避免空白假象。
+      if (edit.type === 'unified_diff' && file.unifiedLineLength === 0) {
+        diffFile.value = null
+      } else {
+        diffFile.value = file
+      }
     } else {
       diffFile.value = null
     }
@@ -83,6 +103,80 @@ function buildDiffFile() {
     console.warn('[DiffView] DiffFile 构建失败', e)
     diffFile.value = null
   }
+}
+
+/**
+ * unified_diff 专用构建：多级 fallback 保证各种 codex diff 格式都能渲染。
+ *
+ * 1. 仅当 diff 带 `---`/`+++` 文件头（完整 git diff）时走库的标准直解 `new DiffFile(..., [diff])`。
+ *    预判可避免对 codex 的无文件头格式触发库的 "identical / No hunks found" 警告。
+ * 2. 标准 unified hunks（无文件头）：codex 的 patch_apply_end 下发的 `unified_diff` 直接以
+ *    `@@ -a,b +c,d @@` 开头，缺文件头 → 库重建内容失败。用 parseUnifiedDiffHunks 把 hunks
+ *    累积成 old/new 内容，再 generateDiffFile。
+ * 3. V4 patch（*** Update File / 裸 @@）：codex apply_patch 工具的格式，用 extractFileFromV4Patch
+ *    切出单文件 old/new。
+ *
+ * 返回未 init 的 DiffFile——由调用方统一 init/build/initTheme（库方法幂等，重复调用安全）。
+ */
+function buildFromUnifiedDiff(filePath: string, diff: string, lang: string): DiffFile | null {
+  // 1. 仅当 diff 含 `---`/`+++` 文件头（完整 git diff）时才走库的标准直解路径。
+  //    codex 的两种格式——无文件头的 unified hunks（`@@ -a,b +c,d @@` 开头）和 V4 patch
+  //    （`*** Begin Patch`）——直解都会让库重建内容失败，打 "identical / No hunks found"
+  //    警告。预判后跳过直解，直接走 resolveOldNewFromDiff，避免噪音。
+  if (hasFileHeaders(diff)) {
+    const direct = new DiffFile(filePath, '', filePath, '', [diff], lang, lang)
+    direct.initTheme(theme.value)
+    direct.init()
+    direct.buildUnifiedDiffLines()
+    if (direct.unifiedLineLength > 0) return direct
+  }
+
+  // 2. 无文件头 / 直解失败 → 把 diff 转成 old/new 内容再让库重算
+  const parsed = resolveOldNewFromDiff(diff, filePath)
+  if (parsed) {
+    const oldStr = ensureTrailingNewline(parsed.oldContent)
+    const newStr = ensureTrailingNewline(parsed.newContent)
+    if (oldStr || newStr) {
+      return generateDiffFile(filePath, oldStr, filePath, newStr, lang, lang)
+    }
+  }
+  return null
+}
+
+/** diff 是否带 `--- ` / `+++ ` 文件头（完整 git unified diff 才有） */
+function hasFileHeaders(diff: string): boolean {
+  return /^--- /m.test(diff) && /^\+\+\+ /m.test(diff)
+}
+
+/**
+ * 从 diff 文本里解析出 old/new 内容（标准 unified hunks 或 V4 patch 任一命中）。
+ * change.diff 可能是：单文件的标准 unified hunks、V4 子段、或整段多文件 V4 patch。
+ */
+function resolveOldNewFromDiff(
+  diff: string,
+  filePath: string,
+): { oldContent: string; newContent: string } | null {
+  // 标准 unified hunks（@@ -a,b +c,d @@，无文件头）——codex patch_apply_end 常见格式
+  const hunks = parseUnifiedDiffHunks(diff)
+  if (hunks) return hunks
+
+  // V4 patch：先按 filePath 从多文件 patch 切，切不到就当单文件子段解析
+  const v4 = extractFileFromV4Patch(diff, filePath) ?? parseSingleV4Section(diff)
+  return v4
+}
+
+/**
+ * 把单文件 V4 子段（后端 mapping 已切好的，如 `*** Update File: x.ts\n@@\n...`）直接解析成 old/new。
+ * 不依赖 filePath 匹配——子段本身就是单文件，头行带路径但这里不需要再匹配。
+ */
+function parseSingleV4Section(diff: string): { oldContent: string; newContent: string } | null {
+  const wrapped = diff.includes('*** Begin Patch')
+    ? diff
+    : `*** Begin Patch\n${diff}\n*** End Patch`
+  const files = parseV4Patch(wrapped)
+  return files.length > 0
+    ? { oldContent: files[0]!.oldContent, newContent: files[0]!.newContent }
+    : null
 }
 
 // ============ 主题联动 ============

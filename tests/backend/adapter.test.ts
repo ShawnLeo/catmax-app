@@ -324,6 +324,101 @@ describe('CodexAdapter', () => {
     expect(events.some((e) => e.type === 'turn_completed')).toBe(true)
   })
 
+  test('Computer Use MCP elicitation 显示授权并回传持久允许', async () => {
+    const { spawner, stdout, stdin } = createMockSpawner()
+    const adapter = new CodexAdapter({ spawner })
+    const clientFrames: Array<Record<string, unknown>> = []
+
+    stdin.on('data', (data) => {
+      const lines = data.toString().split('\n').filter(Boolean)
+      for (const line of lines) {
+        const msg = JSON.parse(line) as Record<string, unknown>
+        clientFrames.push(msg)
+        if (msg.method === 'initialize') {
+          pushLine(stdout, { id: msg.id, result: { ok: true } })
+        } else if (msg.method === 'model/list' && msg.id !== undefined) {
+          pushLine(stdout, {
+            id: msg.id,
+            result: { data: [{ id: 'gpt-5.2-codex', displayName: 'gpt-5.2-codex' }] },
+          })
+        } else if (msg.method === 'turn/start' && msg.id !== undefined) {
+          pushLine(stdout, { id: msg.id, result: { turn: { id: 'codex_turn_mcp' } } })
+          pushLine(stdout, {
+            method: 'turn/started',
+            params: { turn: { id: 'codex_turn_mcp', status: 'in_progress', items: [] } },
+          })
+          pushLine(stdout, {
+            method: 'mcpServer/elicitation/request',
+            id: 77,
+            params: {
+              threadId: 'thr_mcp',
+              turnId: 'codex_turn_mcp',
+              serverName: 'computer-use',
+              mode: 'openai/form',
+              message: 'Allow Computer Use to control Calculator?',
+              requestedSchema: {
+                type: 'object',
+                properties: {
+                  allowPersistentApproval: { type: 'boolean' },
+                },
+                additionalProperties: false,
+              },
+              _meta: {
+                codex_approval_kind: 'mcp_tool_call',
+                persist: ['session', 'always'],
+              },
+            },
+          })
+        } else if (msg.id === 77 && msg.result !== undefined) {
+          pushLine(stdout, {
+            method: 'turn/completed',
+            params: { turn: { id: 'codex_turn_mcp', status: 'completed', items: [] } },
+          })
+        }
+      }
+    })
+
+    const collectPromise = collectEvents(
+      adapter.startTurn({
+        sessionId: 'thr_mcp',
+        prompt: '打开计算器',
+        permissionMode: 'dontAsk',
+      }),
+    )
+    await new Promise((resolve) => setTimeout(resolve, 100))
+
+    await adapter.respondApproval({ requestId: '77', action: 'approve_always' })
+    const events = await collectPromise
+
+    const approval = events.find(
+      (event): event is Extract<TurnEvent, { type: 'approval_requested' }> =>
+        event.type === 'approval_requested',
+    )
+    expect(approval?.request).toMatchObject({
+      kind: 'mcp',
+      displayName: 'Computer Use',
+      approvalPersistence: ['session', 'always'],
+    })
+
+    const turnStart = clientFrames.find((frame) => frame.method === 'turn/start')
+    expect(turnStart?.params).toMatchObject({
+      approvalPolicy: {
+        granular: {
+          mcp_elicitations: true,
+          rules: false,
+          sandbox_approval: false,
+        },
+      },
+    })
+    const elicitationResponse = clientFrames.find((frame) => frame.id === 77)
+    expect(elicitationResponse?.result).toEqual({
+      action: 'accept',
+      content: { allowPersistentApproval: true },
+      _meta: { persist: 'always' },
+    })
+    expect(events.some((event) => event.type === 'turn_completed')).toBe(true)
+  })
+
   test('listModels 返回模型列表（映射 isDefault / supportedEfforts）', async () => {
     const { spawner, stdout, stdin } = createMockSpawner()
     const adapter = new CodexAdapter({ spawner })
@@ -551,6 +646,8 @@ describe('CodexAdapter', () => {
         const msg = JSON.parse(line)
         if (msg.method === 'initialize') {
           pushLine(stdout, { id: msg.id, result: { ok: true } })
+        } else if (msg.method === 'thread/resume' && msg.id !== undefined) {
+          pushLine(stdout, { id: msg.id, result: { thread: { id: 'thr_1' } } })
         } else if (msg.method === 'thread/read' && msg.id !== undefined) {
           pushLine(stdout, {
             id: msg.id,
@@ -582,5 +679,48 @@ describe('CodexAdapter', () => {
     expect(messages[0]!.role).toBe('user')
     expect(messages[1]!.role).toBe('assistant')
     expect(messages[1]!.textBlocks?.[0]?.text).toBe('world')
+  })
+
+  test('getHistory resumes the thread before reading, so a later turn/start does not fail with "thread not found"', async () => {
+    // Reproduces: user opens a history-loaded codex session, sends a 2nd turn,
+    // codex app-server returns "thread not found" because the long-running
+    // app-server process forgot the thread (process restart, idle eviction...).
+    // thread/read works on cold rollout state, but turn/start requires the
+    // thread to be registered in memory. Fix: getHistory must call thread/resume
+    // first to load the thread into the app-server.
+    const { spawner, stdout, stdin } = createMockSpawner()
+    const adapter = new CodexAdapter({ spawner })
+
+    // 记录请求顺序——验证 thread/resume 在 thread/read 之前
+    const requests: { id: number; method: string; params: unknown }[] = []
+    stdin.on('data', (data) => {
+      const lines = data.toString().split('\n').filter(Boolean)
+      for (const line of lines) {
+        const msg = JSON.parse(line)
+        if (msg.method === 'initialize') {
+          pushLine(stdout, { id: msg.id, result: { ok: true } })
+        } else if (msg.method === 'thread/resume' && msg.id !== undefined) {
+          requests.push({ id: msg.id, method: msg.method, params: msg.params })
+          pushLine(stdout, { id: msg.id, result: { thread: { id: 'thr_resume' } } })
+        } else if (msg.method === 'thread/read' && msg.id !== undefined) {
+          requests.push({ id: msg.id, method: msg.method, params: msg.params })
+          pushLine(stdout, {
+            id: msg.id,
+            result: { thread: { id: 'thr_resume', turns: [] } },
+          })
+        }
+      }
+    })
+
+    await adapter.getHistory('thr_resume')
+
+    const methods = requests.map((r) => r.method)
+    expect(methods).toContain('thread/resume')
+    expect(methods).toContain('thread/read')
+    // 顺序：resume 必须在 read 之前
+    expect(methods.indexOf('thread/resume')).toBeLessThan(methods.indexOf('thread/read'))
+    // resume 带正确的 threadId
+    const resumeReq = requests.find((r) => r.method === 'thread/resume')
+    expect((resumeReq?.params as { threadId?: string }).threadId).toBe('thr_resume')
   })
 })

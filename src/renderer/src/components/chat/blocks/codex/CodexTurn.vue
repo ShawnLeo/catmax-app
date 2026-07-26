@@ -53,7 +53,7 @@ import type {
 } from '@shared/backend/blocks'
 import type { NormalizedMessage } from '@shared/backend/types'
 import { ChevronDownIcon } from 'lucide-vue-next'
-import { computed, ref, watch } from 'vue'
+import { computed, onUnmounted, ref, watch } from 'vue'
 
 import MarkdownView from '../../MarkdownView.vue'
 
@@ -79,7 +79,60 @@ watch(
 )
 
 const sections = computed(() => splitCodexTurn(props.messages))
+
+/**
+ * 本轮首个活动 message 的 createdAt ——
+ * upsertCodexActivityBlock 在首次插入活动 message 时写 Date.now()（见 message.ts）。
+ * 这是 running 态的实时计时起点（用户选定的"首个活动开始时间"口径）。
+ * 历史回放时 message.createdAt = 0，但 running 态只在实时流时为 true，不会走到这里。
+ */
+const activityStartedAt = computed(() => {
+  for (const message of props.messages) {
+    if (message.blocks?.some((block) => block.type === 'codex_activity')) {
+      return message.createdAt
+    }
+  }
+  return undefined
+})
+
+/**
+ * 处理中（running）态用 1s tick 的 now 拿到递增的"已运行"时长；
+ * 组件 unmount 或转完成时清理 interval，避免泄漏。多 turn 并发时每个 CodexTurn
+ * 实例独立计时（各自的 startedAt + now），互不干扰。
+ */
+const now = ref(Date.now())
+let tickTimer: ReturnType<typeof setInterval> | null = null
+watch(
+  () => !!props.running && activityStartedAt.value !== undefined,
+  (shouldTick) => {
+    if (shouldTick && !tickTimer) {
+      now.value = Date.now()
+      tickTimer = setInterval(() => {
+        now.value = Date.now()
+      }, 1000)
+    } else if (!shouldTick && tickTimer) {
+      clearInterval(tickTimer)
+      tickTimer = null
+    }
+  },
+  { immediate: true },
+)
+onUnmounted(() => {
+  if (tickTimer) clearInterval(tickTimer)
+})
+
+/**
+ * 顶部状态行耗时（毫秒），三路取值优先级递减：
+ *   1. running 态：now - activityStartedAt（实时递增，处理中态专用）
+ *   2. completed 态、有 reasoning：reasoning.durationMs（历史回放）或 endedAt - startedAt（实时流结束）
+ *   3. completed 态、无 reasoning：所有 codex_activity 块 durationMs 之和（兜底）
+ * 三路都拿不到 → undefined → durationLabel 为空，不显示。
+ */
 const durationMs = computed(() => {
+  if (props.running) {
+    const started = activityStartedAt.value
+    if (started !== undefined && started > 0) return Math.max(0, now.value - started)
+  }
   const reasoning = sections.value.reasoningBlocks.find(
     (block): block is ReasoningContentBlock => block.type === 'reasoning',
   )
@@ -87,7 +140,11 @@ const durationMs = computed(() => {
   if (reasoning?.startedAt !== undefined && reasoning.endedAt !== undefined) {
     return Math.max(0, reasoning.endedAt - reasoning.startedAt)
   }
-  return undefined
+  // 兜底：无 reasoning 的 turn（直接跑命令）—— 活动块 durationMs 在 message.ts 已聚合。
+  const activityTotal = sections.value.processBlocks
+    .filter((block): block is CodexActivityContentBlock => block.type === 'codex_activity')
+    .reduce((total, block) => total + (block.durationMs ?? 0), 0)
+  return activityTotal > 0 ? activityTotal : undefined
 })
 const durationLabel = computed(() => {
   if (durationMs.value === undefined) return ''

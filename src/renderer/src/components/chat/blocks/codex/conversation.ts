@@ -64,8 +64,21 @@ export function splitCodexTurn(messages: NormalizedMessage[]): CodexTurnSections
   const unphasedText = blocks.filter(
     (block): block is TextContentBlock => block.type === 'text' && block.phase === undefined,
   )
-  const fallbackFinal =
-    explicitFinal.length === 0 && unphasedText.length > 0 ? unphasedText.at(-1) : undefined
+  // Streaming ordering bug fix: the "last unphased text is the final answer"
+  // fallback was written for legacy histories that carry NO phase info at all —
+  // there the genuinely last text is plausibly the answer. But during live
+  // streaming, agentMessage text arrives via text_delta with NO phase; the
+  // phase only lands later when item/completed fires. Hoisting such a text out
+  // of processBlocks while it still has a later sibling (e.g. a command that
+  // ran afterwards) left two activity blocks adjacent and let
+  // coalesceCodexActivities merge them — so every later command rendered under
+  // the FIRST "搜索了代码运行了命令" header instead of starting a new row below
+  // the Markdown. Only treat unphased text as the final answer when it is the
+  // actual trailing block of the turn.
+  const trailingUnphased = unphasedText.length > 0 ? unphasedText.at(-1) : undefined
+  const isTrailing =
+    trailingUnphased !== undefined && blocks[blocks.length - 1]?.id === trailingUnphased.id
+  const fallbackFinal = explicitFinal.length === 0 && isTrailing ? trailingUnphased : undefined
 
   const finalBlocks =
     explicitFinal.length > 0 ? explicitFinal : fallbackFinal ? [fallbackFinal] : []

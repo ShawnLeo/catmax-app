@@ -21,7 +21,7 @@
       <div class="flex-1" />
       <button
         type="button"
-        class="rounded-md border border-border px-2.5 py-1 text-xs hover:bg-muted"
+        class="cursor-pointer rounded-md border border-border px-2.5 py-1 text-xs hover:bg-muted"
         @click.stop="review"
       >
         审核
@@ -33,12 +33,16 @@
       />
     </div>
     <div v-if="open" class="border-t border-border/60">
+      <!--
+        文件列表点击：进入审查 tab 并聚焦该文件（不是打开编辑器）。
+        showReview 的 focusPath 会让审查面板自动展开 + 滚动到这个文件的 diff 卡片。
+      -->
       <button
         v-for="file in files"
         :key="file.path"
         type="button"
-        class="flex w-full items-center gap-2 px-3 py-2 text-left text-[12px] hover:bg-muted/40"
-        @click="openFile(file.path)"
+        class="flex w-full cursor-pointer items-center gap-2 px-3 py-2 text-left text-[12px] hover:bg-muted/40"
+        @click="reviewFile(file.path)"
       >
         <span class="min-w-0 flex-1 truncate font-mono">{{ file.path }}</span>
         <span class="font-mono tabular-nums">
@@ -51,27 +55,23 @@
 </template>
 
 <script setup lang="ts">
-import { useFilesStore } from '@renderer/stores/files'
 import { useUiStore } from '@renderer/stores/ui'
-import { useWorkspaceStore } from '@renderer/stores/workspace'
 import type { CodexDiffStats, CodexFileChange } from '@shared/backend/blocks'
 import { ChevronDownIcon, FileDiffIcon } from 'lucide-vue-next'
 import { ref } from 'vue'
 
-defineProps<{ files: CodexFileChange[]; stats: CodexDiffStats }>()
+const props = defineProps<{ files: CodexFileChange[]; stats: CodexDiffStats }>()
 
 const open = ref(false)
-const filesStore = useFilesStore()
 const uiStore = useUiStore()
-const workspaceStore = useWorkspaceStore()
 
+/** 整体审查：进入审查 tab，默认展开第一个有 diff 的文件 */
 function review(): void {
-  uiStore.showRightPanel('git')
+  uiStore.showReview(props.files, props.stats)
 }
 
-async function openFile(path: string): Promise<void> {
-  const workspaceId = workspaceStore.currentWorkspace?.id
-  if (!workspaceId) return
-  await filesStore.openFileReference(workspaceId, path)
+/** 点具体文件：进入审查并聚焦该文件（自动展开 + 滚动定位） */
+function reviewFile(path: string): void {
+  uiStore.showReview(props.files, props.stats, path)
 }
 </script>

@@ -6,7 +6,7 @@
  *   2. startSession() —— 调 thread/start 创建一个 codex thread
  *   3. startTurn() —— 调 turn/start，订阅 item/* 事件流，yield 为 TurnEvent
  *   4. interrupt() —— 调 turn/interrupt
- *   5. respondApproval() —— 响应 item/commandExecution/requestApproval
+ *   5. respondApproval() —— 响应 command/file approval 与 MCP elicitation
  *   6. dispose() —— kill 子进程
  *
  * 关键设计：
@@ -32,6 +32,7 @@ import {
   fileChangePatchUpdatedParamsSchema,
   itemCompletedParamsSchema,
   itemStartedParamsSchema,
+  mcpServerElicitationRequestParamsSchema,
   modelListResultSchema,
   reasoningDeltaParamsSchema,
   turnCompletedParamsSchema,
@@ -41,11 +42,13 @@ import {
   type JsonRpcNotification,
   type JsonRpcRequest,
   type JsonRpcResponse,
+  type McpServerElicitationRequestParams,
 } from '@shared/backend/schema'
 import {
   BackendError,
   type AgentBackend,
   type ApprovalDecision,
+  type ApprovalRequest,
   type BackendCapabilities,
   type EffortLevel,
   type ModelOption,
@@ -306,6 +309,9 @@ export class CodexAdapter implements AgentBackend {
     try {
       await this.sendRequest('initialize', {
         clientInfo: { name: 'catmax-app', title: 'catmax', version: '0.1.0' },
+        // openai/form MCP elicitation（Computer Use 的应用授权）属于扩展能力；
+        // 显式声明后 app-server 才能把该类请求交给 CatMax 渲染。
+        capabilities: { experimentalApi: true },
       })
     } catch (e) {
       // 握手失败——清理半连接的子进程，否则下次 initialize() 会复用死进程，
@@ -570,13 +576,29 @@ export class CodexAdapter implements AgentBackend {
     return { messages: [] }
   }
 
-  /** 读会话历史：调 thread/read 拿 turn 数组，转成 NormalizedMessage[] */
+  /**
+   * 读会话历史：调 thread/read 拿 turn 数组，转成 NormalizedMessage[]。
+   *
+   * Resume 前置：codex 是 long-running app-server，thread 状态驻留在内存里。
+   * 进程重启 / idle 回收后内存里没了这个 thread，后续 turn/start 会报
+   * "thread not found"。thread/read 能从 rollout 文件冷读出历史（看似成功），
+   * 但它不保证 thread 已注册——所以必须在 read 之前先 thread/resume 把 thread
+   * 重新装回 app-server 内存，否则用户从历史会话继续聊第二轮会失败。
+   * thread/resume 幂等：对已注册的 thread 调用是无副作用的 no-op。
+   */
   async getHistory(
     backendThreadId: string,
     cwd?: string,
   ): Promise<{ messages: NormalizedMessage[]; aiTitle?: string | null }> {
     void cwd // codex 是 long-running app-server，cwd 在 thread/start 时已绑定，这里不用
     await this.ensureInitialized()
+    try {
+      await this.sendRequest('thread/resume', { threadId: backendThreadId })
+    } catch (e) {
+      // resume 失败不阻塞 read——rollout 文件还在就能读到历史。极端情况
+      // （文件损坏 / 外部删除）下 read 自己会抛错。
+      log.warn('thread/resume failed before read, continuing anyway', backendThreadId, e)
+    }
     const result = await this.sendRequest('thread/read', {
       threadId: backendThreadId,
       includeTurns: true,
@@ -959,6 +981,39 @@ export class CodexAdapter implements AgentBackend {
       // file_change 的具体 changes 在 item 里，approval 通知不带
       const request = codexApprovalToRequest('file_edit', undefined, undefined, r.data.reason)
       this.registerApproval(requestId, internalTurnId, msg.id, request)
+    } else if (msg.method === 'mcpServer/elicitation/request') {
+      const r = mcpServerElicitationRequestParamsSchema.safeParse(msg.params)
+      if (!r.success) {
+        log.warn('invalid MCP elicitation request:', r.error.message)
+        this.writeServerResponse(msg.id, {
+          action: 'cancel',
+          content: null,
+          _meta: null,
+        })
+        return
+      }
+      const internalTurnId = this.findCurrentTurnId()
+      if (!internalTurnId) {
+        // 没有活动 turn 就没有 UI 可以承载确认，明确 cancel，避免 MCP server 永久等待。
+        this.writeServerResponse(msg.id, {
+          action: 'cancel',
+          content: null,
+          _meta: null,
+        })
+        return
+      }
+      if (!canRenderMcpElicitation(r.data)) {
+        // CatMax 当前只承载“授权确认”表单。URL 流程和需要任意用户输入的表单
+        // 不能靠允许/拒绝按钮正确完成，按 app-server 协议明确 cancel。
+        log.warn('unsupported MCP elicitation form:', r.data.mode, r.data.serverName)
+        this.writeServerResponse(msg.id, {
+          action: 'cancel',
+          content: null,
+          _meta: null,
+        })
+        return
+      }
+      this.registerMcpElicitation(String(msg.id), internalTurnId, msg.id, r.data)
     } else {
       log.warn('unhandled server request:', msg.method)
     }
@@ -999,6 +1054,75 @@ export class CodexAdapter implements AgentBackend {
     })
   }
 
+  /** 把 MCP elicitation 映射为 CatMax 权限面板，并按 MCP 协议返回 action/content/_meta。 */
+  private registerMcpElicitation(
+    requestId: string,
+    internalTurnId: string,
+    rawMsgId: number | string,
+    params: McpServerElicitationRequestParams,
+  ): void {
+    if (params.mode === 'url') return
+    const persistence = extractMcpPersistence(params._meta)
+    const request: ApprovalRequest = {
+      kind: 'mcp',
+      title: params.message,
+      detail: formatMcpElicitationDetail(params),
+      riskLevel: 'medium',
+      displayName: params.serverName === 'computer-use' ? 'Computer Use' : params.serverName,
+      description: `MCP server：${params.serverName}`,
+      decisionReason: 'MCP server 请求操作本机应用，需要由你明确授权。',
+      ...(persistence.length > 0 ? { approvalPersistence: persistence } : {}),
+    }
+
+    const promise = new Promise<ApprovalDecision['action']>((resolve) => {
+      this.pendingApprovals.set(requestId, {
+        resolve,
+        turnId: internalTurnId,
+        requestId,
+      })
+    })
+    this.currentSink?.push({
+      type: 'approval_requested',
+      turnId: internalTurnId,
+      requestId,
+      request,
+    })
+
+    void promise.then((action) => {
+      if (action === 'reject') {
+        this.writeServerResponse(rawMsgId, {
+          action: 'decline',
+          content: null,
+          _meta: null,
+        })
+        return
+      }
+
+      const selectedPersistence =
+        action === 'approve_always'
+          ? persistence.includes('always')
+            ? 'always'
+            : persistence.includes('session')
+              ? 'session'
+              : null
+          : null
+      this.writeServerResponse(rawMsgId, {
+        action: 'accept',
+        content: buildMcpElicitationContent(
+          params.requestedSchema,
+          selectedPersistence === 'always',
+        ),
+        _meta: selectedPersistence ? { persist: selectedPersistence } : null,
+      })
+    })
+  }
+
+  private writeServerResponse(id: number | string, result: unknown): void {
+    if (this.proc) {
+      this.proc.write(encodeResponse(id, result) + '\n')
+    }
+  }
+
   private findCurrentTurnId(): string | null {
     // 简化：取 turnIdMap 第一个 entry（同时只跑一个 turn）
     for (const [internal] of this.turnIdMap) {
@@ -1037,7 +1161,19 @@ function friendlyApiError(httpCode: string, detail: string): string {
 }
 
 /** 把 codex 的权限模式翻译成 codex 的 approvalPolicy */
-function permissionToApproval(mode?: string): string | undefined {
+type CodexApprovalPolicy =
+  | string
+  | {
+      granular: {
+        mcp_elicitations: boolean
+        rules: boolean
+        sandbox_approval: boolean
+        request_permissions: boolean
+        skill_approval: boolean
+      }
+    }
+
+function permissionToApproval(mode?: string): CodexApprovalPolicy | undefined {
   switch (mode) {
     case 'default':
       return 'untrusted'
@@ -1048,12 +1184,70 @@ function permissionToApproval(mode?: string): string | undefined {
     case 'plan':
       return 'never'
     case 'dontAsk':
-      return 'never'
     case 'bypassPermissions':
-      return 'never'
+      // 文件/终端仍保持“不询问”，但让 Computer Use 等 MCP server 的独立授权
+      // 进入客户端。否则 app-server 会自动拒绝 elicitation，UI 永远看不到弹窗。
+      return {
+        granular: {
+          mcp_elicitations: true,
+          rules: false,
+          sandbox_approval: false,
+          request_permissions: false,
+          skill_approval: false,
+        },
+      }
     default:
       return undefined
   }
+}
+
+function extractMcpPersistence(meta: unknown): Array<'session' | 'always'> {
+  if (!meta || typeof meta !== 'object' || Array.isArray(meta)) return []
+  const persist = (meta as Record<string, unknown>).persist
+  const values = Array.isArray(persist) ? persist : typeof persist === 'string' ? [persist] : []
+  return values.filter(
+    (value): value is 'session' | 'always' => value === 'session' || value === 'always',
+  )
+}
+
+function formatMcpElicitationDetail(params: McpServerElicitationRequestParams): string {
+  return params.message
+}
+
+/**
+ * CatMax 的权限面板不是通用表单渲染器。空表单，或只要求
+ * allowPersistentApproval 的 Computer Use 表单，可以由允许/拒绝按钮完整表达；
+ * 其他表单必须 cancel，不能提交一个可能违反 requestedSchema 的空对象。
+ */
+function canRenderMcpElicitation(params: McpServerElicitationRequestParams): boolean {
+  if (params.mode === 'url') return false
+  if (
+    !params.requestedSchema ||
+    typeof params.requestedSchema !== 'object' ||
+    Array.isArray(params.requestedSchema)
+  ) {
+    return false
+  }
+  const schema = params.requestedSchema as Record<string, unknown>
+  const required = Array.isArray(schema.required) ? schema.required : []
+  return required.every((field) => field === 'allowPersistentApproval')
+}
+
+/**
+ * Computer Use 的 openai/form schema 可能包含 allowPersistentApproval。
+ * 只有 schema 明确声明该字段时才回传，避免 additionalProperties=false 的表单拒绝响应。
+ */
+function buildMcpElicitationContent(
+  requestedSchema: unknown,
+  allowPersistentApproval: boolean,
+): Record<string, unknown> {
+  if (!requestedSchema || typeof requestedSchema !== 'object' || Array.isArray(requestedSchema)) {
+    return {}
+  }
+  const properties = (requestedSchema as Record<string, unknown>).properties
+  if (!properties || typeof properties !== 'object' || Array.isArray(properties)) return {}
+  if (!Object.prototype.hasOwnProperty.call(properties, 'allowPersistentApproval')) return {}
+  return { allowPersistentApproval }
 }
 
 /** Build a TurnEventSink backed by the given shared state. push() also flips

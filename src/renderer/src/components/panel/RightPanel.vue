@@ -45,6 +45,7 @@
       <!-- Tab 内容 -->
       <div class="flex-1 overflow-hidden">
         <GitPanel v-if="uiStore.rightPanelTab === 'git'" />
+        <ReviewPanel v-else-if="uiStore.rightPanelTab === 'review'" />
         <div v-else class="h-full min-w-0 flex">
           <!-- File Preview Split: 预览区固定在文件树左侧；无打开文件时仅保留文件树。 -->
           <FilePreview
@@ -63,24 +64,27 @@
 import { useFilesStore } from '@renderer/stores/files'
 import { useGitStore } from '@renderer/stores/git'
 import { useUiStore } from '@renderer/stores/ui'
-import { FilesIcon, GitBranchIcon, XIcon } from 'lucide-vue-next'
+import { FilesIcon, GitBranchIcon, GitCompareIcon, XIcon } from 'lucide-vue-next'
 import { computed } from 'vue'
 
 import FilePreview from './FilePreview.vue'
 import FileTree from './FileTree.vue'
 import GitPanel from './GitPanel.vue'
+import ReviewPanel from './ReviewPanel.vue'
 
 const uiStore = useUiStore()
 const gitStore = useGitStore()
 const filesStore = useFilesStore()
 
 // File Preview Split: 外层面板宽度等于预览区与文件树宽度之和。
+// Review tab 自带左右 split（文件树 + diff），不叠加 filePreviewWidth，宽度即 rightPanelWidth。
 const previewVisible = computed(
   () => uiStore.rightPanelTab === 'files' && filesStore.previewTabs.length > 0,
 )
-const panelWidth = computed(
-  () => uiStore.rightPanelWidth + (previewVisible.value ? uiStore.filePreviewWidth : 0),
-)
+const panelWidth = computed(() => {
+  if (uiStore.rightPanelTab === 'review') return uiStore.rightPanelWidth
+  return uiStore.rightPanelWidth + (previewVisible.value ? uiStore.filePreviewWidth : 0)
+})
 
 const tabs = computed(() => [
   {
@@ -94,6 +98,13 @@ const tabs = computed(() => [
     label: 'Files',
     icon: FilesIcon,
     badge: undefined,
+  },
+  {
+    id: 'review' as const,
+    label: '审查',
+    icon: GitCompareIcon,
+    // 有待审查的变更文件时显示数量徽标
+    badge: uiStore.reviewFiles.length > 0 ? uiStore.reviewFiles.length : undefined,
   },
 ])
 </script>

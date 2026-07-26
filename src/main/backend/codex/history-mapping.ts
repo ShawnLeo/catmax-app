@@ -206,7 +206,8 @@ function mapItemToMessage(
     }
     case 'command_execution':
     case 'file_change':
-    case 'mcp_tool_call': {
+    case 'mcp_tool_call':
+    case 'custom_tool_call': {
       const activityBlock = codexItemToActivityBlock(item, { defaultCollapsed: true })
       if (activityBlock) {
         return {

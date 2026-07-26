@@ -116,4 +116,47 @@ describe('Codex conversation composition', () => {
     expect(sections.processBlocks.map((block) => block.id)).toEqual(['progress'])
     expect(sections.finalBlocks.map((block) => block.id)).toEqual(['answer'])
   })
+
+  test('does not coalesce activities across a trailing unphased text during streaming', () => {
+    // Reproduces the live-streaming bug: while a turn is in flight, the commentary
+    // text item streams in via text_delta (so it has NO phase yet). The fallback
+    // "last unphased text is the final answer" heuristic was hoisting that text
+    // out of processBlocks, which left the two activity blocks adjacent in
+    // processBlocks and let coalesceCodexActivities merge them into one row —
+    // so every command run after the Markdown appeared under the FIRST header.
+    const sections = splitCodexTurn([
+      message('a1', 'assistant', 't1', [
+        {
+          id: 'activity-1',
+          type: 'codex_activity',
+          status: 'completed',
+          activities: [
+            { id: 'read', kind: 'file_read', path: 'a.ts', command: 'cat', status: 'completed' },
+          ],
+        },
+      ]),
+      message('t1', 'assistant', 't1', [
+        // No phase — this is exactly what the renderer sees mid-stream.
+        { id: 'commentary', type: 'text', text: 'let me also run the tests' },
+      ]),
+      message('a2', 'assistant', 't1', [
+        {
+          id: 'activity-2',
+          type: 'codex_activity',
+          status: 'completed',
+          activities: [{ id: 'cmd', kind: 'command', command: 'pnpm test', status: 'completed' }],
+        },
+      ]),
+    ])
+
+    // The activities must stay as two separate rows; the text must survive as a
+    // boundary between them. (Before the fix this returned ['activity-1'] with
+    // both activities merged, and finalBlocks = ['commentary'].)
+    expect(sections.processBlocks.map((block) => block.id)).toEqual([
+      'activity-1',
+      'commentary',
+      'activity-2',
+    ])
+    expect(sections.finalBlocks).toEqual([])
+  })
 })

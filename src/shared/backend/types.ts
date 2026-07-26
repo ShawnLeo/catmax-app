@@ -309,6 +309,11 @@ export interface ApprovalRequest {
   detail: string
   riskLevel: 'low' | 'medium' | 'high'
   /**
+   * MCP server 明确声明可持久化时才展示对应选项。
+   * 普通 command/file approval 不填，继续使用 codex 的 acceptForSession。
+   */
+  approvalPersistence?: Array<'session' | 'always'>
+  /**
    * 以下三项由 Claude Agent SDK 的 canUseTool 回调 options 透传（SDK 原生计算的友好文案）。
    * codex 不填——PermissionPanel 对 undefined 自然回退到 detail 展示。
    */
