@@ -2,7 +2,9 @@
   <div
     :class="[
       'group flex items-center gap-2 px-2 py-1.5 rounded-md cursor-pointer',
-      active ? 'bg-muted' : 'hover:bg-muted/50',
+      // 选中/hover 用 sidebar-accent（侧栏专用色）——比侧栏底色亮一档形成凸起反馈，
+      // 不复用主区 muted，避免侧栏背景压暗后撞色看不清。
+      active ? 'bg-sidebar-accent' : 'hover:bg-sidebar-accent',
     ]"
     @click="$emit('click')"
   >

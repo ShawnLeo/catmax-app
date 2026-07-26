@@ -138,11 +138,11 @@ import {
 } from 'lucide-vue-next'
 import { computed, ref, type Component } from 'vue'
 
+import MarkdownView from './blocks/base/MarkdownView.vue'
 import EnterPlanModeCard from './control/EnterPlanModeCard.vue'
 import ExitPlanModeCard from './control/ExitPlanModeCard.vue'
 import TodoWriteCard from './control/TodoWriteCard.vue'
 import DiffView from './DiffView.vue'
-import MarkdownView from './MarkdownView.vue'
 import TaskCard from './task/TaskCard.vue'
 import WebCard from './web/WebCard.vue'
 

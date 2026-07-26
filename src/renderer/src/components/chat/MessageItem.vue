@@ -16,8 +16,36 @@
   -->
   <article
     v-else
-    :class="['flex gap-3', message.role === 'user' ? 'flex-row-reverse' : 'flex-row']"
+    :class="[
+      'flex gap-3',
+      message.role === 'user'
+        ? // user 消息:靠右,底部留呼吸空间分隔对话轮次
+          'flex-row-reverse mb-4'
+        : // assistant 消息:零外边距 + 自带 border-l 竖线(时间轴)。
+          // 所有 assistant 都画 border-l(让竖线连续)。首尾用 mask 伪元素遮挡多余部分:
+          //   - 第一条(mask-line-top):遮住色点上方竖线(上方接 user,无需延伸到色点之上)
+          //   - 最后一条(mask-line-bottom):遮住色点下方竖线(时间轴末端,色点之后不再延伸)
+          // 中间 assistant 不遮挡,border-l 完整覆盖,与上下衔接。
+          isFirstAssistant
+          ? 'flex-row relative border-l-2 border-border/60 pt-3 mask-line-top'
+          : isLast
+            ? 'flex-row relative border-l-2 border-border/60 pt-3 mask-line-bottom'
+            : 'flex-row relative border-l-2 border-border/60 pt-3',
+    ]"
   >
+    <!-- assistant 起始色点:相对 article 定位,中心对齐 border-l 竖线 + 第一行文字中线。
+         -left-[5px]:8px 色点中心落在 2px border 中心(半径4 - border一半1 = 3,负方向)。
+         top:对齐第一行文字中线。pt-3 让内容下移 12px,首条 first:pt-0 不下移,
+         所以色点 top 也分两档:非首条 18px(12 padding + 6 文字上半),
+         首条 6px。用 :first-child 判断(article 是父级列表首个时触发)。 -->
+    <span
+      v-if="message.role === 'assistant'"
+      :class="[
+        'absolute w-2 h-2 rounded-full -left-[5px] top-[18px] z-10 ring-2 ring-background',
+        assistantStatusClass,
+      ]"
+      :title="assistantStatusTooltip"
+    />
     <!-- 消息体 -->
     <div :class="['min-w-0', message.role === 'user' ? 'max-w-[80%]' : 'flex-1']">
       <!--
@@ -87,12 +115,8 @@
           - 绿色脉冲 = 运行中（有工具 running 或流式输出）
           - 红色 = 有工具失败
       -->
-      <div v-else-if="message.role === 'assistant'" class="relative pl-6 border-l border-border/40">
-        <!-- 唯一的起始色点 -->
-        <span
-          :class="['absolute w-2 h-2 rounded-full -left-[5px] top-1.5', assistantStatusClass]"
-          :title="assistantStatusTooltip"
-        />
+      <div v-else-if="message.role === 'assistant'" class="relative pl-6 -ml-0.5">
+        <!-- 色点已移到 article 层(见上方),这里直接渲染 blocks -->
 
         <!-- toolBlocks：贴竖线渲染，不各自带色点 -->
         <component
@@ -105,7 +129,7 @@
           :message-role="message.role"
           :streaming="block.type === 'reasoning' ? isReasoningStreaming(block) : undefined"
           :duration-sec="block.type === 'reasoning' ? reasoningDurationSec(block) : undefined"
-          class="mt-2 first:mt-1"
+          class="mt-2 first:mt-0"
         />
       </div>
     </div>
@@ -139,6 +163,10 @@ const props = defineProps<{
   showThinking?: boolean
   /** 工作区目录--子 agent 读 jsonl 需要 */
   cwd?: string
+  /** 是否是最后一条 assistant——是则不画时间轴竖线(末端无需向下延伸) */
+  isLast?: boolean
+  /** 是否是第一条 assistant——是则遮住色点上方的竖线段(上方接 user,无需延伸到色点之上) */
+  isFirstAssistant?: boolean
 }>()
 
 const blocks = computed(() => messageBlocks(props.message))
@@ -307,3 +335,41 @@ function statusTooltip(status: 'text' | 'running' | 'completed' | 'failed'): str
   }
 }
 </script>
+
+<style scoped>
+/*
+ * mask-line-top:第一条 assistant 消息用。
+ * border-l 竖线从 article 顶部开始画,但第一条 assistant 上方接的是 user 消息,
+ * 竖线不该延伸到色点之上。用 ::before 伪元素盖住色点上方(0 ~ 22px)的 border 段。
+ * 22px = 色点 top(18px) + 色点半径(4px),即盖到色点中心位置。
+ * 背景色跟随 --color-background,保证暗/亮主题下都与页面融合。
+ */
+.mask-line-top::before {
+  content: '';
+  position: absolute;
+  left: -2px; /* 对齐 border-l 的位置(2px 宽) */
+  top: 0;
+  width: 2px;
+  height: 22px;
+  background-color: var(--color-background);
+  z-index: 5; /* 在 border 之上,色点(z-10)之下 */
+}
+
+/*
+ * mask-line-bottom:最后一条 assistant 消息用。
+ * 时间轴到末端的色点处应终止,色点下方不再画竖线。
+ * ::before 覆盖色点下方(22px ~ 底部)的 border 段。
+ * top 22px 起始(色点中心),height 100% - 22px 用 calc 算,
+ * 或者直接 top: 22px; bottom: 0; 让浏览器撑满。
+ */
+.mask-line-bottom::before {
+  content: '';
+  position: absolute;
+  left: -2px;
+  top: 22px;
+  bottom: 0;
+  width: 2px;
+  background-color: var(--color-background);
+  z-index: 5;
+}
+</style>

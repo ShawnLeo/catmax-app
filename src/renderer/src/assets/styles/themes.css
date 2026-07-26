@@ -60,9 +60,15 @@
   --radius: 8px;
 
   /* Layer 3: 组件 token */
-  --sidebar-background: var(--color-gray-50);
-  --sidebar-border: var(--border);
+  /*
+    Sidebar 层次：侧栏更浅（柔和浅灰），主区更深——聊天区"沉"下去聚焦内容。
+    主区 background=gray-100(18%)，侧栏提亮到 26%——比主区亮 8%，柔和浅灰。
+    sidebar-accent（选中/hover/头像）用 30% 比侧栏底再亮一档，凸起反馈清晰。
+  */
+  --sidebar-background: oklch(26% 0 0);
+  --sidebar-border: oklch(34% 0 0 / 0.6);
   --sidebar-foreground: var(--color-gray-800);
+  --sidebar-accent: oklch(30% 0 0);
   --composer-background: var(--color-gray-50);
   --composer-border: var(--border);
   --code-block-background: oklch(12% 0.005 250);
@@ -125,9 +131,15 @@
   --radius: 8px;
 
   /* Layer 3 */
-  --sidebar-background: var(--color-gray-100);
-  --sidebar-border: var(--border);
+  /*
+    Sidebar 层次：侧栏更浅（柔和浅灰白），跟主区白色形成柔和过渡。
+    主区 background=gray-50(99%)，侧栏 97%——比主区略灰 2%，浅而不发暗。
+    sidebar-accent 用更深的 gray-300(90%) 给选中态做凹陷反馈（浅底上深色 = 凹陷）。
+  */
+  --sidebar-background: oklch(97% 0.002 80);
+  --sidebar-border: oklch(89% 0.002 80);
   --sidebar-foreground: var(--color-gray-700);
+  --sidebar-accent: var(--color-gray-300);
   --composer-background: var(--color-gray-0);
   --composer-border: var(--border);
   --code-block-background: oklch(96% 0.003 80);

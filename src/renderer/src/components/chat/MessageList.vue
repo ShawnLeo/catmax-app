@@ -39,11 +39,13 @@
       />
       <template v-else>
         <MessageItem
-          v-for="message in messageStore.messages"
+          v-for="(message, index) in messageStore.messages"
           :key="message.id"
           :message="message"
           :show-thinking="showThinking"
           :cwd="cwd"
+          :is-last="index === lastAssistantIdx"
+          :is-first-assistant="index === firstAssistantIdx"
         />
       </template>
 
@@ -71,9 +73,9 @@
       -->
       <div v-if="agentWorking && !backendConversationRenderer" class="flex gap-3 flex-row">
         <div class="min-w-0 flex-1">
-          <div class="relative pl-6 border-l border-border/40">
+          <div class="relative pl-6 border-l-2 border-border/60">
             <span
-              class="absolute w-2 h-2 rounded-full -left-[5px] top-1.5 bg-success animate-pulse"
+              class="absolute w-2 h-2 rounded-full -left-[6px] top-1.5 bg-success animate-pulse"
             />
             <div class="mt-1 flex items-center gap-2 text-[13px] text-muted-foreground">
               <Loader2Icon class="w-3.5 h-3.5 flex-shrink-0 animate-spin" />
@@ -159,8 +161,32 @@ const backendConversationRenderer = computed(() =>
 const conversationClass = computed(() =>
   backendConversationRenderer.value
     ? 'mx-auto flex w-full max-w-3xl flex-col px-4 py-4'
-    : 'mx-auto flex flex-col gap-6 px-6 py-4 max-w-3xl lg:max-w-screen-lg xl:max-w-[1280px] 2xl:max-w-[1440px]',
+    : // 不用 flex gap——gap 会在每条消息之间留空白,打断 assistant 时间轴竖线。
+      // 间距改由 MessageItem 内部控制:user 消息底部留呼吸空间(分隔对话轮次),
+      // 连续 assistant 消息之间零间距,竖线才能连续不断。
+      'mx-auto flex flex-col px-6 py-4 max-w-3xl lg:max-w-screen-lg xl:max-w-[1280px] 2xl:max-w-[1440px]',
 )
+
+/**
+ * 第一条 / 最后一条 assistant 消息的 index——用于 MessageItem 决定竖线画到哪里:
+ *   - 第一条 assistant:色点上方不画竖线(上方接的是 user 消息,无需延伸)
+ *   - 最后一条 assistant:整条不画竖线(时间轴末端)
+ * 中间的 assistant 消息画完整竖线,与前一条衔接。
+ */
+const firstAssistantIdx = computed(() => {
+  const msgs = messageStore.messages
+  for (let i = 0; i < msgs.length; i++) {
+    if (msgs[i]!.role === 'assistant') return i
+  }
+  return -1
+})
+const lastAssistantIdx = computed(() => {
+  const msgs = messageStore.messages
+  for (let i = msgs.length - 1; i >= 0; i--) {
+    if (msgs[i]!.role === 'assistant') return i
+  }
+  return -1
+})
 
 /**
  * 是否显示底部"agent 正在干活"指示器。

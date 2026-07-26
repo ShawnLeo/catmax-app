@@ -30,6 +30,8 @@
   --color-sidebar: var(--sidebar-background);
   --color-sidebar-foreground: var(--sidebar-foreground);
   --color-sidebar-border: var(--sidebar-border);
+  /* 侧栏内部交互态专用（选中/hover/头像）——比 sidebar 底色亮/深一档形成凹陷凸起反馈 */
+  --color-sidebar-accent: var(--sidebar-accent);
   --color-code-block: var(--code-block-background);
   --color-tool-call: var(--tool-call-background);
   --color-composer: var(--composer-background);

@@ -12,7 +12,7 @@
     <!-- 工作区切换触发器：Catmax logo + 名字 + 下拉箭头 -->
     <button
       ref="triggerRef"
-      class="flex-1 min-w-0 flex items-center gap-2 px-2 py-1.5 rounded-md hover:bg-muted text-left interactive cursor-pointer"
+      class="flex-1 min-w-0 flex items-center gap-2 px-2 py-1.5 rounded-md hover:bg-sidebar-accent text-left interactive cursor-pointer"
       @click="showPicker = !showPicker"
     >
       <CatmaxLogo variant="plain" class="w-5 h-5 flex-shrink-0 text-foreground" />

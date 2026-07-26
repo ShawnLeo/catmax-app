@@ -6,6 +6,13 @@ const DEFAULT_SIDEBAR_WIDTH = 240
 const DEFAULT_RIGHT_PANEL_WIDTH = 320
 const DEFAULT_FILE_PREVIEW_WIDTH = 520
 const DEFAULT_BOTTOM_PANEL_HEIGHT = 320
+
+// Pointer coordinates can be fractional under display scaling. Persisted panel dimensions are
+// integer pixels, so normalize them at the store boundary before they can reach settings.update.
+function normalizePanelSize(size: number): number {
+  return Math.round(size)
+}
+
 /**
  * 审查 tab 的最小推荐宽度——split diff 视图需要左右两列空间，
  * 低于这个宽度会挤；showReview 会把右栏临时撑到这个值。
@@ -58,12 +65,12 @@ export const useUiStore = defineStore('ui', () => {
   }
 
   function setSidebarWidth(width: number): void {
-    sidebarWidth.value = width
+    sidebarWidth.value = normalizePanelSize(width)
     if (!panelDragging.value) saveWidths()
   }
 
   function setRightPanelWidth(width: number): void {
-    rightPanelWidth.value = width
+    rightPanelWidth.value = normalizePanelSize(width)
     if (!panelDragging.value) saveWidths()
   }
 
@@ -72,7 +79,7 @@ export const useUiStore = defineStore('ui', () => {
   }
 
   function setBottomPanelHeight(height: number): void {
-    bottomPanelHeight.value = height
+    bottomPanelHeight.value = normalizePanelSize(height)
     if (!panelDragging.value) saveWidths()
   }
 
@@ -202,6 +209,14 @@ export const useUiStore = defineStore('ui', () => {
     reviewExpandedPaths.value = new Set()
   }
 
+  /** 清空审查快照——切换后端/工作区时调用，避免残留别处的 codex 改动 */
+  function clearReview(): void {
+    reviewFiles.value = []
+    reviewStats.value = { additions: 0, deletions: 0 }
+    reviewSelectedPath.value = null
+    reviewExpandedPaths.value = new Set()
+  }
+
   function setRightPanelTab(tab: RightPanelTab): void {
     rightPanelTab.value = tab
   }
@@ -262,6 +277,7 @@ export const useUiStore = defineStore('ui', () => {
     setReviewFileExpanded,
     expandAllReviewFiles,
     collapseAllReviewFiles,
+    clearReview,
     setRightPanelTab,
     toggleBottomPanel,
     openCommandPalette,

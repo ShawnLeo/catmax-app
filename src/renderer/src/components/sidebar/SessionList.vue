@@ -12,14 +12,14 @@
       <!-- 顶部：新建会话 + 扫描导入按钮 -->
       <div class="flex gap-1.5 mb-2">
         <button
-          class="flex-1 px-3 py-2 text-sm text-primary hover:bg-muted rounded-md flex items-center gap-2 border border-sidebar-border cursor-pointer"
+          class="flex-1 px-3 py-2 text-sm text-primary hover:bg-sidebar-accent rounded-md flex items-center gap-2 border border-sidebar-border cursor-pointer"
           @click="newSession"
         >
           <PlusIcon class="w-4 h-4" />
           新建会话
         </button>
         <button
-          class="px-2.5 py-2 text-xs text-muted-foreground hover:text-foreground hover:bg-muted rounded-md border border-sidebar-border cursor-pointer"
+          class="px-2.5 py-2 text-xs text-muted-foreground hover:text-foreground hover:bg-sidebar-accent rounded-md border border-sidebar-border cursor-pointer"
           title="扫描磁盘/RPC 上已存在但还没纳入 catmax 的 claude/codex 会话"
           @click="importDialogOpen = true"
         >

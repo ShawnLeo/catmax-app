@@ -308,6 +308,8 @@ export interface ApprovalRequest {
   title: string
   detail: string
   riskLevel: 'low' | 'medium' | 'high'
+  /** ExitPlanMode：待用户确认的 Markdown 计划。存在时由计划审批 UI 渲染。 */
+  plan?: string
   /**
    * MCP server 明确声明可持久化时才展示对应选项。
    * 普通 command/file approval 不填，继续使用 codex 的 acceptForSession。

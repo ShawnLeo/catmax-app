@@ -1,11 +1,16 @@
 <template>
   <!--
-    Markdown 渲染容器。
+    Base Markdown 渲染容器（默认/兜底实现）。
 
-    - 由 markdown.ts 输出 HTML 通过 v-html 注入（GFM、代码块高亮、任务列表已在 render 阶段处理）
-    - 代码块的"复制"按钮靠事件委托：markdown.ts 给每个 fence 包了 [data-action="copy-code"]，
+    - 服务于 Claude 后端，以及所有跨后端共用场景（FilePreview / ThinkingBlock /
+      ToolCallCard / WebCard / ExitPlanModeCard）
+    - 由 `@renderer/lib/markdown/base` 的 baseMarkdown 引擎输出 HTML（markdown-it + Shiki
+      双主题 + 自实现 task-list 插件），通过 v-html 注入
+    - 代码块的"复制"按钮靠事件委托：baseMarkdown 给每个 fence 包了 [data-action="copy-code"]，
       这里在容器上监听 click，向上找最近的 .code-block-wrapper，取其 pre code 文本写剪贴板
     - 任务列表的 checkbox 可点（本地状态，刷新会丢——临时检查清单语义）
+
+    Codex 后端的专属实现见 `../codex/MarkdownView.vue`（初始等价，可独立演化）。
   -->
   <div
     v-if="rendered === undefined"
@@ -157,11 +162,12 @@ function markFileReference(element: HTMLElement, reference: string): void {
 </script>
 
 <style scoped>
-@reference "../../assets/styles/main.css";
+@reference "../../../../assets/styles/main.css";
 
 /* ============ 整体排版基准 ============ */
+/* 聊天正文采用紧凑排版（接近编辑器/终端密度），不是文档那种松散呼吸空间。 */
 .markdown-body {
-  @apply text-[15px] leading-relaxed;
+  @apply text-[15px] leading-snug;
   overflow-wrap: anywhere;
 }
 
@@ -184,27 +190,30 @@ function markFileReference(element: HTMLElement, reference: string): void {
   line-height: 1.5;
 }
 
-/* ============ 标题层级（h1-h6 字号梯度） ============ */
+/* ============ 标题层级（h1-h6 字号梯度） ============
+ * 标题上方 margin 压到 8-12px——聊天回复里标题作为分节符,
+ * 不需要文档那么大的呼吸空间,否则模块之间看着像断开了 */
 .markdown-body :deep(h1) {
-  @apply text-2xl font-semibold mt-6 mb-3;
+  @apply text-xl font-semibold mt-3 mb-1.5;
 }
 .markdown-body :deep(h2) {
-  @apply text-xl font-semibold mt-5 mb-2;
+  @apply text-lg font-semibold mt-3 mb-1;
 }
 .markdown-body :deep(h3) {
-  @apply text-lg font-semibold mt-4 mb-2;
+  @apply text-base font-semibold mt-2.5 mb-1;
 }
 .markdown-body :deep(h4) {
-  @apply text-base font-semibold mt-3 mb-1;
+  @apply text-[15px] font-semibold mt-2 mb-1;
 }
 .markdown-body :deep(h5),
 .markdown-body :deep(h6) {
-  @apply text-sm font-semibold mt-2 mb-1 text-muted-foreground;
+  @apply text-sm font-semibold mt-2 mb-0.5 text-muted-foreground;
 }
 
 /* ============ 段落 / 首尾间距归零 ============ */
+/* 段落间距压到最小（4px）——聊天回复的多段文字应紧凑成流，不要每段都呼吸 */
 .markdown-body :deep(p) {
-  @apply my-2;
+  @apply my-1;
 }
 .markdown-body :deep(:first-child) {
   @apply mt-0;
@@ -213,15 +222,25 @@ function markFileReference(element: HTMLElement, reference: string): void {
   @apply mb-0;
 }
 
-/* ============ 列表 ============ */
+/* ============ 列表 ============
+ * 关键修复:markdown-it 在 <li> 之间输出空白文本节点 "\n",这些节点继承了
+ * ul 的 line-height(默认 1.375 → 20.6px),在 li 之间渲染成看不见的空行,
+ * 导致每个 li 之间凭空多出 ~20px 空白。给 ul 设 line-height:0 消除这些
+ * 空白节点的高度,li 自己显式设行高继承给内容。 */
 .markdown-body :deep(ul) {
-  @apply my-2 list-disc pl-6;
+  @apply my-1 list-disc pl-6;
+  line-height: 0;
 }
 .markdown-body :deep(ol) {
-  @apply my-2 list-decimal pl-6;
+  @apply my-1 list-decimal pl-6;
+  line-height: 0;
 }
 .markdown-body :deep(li) {
-  @apply my-0.5;
+  @apply my-px leading-[1.4];
+}
+/* li 内部的段落不自带间距——列表项就是一行,不该有段落呼吸 */
+.markdown-body :deep(li > p) {
+  @apply my-0;
 }
 .markdown-body :deep(li > ul),
 .markdown-body :deep(li > ol) {
@@ -239,7 +258,7 @@ function markFileReference(element: HTMLElement, reference: string): void {
 
 /* ============ 表格（GFM） ============ */
 .markdown-body :deep(table) {
-  @apply my-3 w-full border-collapse text-sm overflow-hidden;
+  @apply my-2 w-full border-collapse text-sm overflow-hidden;
 }
 .markdown-body :deep(thead) {
   @apply bg-muted;
@@ -304,9 +323,11 @@ function markFileReference(element: HTMLElement, reference: string): void {
   background: transparent;
 }
 
-/* inline code（不在 pre 里的 `code`） */
+/* inline code（不在 pre 里的 `code`）
+ * padding 压到 1px——inline code 常出现在列表/段落行内,上下 padding 大了
+ * 会撑高整行 line-height,让密集含 code 的列表显得松散。 */
 .markdown-body :deep(:not(pre) > code) {
-  @apply font-mono text-[13px] bg-muted px-1 py-0.5 rounded;
+  @apply font-mono text-[13px] bg-muted px-1 py-px rounded;
 }
 /* File Reference: 中性灰底胶囊，等宽字体，视觉与 inline code 同源；
  * 点击在文件面板预览。不使用 primary 色调——保持路径像一段普通代码，
@@ -323,10 +344,10 @@ function markFileReference(element: HTMLElement, reference: string): void {
 
 /* ============ 引用 / 分隔线 / 链接 / 图片 / 删除线 ============ */
 .markdown-body :deep(blockquote) {
-  @apply border-l-2 border-border pl-3 italic text-muted-foreground my-2;
+  @apply border-l-2 border-border pl-3 italic text-muted-foreground my-1.5;
 }
 .markdown-body :deep(hr) {
-  @apply border-border my-4;
+  @apply border-border my-3;
 }
 .markdown-body :deep(a) {
   @apply text-primary underline underline-offset-2;

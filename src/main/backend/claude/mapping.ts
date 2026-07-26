@@ -106,9 +106,14 @@ export function toolUseToInfo(block: ToolUseContent): ToolCallInfo {
             : typeof input?.path === 'string'
               ? input.path
               : '(unknown)'
+      // title 加工具名前缀（"Read: /path"）——前端靠前缀区分渲染策略：
+      //   - Read / NotebookRead → ToolCallInline（单行无边框，点开文件预览）
+      //   - Glob / Grep → ToolCallCard（卡片，可展开看匹配结果）
+      //   不加前缀会让 Read 误走卡片、且 typeName 显示为路径首段而非工具名。
+      const prefix = block.name === 'Glob' ? 'Glob' : block.name === 'Grep' ? 'Grep' : 'Read'
       return {
         kind: 'file_read',
-        title: path,
+        title: `${prefix}: ${path}`,
       }
     }
 
@@ -313,6 +318,18 @@ export function claudePermissionToApprovalRequest(
     title?: string | undefined
   },
 ): ApprovalRequest {
+  if (toolName === 'ExitPlanMode') {
+    const plan = typeof input.plan === 'string' ? input.plan : ''
+    return {
+      kind: 'mcp',
+      title: '计划已准备好',
+      detail: '',
+      riskLevel: 'low',
+      plan,
+      ...pickMeta(meta),
+    }
+  }
+
   if (toolName === 'Bash') {
     const cmd = typeof input.command === 'string' ? input.command : JSON.stringify(input)
     const description = typeof input.description === 'string' ? input.description : undefined

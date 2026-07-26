@@ -13,16 +13,17 @@
 
     <!-- 主体：左侧导航 + 右侧内容 -->
     <div class="flex-1 flex min-h-0">
-      <!-- 左侧导航 -->
-      <nav class="w-52 shrink-0 border-r border-border p-3 flex flex-col gap-1">
+      <!-- 左侧导航：复用 sidebar token（bg-sidebar / sidebar-accent / sidebar-border），
+           跟主会话侧栏共享配色，保持两种布局下"侧栏"视觉一致。右侧内容区沿用 bg-background。 -->
+      <nav class="w-52 shrink-0 border-r border-sidebar-border bg-sidebar p-3 flex flex-col gap-1">
         <button
           v-for="item in navItems"
           :key="item.id"
           :class="[
             'flex items-center gap-2.5 px-3 py-2 rounded-md text-sm text-left transition-colors interactive cursor-pointer',
             activeSection === item.id
-              ? 'bg-accent text-accent-foreground font-medium'
-              : 'text-muted-foreground hover:bg-muted hover:text-foreground',
+              ? 'bg-sidebar-accent text-foreground font-medium'
+              : 'text-muted-foreground hover:bg-sidebar-accent hover:text-foreground',
           ]"
           @click="activeSection = item.id"
         >

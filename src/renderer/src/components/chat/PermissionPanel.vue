@@ -19,81 +19,127 @@
         class="rounded-2xl border bg-background transition-colors overflow-hidden"
         :class="isHighRisk ? 'border-destructive/60' : 'border-border'"
       >
-        <!-- header -->
-        <div class="px-4 pt-3 pb-2 flex items-center gap-2">
-          <ShieldAlertIcon :class="['w-5 h-5 flex-shrink-0', riskColor]" />
-          <h3 class="text-base font-semibold flex-1 min-w-0 truncate">
-            {{ request.title }}
-          </h3>
-          <span
-            :class="[
-              'text-xs px-2 py-0.5 rounded-full whitespace-nowrap flex-shrink-0',
-              riskBadgeClass,
-            ]"
-          >
-            {{ riskLabel }}
-          </span>
-        </div>
+        <!-- ExitPlanMode：参考 Codex 的内联计划审批，不暴露原始工具 JSON。 -->
+        <template v-if="isPlanApproval">
+          <div class="flex items-start gap-3 px-5 pt-5 pb-4">
+            <div
+              class="mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary"
+            >
+              <ListChecksIcon class="size-4" />
+            </div>
+            <div class="min-w-0">
+              <h3 class="text-[15px] font-semibold text-foreground">计划已准备好</h3>
+              <p class="mt-0.5 text-xs text-muted-foreground">
+                请检查下面的实施计划，然后决定是否开始执行。
+              </p>
+            </div>
+          </div>
 
-        <!-- 动作描述：SDK canUseTool 透传的友好文案（displayName + description）。
-             没有 SDK 文案时（codex / 旧消息）回退到 kind 的中文标签。 -->
-        <div
-          v-if="request.displayName || request.description || request.kind"
-          class="px-4 pb-2 flex items-center gap-2 flex-wrap"
-        >
-          <span
-            v-if="request.displayName"
-            class="text-xs font-medium px-1.5 py-0.5 rounded bg-muted text-foreground whitespace-nowrap"
-          >
-            {{ request.displayName }}
-          </span>
-          <span
-            v-else
-            class="text-xs font-medium px-1.5 py-0.5 rounded bg-muted text-foreground whitespace-nowrap"
-          >
-            {{ kindLabel }}
-          </span>
-          <span v-if="request.description" class="text-xs text-muted-foreground min-w-0 truncate">
-            {{ request.description }}
-          </span>
-        </div>
+          <div class="mx-5 mb-5 max-h-[min(55vh,36rem)] overflow-y-auto rounded-xl bg-muted/35">
+            <MarkdownView
+              v-if="request.plan"
+              :text="request.plan"
+              class="px-5 py-4 text-[13px] text-foreground"
+            />
+            <p v-else class="px-5 py-4 text-sm italic text-muted-foreground">没有可显示的计划。</p>
+          </div>
 
-        <!-- 为什么问：SDK decisionReason（如 "Path is outside allowed working directories"） -->
-        <div v-if="request.decisionReason" class="px-4 pb-2">
-          <p class="text-[11px] text-muted-foreground italic">
-            {{ request.decisionReason }}
-          </p>
-        </div>
-
-        <!-- body：要确认的命令 / diff / mcp 细节（原始 input，补充信息） -->
-        <div v-if="request.detail" class="px-4 pb-3 max-h-72 overflow-y-auto">
-          <pre
-            class="font-mono text-[12px] text-foreground bg-code-block p-3 rounded whitespace-pre-wrap overflow-x-auto"
-            >{{ request.detail }}</pre>
-        </div>
-
-        <!-- footer -->
-        <div class="px-4 py-2.5 border-t border-border flex items-center justify-between gap-2">
-          <span class="text-xs text-muted-foreground truncate">{{ sourceLabel }}</span>
-          <div class="flex gap-2 flex-shrink-0">
-            <Button variant="outline" size="sm" @click="onReject">拒绝（Esc）</Button>
-            <Button v-if="showApproveAlways" variant="secondary" size="sm" @click="onApproveAlways">
-              {{ approveAlwaysLabel }}
-            </Button>
-            <Button :variant="isHighRisk ? 'destructive' : 'default'" size="sm" @click="onApprove">
-              允许（Enter）
+          <div class="flex items-center justify-end gap-2 border-t border-border/70 px-5 py-3">
+            <Button variant="outline" size="sm" @click="onReject">继续规划（Esc）</Button>
+            <Button size="sm" @click="onApprove">
+              <PlayIcon class="mr-1.5 size-3.5" />
+              开始实现（Enter）
             </Button>
           </div>
-        </div>
+        </template>
+
+        <template v-else>
+          <!-- header -->
+          <div class="px-4 pt-3 pb-2 flex items-center gap-2">
+            <ShieldAlertIcon :class="['w-5 h-5 flex-shrink-0', riskColor]" />
+            <h3 class="text-base font-semibold flex-1 min-w-0 truncate">
+              {{ request.title }}
+            </h3>
+            <span
+              :class="[
+                'text-xs px-2 py-0.5 rounded-full whitespace-nowrap flex-shrink-0',
+                riskBadgeClass,
+              ]"
+            >
+              {{ riskLabel }}
+            </span>
+          </div>
+
+          <!-- 动作描述：SDK canUseTool 透传的友好文案（displayName + description）。
+             没有 SDK 文案时（codex / 旧消息）回退到 kind 的中文标签。 -->
+          <div
+            v-if="request.displayName || request.description || request.kind"
+            class="px-4 pb-2 flex items-center gap-2 flex-wrap"
+          >
+            <span
+              v-if="request.displayName"
+              class="text-xs font-medium px-1.5 py-0.5 rounded bg-muted text-foreground whitespace-nowrap"
+            >
+              {{ request.displayName }}
+            </span>
+            <span
+              v-else
+              class="text-xs font-medium px-1.5 py-0.5 rounded bg-muted text-foreground whitespace-nowrap"
+            >
+              {{ kindLabel }}
+            </span>
+            <span v-if="request.description" class="text-xs text-muted-foreground min-w-0 truncate">
+              {{ request.description }}
+            </span>
+          </div>
+
+          <!-- 为什么问：SDK decisionReason（如 "Path is outside allowed working directories"） -->
+          <div v-if="request.decisionReason" class="px-4 pb-2">
+            <p class="text-[11px] text-muted-foreground italic">
+              {{ request.decisionReason }}
+            </p>
+          </div>
+
+          <!-- body：要确认的命令 / diff / mcp 细节（原始 input，补充信息） -->
+          <div v-if="request.detail" class="px-4 pb-3 max-h-72 overflow-y-auto">
+            <pre
+              class="font-mono text-[12px] text-foreground bg-code-block p-3 rounded whitespace-pre-wrap overflow-x-auto"
+              >{{ request.detail }}</pre>
+          </div>
+
+          <!-- footer -->
+          <div class="px-4 py-2.5 border-t border-border flex items-center justify-between gap-2">
+            <span class="text-xs text-muted-foreground truncate">{{ sourceLabel }}</span>
+            <div class="flex gap-2 flex-shrink-0">
+              <Button variant="outline" size="sm" @click="onReject">拒绝（Esc）</Button>
+              <Button
+                v-if="showApproveAlways"
+                variant="secondary"
+                size="sm"
+                @click="onApproveAlways"
+              >
+                {{ approveAlwaysLabel }}
+              </Button>
+              <Button
+                :variant="isHighRisk ? 'destructive' : 'default'"
+                size="sm"
+                @click="onApprove"
+              >
+                允许（Enter）
+              </Button>
+            </div>
+          </div>
+        </template>
       </div>
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
+import MarkdownView from '@renderer/components/chat/blocks/base/MarkdownView.vue'
 import { Button } from '@renderer/components/ui/button'
 import { useMessageStore } from '@renderer/stores/message'
-import { ShieldAlertIcon } from 'lucide-vue-next'
+import { ListChecksIcon, PlayIcon, ShieldAlertIcon } from 'lucide-vue-next'
 import { computed, onMounted, onUnmounted } from 'vue'
 
 const messageStore = useMessageStore()
@@ -108,6 +154,7 @@ const request = computed(() => pending.value!.request)
 /** 来源：claude 权限走 pendingClaudePermission，否则 codex。决定文案与"本会话都允许"语义。 */
 const isClaude = computed(() => messageStore.pendingClaudePermission !== null)
 const isHighRisk = computed(() => request.value.riskLevel === 'high')
+const isPlanApproval = computed(() => isClaude.value && request.value.plan !== undefined)
 
 /**
  * "本会话都允许/始终允许"显示条件：

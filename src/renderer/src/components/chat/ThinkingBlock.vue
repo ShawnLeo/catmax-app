@@ -58,8 +58,8 @@
 import { BrainIcon, ChevronDownIcon } from 'lucide-vue-next'
 import { computed, ref } from 'vue'
 
+import MarkdownView from './blocks/base/MarkdownView.vue'
 import LoadingDots from './LoadingDots.vue'
-import MarkdownView from './MarkdownView.vue'
 
 const props = defineProps<{
   /** reasoning 文本（可能是部分流式 token，会随时间增长） */

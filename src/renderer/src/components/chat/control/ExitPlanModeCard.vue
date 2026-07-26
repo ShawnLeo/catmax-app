@@ -17,7 +17,7 @@
 import type { ToolControlInfo } from '@shared/backend/types'
 import { ClipboardCheckIcon } from 'lucide-vue-next'
 
-import MarkdownView from '../MarkdownView.vue'
+import MarkdownView from '../blocks/base/MarkdownView.vue'
 
 defineProps<{ control: ToolControlInfo }>()
 </script>

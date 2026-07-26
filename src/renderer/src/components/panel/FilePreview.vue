@@ -289,7 +289,7 @@
 </template>
 
 <script setup lang="ts">
-import MarkdownView from '@renderer/components/chat/MarkdownView.vue'
+import MarkdownView from '@renderer/components/chat/blocks/base/MarkdownView.vue'
 import { renderMarkdown } from '@renderer/lib/markdown'
 import { ideSelectionAttachment, useChatInputStore } from '@renderer/stores/chat-input'
 import { useFilesStore } from '@renderer/stores/files'

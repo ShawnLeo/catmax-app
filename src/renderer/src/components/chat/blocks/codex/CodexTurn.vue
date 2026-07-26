@@ -14,6 +14,18 @@
       />
     </button>
 
+    <!-- Codex Turn Thinking: 发送后立即反馈，覆盖首个流式事件到达前的空窗期。 -->
+    <div
+      v-if="running"
+      class="flex items-center gap-2 pt-3 text-[13px] text-muted-foreground"
+      role="status"
+      aria-live="polite"
+    >
+      <span class="size-1.5 rounded-full bg-current animate-pulse" aria-hidden="true" />
+      <span>正在思考</span>
+      <LoadingDots :dot-size="3" :duration="1.6" />
+    </div>
+
     <div v-if="open && sections.processBlocks.length" class="space-y-4 pt-4">
       <template v-for="block in sections.processBlocks" :key="block.id">
         <MarkdownView
@@ -55,12 +67,13 @@ import type { NormalizedMessage } from '@shared/backend/types'
 import { ChevronDownIcon } from 'lucide-vue-next'
 import { computed, onUnmounted, ref, watch } from 'vue'
 
-import MarkdownView from '../../MarkdownView.vue'
+import LoadingDots from '../../LoadingDots.vue'
 
 import CodexActivityBlockView from './CodexActivityBlockView.vue'
 import CodexChangesCard from './CodexChangesCard.vue'
 import CodexToolCallBlockView from './CodexToolCallBlockView.vue'
 import { splitCodexTurn } from './conversation'
+import MarkdownView from './MarkdownView.vue'
 import PlanBlockView from './PlanBlockView.vue'
 
 const props = defineProps<{

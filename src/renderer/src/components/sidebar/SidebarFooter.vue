@@ -2,12 +2,14 @@
   <div class="p-2 border-t border-sidebar-border flex items-center gap-1">
     <!-- 用户信息（预留）—— 后续接入登录态后填充头像/用户名 -->
     <button
-      class="flex-1 min-w-0 flex items-center gap-2 px-2 py-1.5 rounded-md hover:bg-muted text-left cursor-pointer"
+      class="flex-1 min-w-0 flex items-center gap-2 px-2 py-1.5 rounded-md hover:bg-sidebar-accent text-left cursor-pointer"
       :title="'用户信息（即将推出）'"
       @click="onUserClick"
     >
       <!-- 头像占位：灰色圆形 + user icon -->
-      <div class="w-6 h-6 rounded-full bg-muted flex items-center justify-center flex-shrink-0">
+      <div
+        class="w-6 h-6 rounded-full bg-sidebar-accent flex items-center justify-center flex-shrink-0"
+      >
         <UserIcon class="w-3.5 h-3.5 text-muted-foreground" />
       </div>
       <div class="flex-1 min-w-0">
@@ -17,7 +19,7 @@
 
     <!-- 设置入口（纯图标） -->
     <button
-      class="p-1.5 rounded-md hover:bg-muted text-muted-foreground hover:text-foreground flex-shrink-0 cursor-pointer"
+      class="p-1.5 rounded-md hover:bg-sidebar-accent text-muted-foreground hover:text-foreground flex-shrink-0 cursor-pointer"
       title="设置"
       @click="openSettings"
     >

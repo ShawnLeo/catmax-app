@@ -8,7 +8,7 @@
 <script setup lang="ts">
 import type { TextContentBlock } from '@shared/backend/blocks'
 
-import MarkdownView from '../../MarkdownView.vue'
+import MarkdownView from './MarkdownView.vue'
 
 defineProps<{ block: TextContentBlock; messageRole?: string }>()
 </script>
