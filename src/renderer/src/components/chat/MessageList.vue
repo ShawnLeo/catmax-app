@@ -71,13 +71,13 @@
         样式跟 assistant 消息的时间轴一致：左侧竖线 + 色点（绿色脉冲 = running），
         让它视觉上属于 assistant 侧的对话流，而不是一个突兀的浮层。
       -->
-      <div v-if="agentWorking && !backendConversationRenderer" class="flex gap-3 flex-row">
+      <div v-if="agentWorking && !backendConversationRenderer" class="flex gap-3 flex-row mt-3">
         <div class="min-w-0 flex-1">
           <div class="relative pl-6 border-l-2 border-border/60">
             <span
               class="absolute w-2 h-2 rounded-full -left-[6px] top-1.5 bg-success animate-pulse"
             />
-            <div class="mt-1 flex items-center gap-2 text-[13px] text-muted-foreground">
+            <div class="flex items-center gap-2 text-[13px] text-muted-foreground">
               <Loader2Icon class="w-3.5 h-3.5 flex-shrink-0 animate-spin" />
               <span>正在思考</span>
               <LoadingDots class="text-muted-foreground" :dot-size="4" :duration="1.6" />

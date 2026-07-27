@@ -191,20 +191,20 @@ function markFileReference(element: HTMLElement, reference: string): void {
 
 /* ============ 标题层级（h1-h6 字号梯度） ============ */
 .markdown-body :deep(h1) {
-  @apply text-2xl font-semibold mt-6 mb-3;
+  @apply text-2xl font-semibold mt-2 mb-1;
 }
 .markdown-body :deep(h2) {
-  @apply text-xl font-semibold mt-5 mb-2;
+  @apply text-xl font-semibold mt-2 mb-0.5;
 }
 .markdown-body :deep(h3) {
-  @apply text-lg font-semibold mt-4 mb-2;
+  @apply text-lg font-semibold mt-1.5 mb-0.5;
 }
 .markdown-body :deep(h4) {
-  @apply text-base font-semibold mt-3 mb-1;
+  @apply text-base font-semibold mt-1.5 mb-0;
 }
 .markdown-body :deep(h5),
 .markdown-body :deep(h6) {
-  @apply text-sm font-semibold mt-2 mb-1 text-muted-foreground;
+  @apply text-sm font-semibold mt-1.5 mb-0 text-muted-foreground;
 }
 
 /* ============ 段落 / 首尾间距归零 ============ */

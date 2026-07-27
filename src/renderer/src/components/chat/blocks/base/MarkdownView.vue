@@ -194,20 +194,20 @@ function markFileReference(element: HTMLElement, reference: string): void {
  * 标题上方 margin 压到 8-12px——聊天回复里标题作为分节符,
  * 不需要文档那么大的呼吸空间,否则模块之间看着像断开了 */
 .markdown-body :deep(h1) {
-  @apply text-xl font-semibold mt-3 mb-1.5;
+  @apply text-xl font-semibold mt-1.5 mb-0.5;
 }
 .markdown-body :deep(h2) {
-  @apply text-lg font-semibold mt-3 mb-1;
+  @apply text-lg font-semibold mt-1.5 mb-0.5;
 }
 .markdown-body :deep(h3) {
-  @apply text-base font-semibold mt-2.5 mb-1;
+  @apply text-base font-semibold mt-1 mb-0.5;
 }
 .markdown-body :deep(h4) {
-  @apply text-[15px] font-semibold mt-2 mb-1;
+  @apply text-[15px] font-semibold mt-1 mb-0;
 }
 .markdown-body :deep(h5),
 .markdown-body :deep(h6) {
-  @apply text-sm font-semibold mt-2 mb-0.5 text-muted-foreground;
+  @apply text-sm font-semibold mt-1 mb-0 text-muted-foreground;
 }
 
 /* ============ 段落 / 首尾间距归零 ============ */
