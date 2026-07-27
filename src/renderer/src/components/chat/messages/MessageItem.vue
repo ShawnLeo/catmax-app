@@ -21,23 +21,17 @@
       message.role === 'user'
         ? // user 消息:靠右,底部留呼吸空间分隔对话轮次
           'flex-row-reverse mb-4'
-        : // assistant 消息:零外边距 + 自带 border-l 竖线(时间轴)。
-          // 所有 assistant 都画 border-l(让竖线连续)。首尾用 mask 伪元素遮挡多余部分:
-          //   - 第一条(mask-line-top):遮住色点上方竖线(上方接 user,无需延伸到色点之上)
-          //   - 最后一条(mask-line-bottom):遮住色点下方竖线(时间轴末端,色点之后不再延伸)
-          // 中间 assistant 不遮挡,border-l 完整覆盖,与上下衔接。
-          isFirstAssistant
-          ? 'flex-row relative border-l-2 border-border/60 pt-3 mask-line-top'
-          : isLast
-            ? 'flex-row relative border-l-2 border-border/60 pt-3 mask-line-bottom'
-            : 'flex-row relative border-l-2 border-border/60 pt-3',
+        : 'flex-row relative border-l-2 border-border/60 pt-3',
+      // assistant 首尾遮罩必须能同时生效：只有一条（含仅 thinking）时隐藏整条连线。
+      {
+        'mask-line-top': message.role === 'assistant' && isFirstAssistant,
+        'mask-line-bottom': message.role === 'assistant' && isLast,
+      },
     ]"
   >
     <!-- assistant 起始色点:相对 article 定位,中心对齐 border-l 竖线 + 第一行文字中线。
          -left-[5px]:8px 色点中心落在 2px border 中心(半径4 - border一半1 = 3,负方向)。
-         top:对齐第一行文字中线。pt-3 让内容下移 12px,首条 first:pt-0 不下移,
-         所以色点 top 也分两档:非首条 18px(12 padding + 6 文字上半),
-         首条 6px。用 :first-child 判断(article 是父级列表首个时触发)。 -->
+         top:对齐第一行文字中线。pt-3 让内容下移 12px，色点 top 为 18px。 -->
     <span
       v-if="message.role === 'assistant'"
       :class="[
@@ -359,11 +353,12 @@ function statusTooltip(status: 'text' | 'running' | 'completed' | 'failed'): str
 /*
  * mask-line-bottom:最后一条 assistant 消息用。
  * 时间轴到末端的色点处应终止,色点下方不再画竖线。
- * ::before 覆盖色点下方(22px ~ 底部)的 border 段。
+ * ::after 覆盖色点下方(22px ~ 底部)的 border 段。
  * top 22px 起始(色点中心),height 100% - 22px 用 calc 算,
  * 或者直接 top: 22px; bottom: 0; 让浏览器撑满。
+ * 与顶部的 ::before 分开，确保单条 assistant 可同时遮住点的上下两侧。
  */
-.mask-line-bottom::before {
+.mask-line-bottom::after {
   content: '';
   position: absolute;
   left: -2px;

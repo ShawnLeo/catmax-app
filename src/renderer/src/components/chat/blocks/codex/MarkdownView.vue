@@ -12,23 +12,15 @@
 
     Base 实现见 `../base/MarkdownView.vue`（服务 Claude 及跨后端共用场景）。
   -->
-  <div
-    v-if="rendered === undefined"
-    class="animate-pulse text-muted-foreground text-sm select-none"
-  >
+  <div v-if="rendered === undefined" class="animate-pulse text-muted-foreground text-sm select-none">
     <!--
       同步渲染未命中（markdown 管线还在初始化）的极短占位。
       预热完成后几乎不会出现；出现也只是首启那一瞬，比空白好——告诉用户内容正在来。
     -->
     …
   </div>
-  <div
-    v-else
-    ref="container"
-    :class="['markdown-body', { 'markdown-body-compact': compact }]"
-    @click="onClick"
-    v-html="rendered"
-  />
+  <div v-else ref="container" :class="['markdown-body', { 'markdown-body-compact': compact }]" @click="onClick"
+    v-html="rendered" />
 </template>
 
 <script setup lang="ts">
@@ -174,6 +166,7 @@ function markFileReference(element: HTMLElement, reference: string): void {
 .markdown-body-compact {
   line-height: 1.45;
 }
+
 .markdown-body-compact :deep(p),
 .markdown-body-compact :deep(ul),
 .markdown-body-compact :deep(ol),
@@ -181,39 +174,47 @@ function markFileReference(element: HTMLElement, reference: string): void {
   margin-top: 0.375rem;
   margin-bottom: 0.375rem;
 }
+
 .markdown-body-compact :deep(li) {
   margin-top: 0;
   margin-bottom: 0;
 }
+
 .markdown-body-compact :deep(.code-block-wrapper pre) {
   line-height: 1.5;
 }
 
 /* ============ 标题层级（h1-h6 字号梯度） ============ */
 .markdown-body :deep(h1) {
-  @apply text-2xl font-semibold mt-2 mb-1;
+  @apply text-2xl font-semibold;
 }
+
 .markdown-body :deep(h2) {
-  @apply text-xl font-semibold mt-2 mb-0.5;
+  @apply text-xl font-semibold;
 }
+
 .markdown-body :deep(h3) {
-  @apply text-lg font-semibold mt-1.5 mb-0.5;
+  @apply text-lg font-semibold;
 }
+
 .markdown-body :deep(h4) {
-  @apply text-base font-semibold mt-1.5 mb-0;
+  @apply text-base font-semibold;
 }
+
 .markdown-body :deep(h5),
 .markdown-body :deep(h6) {
-  @apply text-sm font-semibold mt-1.5 mb-0 text-muted-foreground;
+  @apply text-sm font-semibold text-muted-foreground;
 }
 
 /* ============ 段落 / 首尾间距归零 ============ */
 .markdown-body :deep(p) {
   @apply my-2;
 }
+
 .markdown-body :deep(:first-child) {
   @apply mt-0;
 }
+
 .markdown-body :deep(:last-child) {
   @apply mb-0;
 }
@@ -222,12 +223,15 @@ function markFileReference(element: HTMLElement, reference: string): void {
 .markdown-body :deep(ul) {
   @apply my-2 list-disc pl-6;
 }
+
 .markdown-body :deep(ol) {
   @apply my-2 list-decimal pl-6;
 }
+
 .markdown-body :deep(li) {
   @apply my-0.5;
 }
+
 .markdown-body :deep(li > ul),
 .markdown-body :deep(li > ol) {
   @apply my-1;
@@ -237,6 +241,7 @@ function markFileReference(element: HTMLElement, reference: string): void {
 .markdown-body :deep(.task-list-item) {
   @apply list-none pl-0;
 }
+
 .markdown-body :deep(.task-list-item > input[type='checkbox']) {
   @apply mr-2 align-middle cursor-pointer;
   accent-color: var(--color-primary);
@@ -246,15 +251,19 @@ function markFileReference(element: HTMLElement, reference: string): void {
 .markdown-body :deep(table) {
   @apply my-3 w-full border-collapse text-sm overflow-hidden;
 }
+
 .markdown-body :deep(thead) {
   @apply bg-muted;
 }
+
 .markdown-body :deep(th) {
   @apply px-3 py-1.5 text-left font-semibold border border-border;
 }
+
 .markdown-body :deep(td) {
   @apply px-3 py-1.5 border border-border;
 }
+
 .markdown-body :deep(tbody tr:nth-child(even)) {
   @apply bg-muted/30;
 }
@@ -268,14 +277,16 @@ function markFileReference(element: HTMLElement, reference: string): void {
   @apply my-3 rounded-md overflow-hidden border border-border;
   background-color: transparent;
 }
+
 .markdown-body :deep(.code-block-header) {
-  @apply flex items-center justify-between px-3 py-1 border-b border-border/50
-    text-xs text-muted-foreground;
+  @apply flex items-center justify-between px-3 py-1 border-b border-border/50 text-xs text-muted-foreground;
   background-color: var(--code-block-background);
 }
+
 .markdown-body :deep(.code-block-copy) {
   @apply cursor-pointer hover:text-foreground transition-colors;
 }
+
 /* pre 自己负责横向滚动——长代码行在 pre 内部滚，不撑爆 wrapper。
  * macOS Chromium 默认 overlay scrollbar（不悬停不可见），用户看不到能滚；
  * 这里用 ::-webkit-scrollbar 强制常驻细滚动条，跟 VS Code 行为一致。
@@ -286,6 +297,7 @@ function markFileReference(element: HTMLElement, reference: string): void {
   @apply my-0 p-3 rounded-none border-0 text-[12px];
   overflow-x: auto;
 }
+
 .markdown-body :deep(.code-block-wrapper pre code) {
   display: block;
   /* 用 white-space: pre 而不是 min-width: max-content——后者会让 code 整块
@@ -293,18 +305,22 @@ function markFileReference(element: HTMLElement, reference: string): void {
    * code 必须 block，否则 inline 会被 pre 宽度夹住导致换行。 */
   white-space: pre;
 }
+
 /* 代码块专属的细滚动条（覆盖全局 ::-webkit-scrollbar，让它常驻可见） */
 .markdown-body :deep(.code-block-wrapper pre::-webkit-scrollbar) {
   height: 8px;
   width: 8px;
 }
+
 .markdown-body :deep(.code-block-wrapper pre::-webkit-scrollbar-thumb) {
   background-color: oklch(50% 0 0 / 0.35);
   border-radius: 4px;
 }
+
 .markdown-body :deep(.code-block-wrapper pre::-webkit-scrollbar-thumb:hover) {
   background-color: oklch(50% 0 0 / 0.55);
 }
+
 .markdown-body :deep(.code-block-wrapper pre::-webkit-scrollbar-track) {
   background: transparent;
 }
@@ -313,6 +329,7 @@ function markFileReference(element: HTMLElement, reference: string): void {
 .markdown-body :deep(:not(pre) > code) {
   @apply font-mono text-[13px] bg-muted px-1 py-0.5 rounded;
 }
+
 /* File Reference: 中性灰底胶囊，等宽字体，视觉与 inline code 同源；
  * 点击在文件面板预览。不使用 primary 色调——保持路径像一段普通代码，
  * 只靠 hover 的轻微背景抬升暗示可点（参考附件设计稿）。 */
@@ -322,6 +339,7 @@ function markFileReference(element: HTMLElement, reference: string): void {
   color: inherit;
   background-color: var(--color-muted);
 }
+
 .markdown-body :deep(.file-reference:hover) {
   background-color: color-mix(in oklch, var(--color-muted), var(--color-foreground) 8%);
 }
@@ -330,15 +348,19 @@ function markFileReference(element: HTMLElement, reference: string): void {
 .markdown-body :deep(blockquote) {
   @apply border-l-2 border-border pl-3 italic text-muted-foreground my-2;
 }
+
 .markdown-body :deep(hr) {
   @apply border-border my-4;
 }
+
 .markdown-body :deep(a) {
   @apply text-primary underline underline-offset-2;
 }
+
 .markdown-body :deep(img) {
   @apply max-w-full rounded-md my-2;
 }
+
 .markdown-body :deep(del) {
   @apply text-muted-foreground line-through;
 }
