@@ -58,7 +58,8 @@
 import { BrainIcon, ChevronDownIcon } from 'lucide-vue-next'
 import { computed, ref } from 'vue'
 
-import MarkdownView from './blocks/base/MarkdownView.vue'
+import MarkdownView from '../blocks/base/MarkdownView.vue'
+
 import LoadingDots from './LoadingDots.vue'
 
 const props = defineProps<{

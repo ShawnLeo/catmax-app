@@ -7,8 +7,8 @@
 import type { ToolCallContentBlock } from '@shared/backend/blocks'
 import { computed } from 'vue'
 
-import ToolCallCard from '../../ToolCallCard.vue'
-import ToolCallInline from '../../ToolCallInline.vue'
+import ToolCallCard from '../../tools/ToolCallCard.vue'
+import ToolCallInline from '../../tools/ToolCallInline.vue'
 
 const props = defineProps<{
   block: ToolCallContentBlock

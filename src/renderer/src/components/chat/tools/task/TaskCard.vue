@@ -75,13 +75,12 @@
 
 <script setup lang="ts">
 import { useBackendStore } from '@renderer/stores/backend'
-import { useWorkspaceStore } from '@renderer/stores/workspace'
 import type { ToolTaskInfo, ToolTaskStats } from '@shared/backend/types'
 import type { NormalizedMessage } from '@shared/backend/types'
 import { BotIcon } from 'lucide-vue-next'
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 
-import MessageItem from '../MessageItem.vue'
+import MessageItem from '../../messages/MessageItem.vue'
 
 const props = defineProps<{
   task: ToolTaskInfo
@@ -98,7 +97,6 @@ const subagentExpanded = ref(false)
 const subagentMessages = ref<NormalizedMessage[]>([])
 const loadingSubagent = ref(false)
 const backendStore = useBackendStore()
-const workspaceStore = useWorkspaceStore()
 
 /**
  * 能否显示"展开子会话"按钮？

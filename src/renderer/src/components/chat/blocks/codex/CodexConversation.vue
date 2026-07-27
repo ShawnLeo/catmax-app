@@ -23,7 +23,7 @@
 import type { NormalizedMessage } from '@shared/backend/types'
 import { computed } from 'vue'
 
-import CompactHistoryEntry from '../../CompactHistoryEntry.vue'
+import CompactHistoryEntry from '../../messages/CompactHistoryEntry.vue'
 
 import CodexTurn from './CodexTurn.vue'
 import CodexUserMessage from './CodexUserMessage.vue'

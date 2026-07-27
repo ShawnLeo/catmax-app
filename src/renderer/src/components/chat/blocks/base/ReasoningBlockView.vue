@@ -11,7 +11,7 @@
 <script setup lang="ts">
 import type { ReasoningContentBlock } from '@shared/backend/blocks'
 
-import ThinkingBlock from '../../ThinkingBlock.vue'
+import ThinkingBlock from '../../messages/ThinkingBlock.vue'
 
 defineProps<{
   block: ReasoningContentBlock

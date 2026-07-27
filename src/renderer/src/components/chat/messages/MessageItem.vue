@@ -150,7 +150,8 @@ import type { NormalizedMessage } from '@shared/backend/types'
 import { CheckIcon, CopyIcon } from 'lucide-vue-next'
 import { computed, ref } from 'vue'
 
-import { getBlockRenderer } from './blocks/registry'
+import { getBlockRenderer } from '../blocks/registry'
+
 import CompactHistoryEntry from './CompactHistoryEntry.vue'
 
 type TextBlock = ReasoningContentBlock

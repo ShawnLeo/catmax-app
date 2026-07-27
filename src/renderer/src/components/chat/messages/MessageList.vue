@@ -136,7 +136,8 @@ import { useWorkspaceStore } from '@renderer/stores/workspace'
 import { AlertCircleIcon, ArrowDownIcon, Loader2Icon } from 'lucide-vue-next'
 import { onMounted, ref, watch, nextTick, computed } from 'vue'
 
-import { getBackendConversationRenderer } from './blocks/plugin-registry'
+import { getBackendConversationRenderer } from '../blocks/plugin-registry'
+
 import CompactDivider from './CompactDivider.vue'
 import LoadingDots from './LoadingDots.vue'
 import MessageItem from './MessageItem.vue'

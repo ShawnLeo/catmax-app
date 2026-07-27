@@ -76,12 +76,12 @@
 </template>
 
 <script setup lang="ts">
-import BottomTerminalPanel from '@renderer/components/chat/BottomTerminalPanel.vue'
-import Composer from '@renderer/components/chat/Composer.vue'
-import MessageList from '@renderer/components/chat/MessageList.vue'
-import PermissionPanel from '@renderer/components/chat/PermissionPanel.vue'
-import QuestionPanel from '@renderer/components/chat/QuestionPanel.vue'
-import RuntimeConfigBar from '@renderer/components/chat/RuntimeConfigBar.vue'
+import Composer from '@renderer/components/chat/composer/Composer.vue'
+import PermissionPanel from '@renderer/components/chat/feedback/PermissionPanel.vue'
+import QuestionPanel from '@renderer/components/chat/feedback/QuestionPanel.vue'
+import BottomTerminalPanel from '@renderer/components/chat/layout/BottomTerminalPanel.vue'
+import RuntimeConfigBar from '@renderer/components/chat/layout/RuntimeConfigBar.vue'
+import MessageList from '@renderer/components/chat/messages/MessageList.vue'
 import RightPanel from '@renderer/components/panel/RightPanel.vue'
 import Sidebar from '@renderer/components/sidebar/Sidebar.vue'
 import ResizeHandle from '@renderer/components/ui/ResizeHandle.vue'

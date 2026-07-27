@@ -5,7 +5,7 @@
 <script setup lang="ts">
 import type { CompactDividerContentBlock } from '@shared/backend/blocks'
 
-import CompactHistoryEntry from '../../CompactHistoryEntry.vue'
+import CompactHistoryEntry from '../../messages/CompactHistoryEntry.vue'
 
 defineProps<{ block: CompactDividerContentBlock }>()
 </script>

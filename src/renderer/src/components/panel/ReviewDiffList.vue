@@ -73,7 +73,7 @@
 </template>
 
 <script setup lang="ts">
-import DiffView from '@renderer/components/chat/DiffView.vue'
+import DiffView from '@renderer/components/chat/tools/DiffView.vue'
 import { useUiStore } from '@renderer/stores/ui'
 import type { CodexFileChange } from '@shared/backend/blocks'
 import type { ToolEditInfo } from '@shared/backend/types'

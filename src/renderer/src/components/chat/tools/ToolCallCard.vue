@@ -138,7 +138,8 @@ import {
 } from 'lucide-vue-next'
 import { computed, ref, type Component } from 'vue'
 
-import MarkdownView from './blocks/base/MarkdownView.vue'
+import MarkdownView from '../blocks/base/MarkdownView.vue'
+
 import EnterPlanModeCard from './control/EnterPlanModeCard.vue'
 import ExitPlanModeCard from './control/ExitPlanModeCard.vue'
 import TodoWriteCard from './control/TodoWriteCard.vue'

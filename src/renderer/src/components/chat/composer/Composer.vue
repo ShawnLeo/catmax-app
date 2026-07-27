@@ -143,9 +143,9 @@
 </template>
 
 <script setup lang="ts">
-import AttachmentBar from '@renderer/components/chat/AttachmentBar.vue'
-import PermissionShieldButton from '@renderer/components/chat/PermissionShieldButton.vue'
-import ThinkingSlider from '@renderer/components/chat/ThinkingSlider.vue'
+import AttachmentBar from '@renderer/components/chat/composer/AttachmentBar.vue'
+import PermissionShieldButton from '@renderer/components/chat/composer/PermissionShieldButton.vue'
+import ThinkingSlider from '@renderer/components/chat/composer/ThinkingSlider.vue'
 import { Button } from '@renderer/components/ui/button'
 import { DropdownMenu } from '@renderer/components/ui/dropdown-menu'
 import { useBackendStore } from '@renderer/stores/backend'

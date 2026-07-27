@@ -9,7 +9,7 @@
 </template>
 
 <script setup lang="ts">
-import ImagePreviewOverlay from '@renderer/components/chat/ImagePreviewOverlay.vue'
+import ImagePreviewOverlay from '@renderer/components/chat/overlays/ImagePreviewOverlay.vue'
 import CommandPalette from '@renderer/components/command/CommandPalette.vue'
 import { useTheme } from '@renderer/composables/useTheme'
 import { useBackendStore } from '@renderer/stores/backend'

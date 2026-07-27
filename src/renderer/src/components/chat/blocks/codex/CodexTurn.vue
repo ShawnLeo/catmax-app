@@ -67,7 +67,7 @@ import type { NormalizedMessage } from '@shared/backend/types'
 import { ChevronDownIcon } from 'lucide-vue-next'
 import { computed, onUnmounted, ref, watch } from 'vue'
 
-import LoadingDots from '../../LoadingDots.vue'
+import LoadingDots from '../../messages/LoadingDots.vue'
 
 import CodexActivityBlockView from './CodexActivityBlockView.vue'
 import CodexChangesCard from './CodexChangesCard.vue'
