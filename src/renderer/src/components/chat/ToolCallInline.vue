@@ -22,9 +22,10 @@
       class="w-3.5 h-3.5 text-muted-foreground flex-shrink-0"
     />
     <span class="font-medium text-foreground flex-shrink-0">{{ typeName }}</span>
-    <span class="text-muted-foreground font-mono truncate min-w-0 hover:text-primary hover:underline">{{
-      fileName
-    }}</span>
+    <span
+      class="text-muted-foreground font-mono truncate min-w-0 hover:text-primary hover:underline"
+      >{{ fileName }}</span
+    >
   </button>
 </template>
 

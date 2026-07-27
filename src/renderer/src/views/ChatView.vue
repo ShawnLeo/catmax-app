@@ -11,8 +11,10 @@
       @resize="uiStore.setSidebarWidth"
     />
 
-    <!-- 主聊天区 -->
-    <div class="flex-1 flex flex-col min-w-0">
+    <!-- 主聊天区:用具体 min-width 而非 min-w-0,防止被右面板挤压到低于 250px。
+         sidebar 折叠时宽度为 0,不占空间;展开时由 ResizeHandle clamp 在 [SIDEBAR_MIN, 容器一半],
+         加上这里的 min-w 保证主聊天区 + sidebar 不会被右面板挤没。 -->
+    <div class="flex-1 flex flex-col min-w-[250px]">
       <RuntimeConfigBar />
 
       <MessageList
@@ -121,6 +123,9 @@ const SIDEBAR_MIN = 280
 const RIGHT_PANEL_MIN = 320
 const FILE_PREVIEW_MIN = 360
 const FILE_PREVIEW_SPLIT_HANDLE_WIDTH = 1
+// 主聊天区最小宽度——右面板拖宽时不能把聊天区挤到低于此值。
+// 250px 保证 textarea + 发送按钮至少能正常显示,再加窄就失去可用性。
+const CHAT_AREA_MIN = 250
 // 底部终端面板可拖拽高度——min 保证终端至少能显示几行，max 不超过容器 70%（留空间给聊天区）
 const BOTTOM_PANEL_MIN = 120
 const containerRef = ref<HTMLElement | null>(null)
@@ -149,9 +154,18 @@ const rightPanelCurrent = computed(() => {
   return filePreviewOpen.value ? uiStore.filePreviewWidth : uiStore.rightPanelWidth
 })
 const rightPanelMin = computed(() => (filePreviewOpen.value ? FILE_PREVIEW_MIN : RIGHT_PANEL_MIN))
-const rightPanelMax = computed(() =>
-  Math.max(rightPanelMin.value, Math.floor(containerWidth.value * 0.78)),
-)
+const rightPanelMax = computed(() => {
+  // 右面板最大值受「主聊天区最小宽度」约束:
+  // 容器 - sidebar 实际宽度 - 聊天区最小宽度 = 右面板能占的最大空间。
+  // sidebar 折叠时不占空间(宽度 0),展开时用 uiStore.sidebarWidth。
+  const sidebarWidth = uiStore.sidebarCollapsed ? 0 : uiStore.sidebarWidth
+  const available = containerWidth.value - sidebarWidth - CHAT_AREA_MIN
+  // 不低于 rightPanelMin(否则 handle 无法拖到 min),也不超过容器 78%
+  return Math.max(
+    rightPanelMin.value,
+    Math.min(Math.floor(available), Math.floor(containerWidth.value * 0.78)),
+  )
+})
 const bottomPanelMax = computed(() =>
   Math.max(BOTTOM_PANEL_MIN, Math.floor(containerHeight.value * 0.7)),
 )

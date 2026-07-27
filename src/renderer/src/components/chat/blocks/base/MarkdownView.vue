@@ -223,25 +223,74 @@ function markFileReference(element: HTMLElement, reference: string): void {
 }
 
 /* ============ 列表 ============
- * 关键修复:markdown-it 在 <li> 之间输出空白文本节点 "\n",这些节点继承了
- * ul 的 line-height(默认 1.375 → 20.6px),在 li 之间渲染成看不见的空行,
- * 导致每个 li 之间凭空多出 ~20px 空白。给 ul 设 line-height:0 消除这些
- * 空白节点的高度,li 自己显式设行高继承给内容。 */
+ * markdown-it 在 <li> 之间、以及宽松式列表(<p> 包裹)的 li 内部,都会输出
+ * 空白文本节点 "\n"。这些节点继承 ul/ol 的 line-height,凭空撑出 ~20px 空白
+ * (li 之间 + li 内部 p 前后都有),导致列表严重松散。
+ *
+ * 消除方案:ul/ol 设 line-height:0 让空白节点高度归零。
+ *
+ * 副作用:line-height:0 会让 ol 的原生数字标记(::marker)与文字错位——
+ * marker 的高度计算依赖 li 的行框,而 li 在 line-height:0 的 ol 内行框被压缩。
+ * 彻底解法:关闭原生 marker,用 CSS counter + li::before 自画数字。
+ * 自画的数字是 li 内部的真实 inline 元素,跟随 li 第一行 line box,与文字天然对齐。 */
 .markdown-body :deep(ul) {
-  @apply my-1 list-disc pl-6;
+  @apply my-1 list-none pl-6;
   line-height: 0;
 }
 .markdown-body :deep(ol) {
-  @apply my-1 list-decimal pl-6;
+  @apply my-1 list-none pl-6;
   line-height: 0;
+  /* counter-reset 在 ol 上,每个 ol 独立计数 */
+  counter-reset: md-list-item;
 }
 .markdown-body :deep(li) {
   @apply my-px leading-[1.4];
+  position: relative;
+  /* li 自己保持正常 line-height——纯文本 li(无 <p>/<code> 包裹的内容)靠它撑高度。
+   * 早期版本曾给 li 设 line-height:0 消除内部 "\n" 空白节点,但那会让纯文本 li
+   * 高度归零、文字消失重叠(li > * 只恢复元素子节点,纯文本节点继承 0)。
+   * li 之间的空白由 ul/ol 的 line-height:0 消除;li 内部 <p> 前后的空白
+   * 通过下面的 li > p { margin-top: 0 } + 负 margin 抵消。 */
 }
-/* li 内部的段落不自带间距——列表项就是一行,不该有段落呼吸 */
+/* li 内部段落归零 margin + 用负 margin-top 抵消前导 "\n" 空白节点的行高
+ * (空白节点继承 li 的 line-height 21px,会把 <p> 往下推,导致自画数字与 <p>
+ * 第一行错位)。margin-top: -1.4em 精确抵消一个行高(li line-height=1.4,font-size=15px,
+ * -1.4em = -21px)。用 !important 确保覆盖 Tailwind preflight 的 p 默认 margin。 */
 .markdown-body :deep(li > p) {
-  @apply my-0;
+  margin-top: -1.4em !important;
+  margin-bottom: 0 !important;
 }
+/* 自画列表标记,绕过原生 ::marker(它受 line-height:0 影响会错位)。
+ * ul 用圆点,ol 用 counter 数字。标记绝对定位到 li 左侧,垂直居中对齐第一行。 */
+.markdown-body :deep(ul > li)::before {
+  content: '';
+  position: absolute;
+  left: -1.25rem;
+  top: 0.55rem;
+  width: 0.3rem;
+  height: 0.3rem;
+  border-radius: 50%;
+  background-color: currentColor;
+  opacity: 0.6;
+}
+.markdown-body :deep(ol > li) {
+  /* 自增 counter */
+  counter-increment: md-list-item;
+}
+.markdown-body :deep(ol > li)::before {
+  content: counter(md-list-item) '.';
+  position: absolute;
+  left: -1.5rem;
+  top: 0;
+  /* line-height 与 li 第一行一致(21px),让数字在该行高内垂直居中,
+   * 与 li 第一行文字基线对齐。top:0 对齐 li 顶部 = 第一行顶部。 */
+  line-height: 1.4;
+  width: 1.25rem;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  font-weight: 500;
+}
+/* li 内嵌套的子列表留一点间距 */
 .markdown-body :deep(li > ul),
 .markdown-body :deep(li > ol) {
   @apply my-1;

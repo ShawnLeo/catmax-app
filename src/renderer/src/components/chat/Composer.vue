@@ -14,13 +14,16 @@
   -->
   <div>
     <div class="mx-auto max-w-3xl lg:max-w-screen-lg xl:max-w-[1280px] 2xl:max-w-[1440px] p-3">
-      <!-- 圆角输入容器
+      <!-- 圆角输入容器(@container:作为容器查询的锚点,底部配置行根据此容器实际宽度
+           折叠/展开,而不是根据视口宽度——这样右侧面板挤压时能正确响应)。
            注意：不加 overflow-hidden——否则 DropdownMenu/ThinkingSlider 的弹层
            会被容器裁切（弹层在按钮上方时超出容器上边界）。内部子元素的圆角
            由各自的 rounded-* 控制，textarea/AttachmentBar 没有溢出元素，
            容器自身圆角不会露出直角。-->
+      <!-- File Preview Tabs: 输入容器背景与左侧会话列表统一(bg-sidebar),
+           跟主体聊天区(--background)形成轻微对比,呼应侧边栏的层次感。 -->
       <div
-        class="rounded-2xl border border-border bg-background focus-within:border-primary/50 transition-colors"
+        class="rounded-2xl border border-border bg-sidebar focus-within:border-primary/50 transition-colors @container"
       >
         <!-- 附件区 -->
         <AttachmentBar
@@ -40,9 +43,14 @@
           @paste="onPaste"
         />
 
-        <!-- 底部配置行：Model / Effort / PermissionMode + 发送按钮 -->
+        <!-- 底部配置行：Model / Effort / 权限(盾牌) + 发送按钮。
+             用 @container 响应自身宽度(非视口),右面板挤压时优雅折叠:
+               - 正常(宽):全部显示,带文字标签
+               - 紧凑:Model 隐藏文字只留 chevron、Effort 隐藏文字+chevron 只留脑图标
+               - 极窄:隐藏刷新按钮 + 辅助提示文字
+               权限盾牌 + Model + Effort + 发送按钮 永不隐藏 -->
         <div class="flex items-center gap-2 px-3 py-2">
-          <!-- Model -->
+          <!-- Model(最高优先级,几乎一直显示;窄时只显图标) -->
           <DropdownMenu
             :model-value="modelValue.model"
             :options="[
@@ -55,13 +63,15 @@
             placement="top"
             title="模型"
             :trigger-width="120"
+            class="composer-model-trigger"
             @update:model-value="onModelSelect"
           />
 
-          <!-- 刷新模型列表--清 main 端 cachedModelsPromise，重新拉一次 model/list -->
+          <!-- 刷新模型列表--清 main 端 cachedModelsPromise，重新拉一次 model/list。
+               低优先级:窄屏隐藏(composer-refresh,样式在 <style> 里用容器查询控制)。 -->
           <button
             type="button"
-            class="text-secondary-foreground/60 hover:text-secondary-foreground transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+            class="composer-refresh text-secondary-foreground/60 hover:text-secondary-foreground transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
             :disabled="refreshing"
             title="刷新模型列表"
             @click="onRefreshModels"
@@ -74,11 +84,14 @@
           <ThinkingSlider
             :model-value="modelValue.effort ?? 'medium'"
             :supported="supportedEfforts"
+            class="composer-effort-trigger"
             @update:model-value="onEffortSelect"
           />
 
-          <!-- Permission Mode -->
-          <DropdownMenu
+          <!-- Permission Mode:盾牌图标按钮(无文字),始终显示。
+               bypassPermissions(完全跳过)时盾牌变 amber 警告色。
+               不再用 DropdownMenu——换成图标按钮,避免窄屏被折叠隐藏。 -->
+          <PermissionShieldButton
             :model-value="modelValue.permissionMode"
             :options="
               supportedPermissionModes.map((m) => ({
@@ -86,14 +99,14 @@
                 label: permissionLabel(m),
               }))
             "
-            placement="top"
-            title="权限模式"
+            class="composer-perm"
             @update:model-value="onPermissionModeSelect"
           />
 
           <div class="flex-1" />
 
-          <span class="font-sans text-[11px] text-muted-foreground hidden sm:inline">
+          <!-- 提示文字:窄屏隐藏(composer-hint) -->
+          <span class="composer-hint font-sans text-[11px] text-muted-foreground hidden sm:inline">
             Shift+Enter 换行
           </span>
 
@@ -131,6 +144,7 @@
 
 <script setup lang="ts">
 import AttachmentBar from '@renderer/components/chat/AttachmentBar.vue'
+import PermissionShieldButton from '@renderer/components/chat/PermissionShieldButton.vue'
 import ThinkingSlider from '@renderer/components/chat/ThinkingSlider.vue'
 import { Button } from '@renderer/components/ui/button'
 import { DropdownMenu } from '@renderer/components/ui/dropdown-menu'
@@ -285,3 +299,114 @@ function onPermissionModeSelect(value: PermissionMode): void {
   emit('update:modelValue', { ...props.modelValue, permissionMode: value })
 }
 </script>
+
+<style scoped>
+/*
+ * 底部配置行样式统一——所有 trigger 按钮(Model/Effort/权限盾牌)和发送按钮:
+ *   1. 高度统一 h-7(28px),垂直对齐
+ *   2. 背景透明(融入 Composer 的 bg-sidebar),hover 时才有 bg-accent 反馈
+ *      之前用 bg-secondary(更深)会在 Composer 上形成色块,不协调
+ *
+ * 通过 :deep() 穿透到 DropdownMenu/ThinkingSlider/PermissionShieldButton 的内部 button,
+ * 只影响 Composer 内的实例(这些组件本体不改,避免影响其他使用方)。
+ */
+/*
+ * 注意::deep(button) 会匹配 trigger button + 弹层内的所有 button(选项/圆点),
+ * 会误伤弹层。所以只匹配 trigger button:
+ *   - Model/权限:弹层 button 在 :deep 里也会被匹配,但它们不受 height/padding 影响
+ *     (弹层 button 有自己的 w-full + py-2)。这里只调 trigger 的视觉。
+ *   - Effort:必须用精确的 .effort-trigger-btn,否则弹层圆点 span 被隐藏。
+ * 用 > button(直接子 button)缩小范围——弹层在 trigger button 之后,不是直接子。
+ */
+.composer-model-trigger > :deep(button),
+.composer-effort-trigger > :deep(button.effort-trigger-btn),
+.composer-perm > :deep(button) {
+  height: 1.75rem; /* h-7 = 28px,与发送按钮一致 */
+  padding-top: 0;
+  padding-bottom: 0;
+  background-color: transparent;
+  border-radius: 0.375rem;
+}
+.composer-model-trigger > :deep(button:hover),
+.composer-effort-trigger > :deep(button.effort-trigger-btn:hover),
+.composer-perm > :deep(button:hover) {
+  background-color: var(--color-accent);
+  color: var(--color-accent-foreground);
+}
+
+/* 刷新按钮也统一高度 + 透明背景 */
+.composer-refresh {
+  height: 1.75rem;
+  width: 1.75rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 0.375rem;
+}
+
+/*
+ * 底部配置行响应式收窄——基于 CSS 容器查询(@container),而非 media query。
+ * 容器是 template 里带 @container class 的圆角输入框(Tailwind v4 的 @container
+ * 会自动设 container-type: inline-size),它会被右侧面板挤压变窄。
+ *
+ * 为什么不用 media query:右侧面板挤压时,中间列实际宽度 < 视口宽度,
+ * media query 看的是视口,无法感知实际可用宽度。容器查询直接量自身容器。
+ *
+ * 折叠策略(按容器实际宽度,从宽到窄逐级折叠):
+ *   - ≥512px (32rem):全部正常显示
+ *   - 紧凑:Model/Effort trigger 收窄,辅助提示隐藏
+ *   - 极窄:刷新按钮隐藏
+ *   权限盾牌 + Model + Effort + 发送按钮 永不隐藏
+ */
+
+/* ---- 辅助提示文字:< 32rem 隐藏 ---- */
+.composer-hint {
+  @container (width < 32rem) {
+    display: none;
+  }
+}
+
+/* ---- 刷新按钮:< 28rem 隐藏(优先级低于 Model/Effort/权限) ---- */
+.composer-refresh {
+  @container (width < 28rem) {
+    display: none;
+  }
+}
+
+/*
+ * Model trigger:< 32rem 收窄,去掉下拉箭头(chevron),只保留模型名文字。
+ * 用 > button(直接子)避免匹配弹层内的选项 button。
+ * chevron 是 button 内最后一个 svg(svg:last-child),隐藏后 label span 可占满 trigger。
+ */
+.composer-model-trigger > :deep(button) {
+  @container (width < 32rem) {
+    max-width: 80px;
+  }
+}
+.composer-model-trigger > :deep(button > span) {
+  @container (width < 32rem) {
+    max-width: 64px;
+  }
+}
+.composer-model-trigger > :deep(button > svg:last-child) {
+  @container (width < 32rem) {
+    display: none;
+  }
+}
+
+/*
+ * Effort (ThinkingSlider) trigger:< 30rem 隐藏档位文字 + chevron,只留脑图标。
+ * 必须用 .effort-trigger-btn 精确匹配——否则 :deep(button > span) 会匹配到
+ * 弹层里圆点 button 内的 span(圆点本身),把圆点 display:none 掉。
+ */
+.composer-effort-trigger :deep(button.effort-trigger-btn > span) {
+  @container (width < 30rem) {
+    display: none;
+  }
+}
+.composer-effort-trigger :deep(button.effort-trigger-btn > svg:last-child) {
+  @container (width < 30rem) {
+    display: none;
+  }
+}
+</style>

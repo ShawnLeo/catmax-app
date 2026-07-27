@@ -23,7 +23,7 @@
     >
       <span class="truncate flex-1">{{ triggerLabel }}</span>
       <ChevronDownIcon
-        class="w-3.5 h-3.5 flex-shrink-0 transition-transform"
+        class="w-4 h-4 flex-shrink-0 transition-transform"
         :class="open ? 'rotate-180' : ''"
       />
     </button>
@@ -31,7 +31,7 @@
     <div
       v-if="open"
       :class="[
-        'absolute z-50 min-w-[12rem] max-w-[20rem] rounded-md border border-border bg-popover p-1 shadow-lg',
+        'absolute z-50 w-max max-w-[20rem] rounded-md border border-border bg-popover p-1 shadow-lg',
         placement === 'top' ? 'bottom-full mb-1' : 'mt-1',
         align === 'right' ? 'right-0' : 'left-0',
       ]"
@@ -74,6 +74,12 @@ const props = withDefaults(
     options: DropdownOption<T>[]
     /** 未选中时显示的占位文案 */
     placeholder?: string
+    /**
+     * 显式覆盖 trigger 显示文案——优先级最高。
+     * 不传时回退到当前选中项的 label。
+     * 用于"完整 label 在弹层显示,trigger 显示短名"这类场景(如 Model)。
+     */
+    triggerLabel?: string
     /** 弹层对齐方向 */
     align?: 'left' | 'right'
     /** 弹层展开方向：bottom（默认，向下）或 top（向上，给 trigger 贴近窗口底部用） */
@@ -106,12 +112,14 @@ const triggerStyle = computed(() =>
 )
 
 /**
- * trigger 按钮显示的文案：
- *   - 当前选中项的 label（优先）
- *   - 都没选中时显示 placeholder
- *   - placeholder 未传时显示空串（按钮宽度由 chevron 撑起）
+ * trigger 按钮显示的文案（优先级从高到低）：
+ *   1. 显式传入的 triggerLabel prop(覆盖,用于显示短名)
+ *   2. 当前选中项的 label
+ *   3. placeholder
+ *   4. 空串(按钮宽度由 chevron 撑起)
  */
 const triggerLabel = computed(() => {
+  if (props.triggerLabel !== undefined) return props.triggerLabel
   const current = props.options.find((o) => o.value === props.modelValue)
   if (current) return current.label
   return props.placeholder ?? ''

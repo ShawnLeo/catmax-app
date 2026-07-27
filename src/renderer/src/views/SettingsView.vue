@@ -7,8 +7,6 @@
     >
       <TitleBarControls />
       <h1 class="text-sm font-medium text-foreground ml-2">设置</h1>
-      <div class="flex-1" />
-      <Button variant="ghost" size="sm" class="interactive" @click="goBack">返回</Button>
     </div>
 
     <!-- 主体：左侧导航 + 右侧内容 -->
@@ -16,6 +14,15 @@
       <!-- 左侧导航：复用 sidebar token（bg-sidebar / sidebar-accent / sidebar-border），
            跟主会话侧栏共享配色，保持两种布局下"侧栏"视觉一致。右侧内容区沿用 bg-background。 -->
       <nav class="w-52 shrink-0 border-r border-sidebar-border bg-sidebar p-3 flex flex-col gap-1">
+        <!-- 返回按钮：放在外观导航项之上，样式对齐工作区切换按钮
+             （hover:bg-sidebar-accent + rounded-md），与下方导航项同间距。 -->
+        <button
+          class="flex items-center gap-2.5 px-3 py-2 rounded-md text-sm font-medium text-left transition-colors text-muted-foreground hover:bg-sidebar-accent hover:text-foreground interactive cursor-pointer mb-1"
+          @click="goBack"
+        >
+          <ArrowLeftIcon class="w-4 h-4 shrink-0" />
+          <span>返回</span>
+        </button>
         <button
           v-for="item in navItems"
           :key="item.id"
@@ -67,9 +74,15 @@ import ProxySection from '@renderer/components/settings/ProxySection.vue'
 import ThemeSection from '@renderer/components/settings/ThemeSection.vue'
 import WorkspaceSection from '@renderer/components/settings/WorkspaceSection.vue'
 import TitleBarControls from '@renderer/components/TitleBarControls.vue'
-import { Button } from '@renderer/components/ui/button'
 import type { PlatformInfo } from '@shared/ipc/system'
-import { PaletteIcon, CpuIcon, FolderIcon, GlobeIcon, InfoIcon } from 'lucide-vue-next'
+import {
+  PaletteIcon,
+  CpuIcon,
+  FolderIcon,
+  GlobeIcon,
+  InfoIcon,
+  ArrowLeftIcon,
+} from 'lucide-vue-next'
 import type { Component } from 'vue'
 import { ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'

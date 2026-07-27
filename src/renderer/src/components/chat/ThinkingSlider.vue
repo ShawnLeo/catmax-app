@@ -20,11 +20,13 @@
     'none' = 关闭思考（codex 零 reasoning token；claude 压到 low）。
   -->
   <div ref="rootEl" class="relative inline-block">
-    <!-- 折叠态触发按钮（跟 DropdownMenu trigger 同款样式） -->
+    <!-- 折叠态触发按钮（跟 DropdownMenu trigger 同款样式）。
+         加 effort-trigger-btn class 让外部样式能精确选中此 trigger,
+         不影响弹层内的圆点 button(:deep(button > span) 会误伤圆点)。 -->
     <button
       type="button"
       :title="triggerTitle"
-      class="flex items-center gap-2 px-3 py-2 rounded-md text-sm transition-colors bg-secondary text-secondary-foreground hover:bg-accent hover:text-accent-foreground focus:outline-none focus-visible:ring-1 focus-visible:ring-ring cursor-pointer"
+      class="effort-trigger-btn flex items-center gap-2 px-3 py-2 rounded-md text-sm transition-colors bg-secondary text-secondary-foreground hover:bg-accent hover:text-accent-foreground focus:outline-none focus-visible:ring-1 focus-visible:ring-ring cursor-pointer"
       @click="open = !open"
     >
       <BrainIcon
@@ -39,7 +41,7 @@
       />
       <span class="truncate">{{ tierLabel(modelValue) }}</span>
       <ChevronDownIcon
-        class="w-3.5 h-3.5 flex-shrink-0 transition-transform"
+        class="w-4 h-4 flex-shrink-0 transition-transform"
         :class="open ? 'rotate-180' : ''"
       />
     </button>

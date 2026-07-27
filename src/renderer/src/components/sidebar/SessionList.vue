@@ -22,6 +22,7 @@
           </span>
           <span class="truncate">新建会话</span>
         </button>
+        <!-- 导入会话按钮：暂时注释（导入功能暂不使用）
         <button
           class="flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-background/40 hover:text-foreground cursor-pointer"
           title="扫描磁盘/RPC 上已存在但还没纳入 catmax 的 claude/codex 会话"
@@ -30,6 +31,7 @@
         >
           <FileInputIcon class="w-4 h-4" />
         </button>
+        -->
         <button
           class="flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-background/40 hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50 cursor-pointer"
           title="刷新当前工作区会话"
@@ -43,7 +45,7 @@
 
       <!-- 会话列表——按 lastActiveAt 倒序混排（DB 已 ORDER BY last_active_at DESC），
            用 SessionItem 左侧的 backend 图标区分 codex / claude -->
-      <div class="flex-1 overflow-y-auto">
+      <div class="session-scroll flex-1 overflow-y-auto">
         <SessionItem
           v-for="session in sessionStore.sessions"
           :key="session.id"
@@ -241,3 +243,32 @@ async function onImportDialogClose(): Promise<void> {
   }
 }
 </script>
+
+<style scoped>
+/*
+ * 会话列表滚动条：默认完全隐藏，只在容器悬停或滚动中时显示细滚动条。
+ * 覆盖全局 ::-webkit-scrollbar 的常驻 8px 样式，让侧栏更干净。
+ */
+.session-scroll {
+  scrollbar-width: thin;
+  transition: scrollbar-color 0.2s ease;
+}
+.session-scroll::-webkit-scrollbar {
+  width: 6px;
+}
+.session-scroll::-webkit-scrollbar-thumb {
+  background-color: transparent;
+  border-radius: 3px;
+  transition: background-color 0.2s ease;
+}
+.session-scroll:hover::-webkit-scrollbar-thumb {
+  background-color: oklch(50% 0 0 / 0.3);
+}
+.session-scroll:hover::-webkit-scrollbar-thumb:hover {
+  background-color: oklch(50% 0 0 / 0.5);
+}
+/* 滚动进行中强制可见（滚动停下后回归透明） */
+.session-scroll:active::-webkit-scrollbar-thumb {
+  background-color: oklch(50% 0 0 / 0.4);
+}
+</style>
