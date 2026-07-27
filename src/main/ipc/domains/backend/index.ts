@@ -14,6 +14,7 @@ import {
   startTurn,
   switchBackend,
   updateTurnConfig,
+  warmupBackend,
 } from './handlers'
 
 export function registerBackendHandlers(): void {
@@ -29,6 +30,7 @@ export function registerBackendHandlers(): void {
     'backend.refreshModels',
     refreshModels,
   )
+  handleRendererRequest<BackendHandlers, 'backend.warmup'>('backend.warmup', warmupBackend)
   handleRendererRequest<BackendHandlers, 'backend.startTurn'>('backend.startTurn', startTurn)
   handleRendererRequest<BackendHandlers, 'backend.interruptTurn'>(
     'backend.interruptTurn',

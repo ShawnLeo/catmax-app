@@ -20,6 +20,7 @@ import { unlink } from 'node:fs/promises'
 import { join } from 'node:path'
 
 import {
+  deleteSession as deleteSdkSession,
   query,
   type CanUseTool,
   type ModelInfo,
@@ -44,6 +45,7 @@ import {
   type StartTurnArgs,
   type TurnConfigUpdate,
   type TurnEvent,
+  type WarmupBackendArgs,
 } from '@shared/backend/types'
 import { app } from 'electron'
 
@@ -70,6 +72,9 @@ import {
 } from './sdk-mapping'
 
 const log = logger.domain('claude-adapter')
+const WARMUP_CACHE_TTL_MS = 4 * 60 * 1000
+const WARMUP_TIMEOUT_MS = 30_000
+const WARMUP_PROMPT = 'Warmup. Reply with exactly "ready" and do not use any tools.'
 
 /**
  * ask_user 工具的 system prompt 引导语——追加到 Claude Code 默认 system prompt 之后。
@@ -147,6 +152,11 @@ export class ClaudeAdapter implements AgentBackend {
    * undefined = 还没拿到过，listModels 返回静态 fallback。
    */
   private modelsCache: ModelInfo[] | undefined
+  /**
+   * Prompt-cache 预热按 cwd/model/effort 去重。这里缓存的是临时 Warmup turn，
+   * 与任何 Catmax 用户会话无关；完成后对应的 Claude JSONL 会被删除。
+   */
+  private warmups = new Map<string, { promise: Promise<void>; warmedAt: number | null }>()
 
   constructor(opts: ClaudeAdapterOptions = {}) {
     this.opts = opts
@@ -228,6 +238,136 @@ export class ClaudeAdapter implements AgentBackend {
     this.sessionIdMap.set(sessionId, sessionId) // 占位，首次 turn 后回填真实 id
     void args
     return { sessionId, backendThreadId: sessionId }
+  }
+
+  /**
+   * Claude Code 风格的 cache warmup。
+   *
+   * Agent SDK 没有单独的 initialize-only API，因此用一次最小真实 query 提前写入
+   * system prompt / tool schema 的 prompt cache。关键区别是使用独立 sessionId，
+   * 并在完成后通过 SDK deleteSession 删除 transcript，绝不 resume 到用户会话。
+   */
+  async warmup(args: WarmupBackendArgs): Promise<void> {
+    const key = `${args.cwd}\0${args.model ?? ''}\0${args.effort ?? ''}`
+    const existing = this.warmups.get(key)
+    if (existing) {
+      if (existing.warmedAt === null) {
+        log.info('warmup joined in-flight request', {
+          cwd: args.cwd,
+          model: args.model ?? 'default',
+          effort: args.effort ?? 'default',
+        })
+        return existing.promise
+      }
+      const ageMs = Date.now() - existing.warmedAt
+      if (ageMs < WARMUP_CACHE_TTL_MS) {
+        log.info('warmup skipped: cache still fresh', {
+          ageMs,
+          cwd: args.cwd,
+          model: args.model ?? 'default',
+          effort: args.effort ?? 'default',
+        })
+        return existing.promise
+      }
+      log.info('warmup cache expired; starting a new request', { ageMs, cwd: args.cwd })
+      this.warmups.delete(key)
+    }
+
+    const state: { promise: Promise<void>; warmedAt: number | null } = {
+      promise: Promise.resolve(),
+      warmedAt: null,
+    }
+    state.promise = this.runWarmup(args)
+      .then(() => {
+        state.warmedAt = Date.now()
+      })
+      .catch((error) => {
+        this.warmups.delete(key)
+        throw error
+      })
+    this.warmups.set(key, state)
+    return state.promise
+  }
+
+  private async runWarmup(args: WarmupBackendArgs): Promise<void> {
+    const sessionId = randomUUID()
+    const startedAt = Date.now()
+    const abortController = new AbortController()
+    const timeout = setTimeout(() => abortController.abort(), WARMUP_TIMEOUT_MS)
+    const askUser = createAskUserServer((_requestId, _question) => {})
+    log.info('warmup started', {
+      sessionId,
+      cwd: args.cwd,
+      model: args.model ?? 'default',
+      effort: args.effort ?? 'default',
+      timeoutMs: WARMUP_TIMEOUT_MS,
+    })
+
+    // 与正式 turn 保持相同的 system prompt 和 MCP schema，才能复用共享前缀缓存。
+    // Warmup 不允许执行任何工具；若模型意外请求工具，直接拒绝。
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const options: Record<string, any> = {
+      abortController,
+      allowDangerouslySkipPermissions: true,
+      canUseTool: async () => ({
+        behavior: 'deny',
+        message: 'Warmup does not execute tools',
+        interrupt: true,
+      }),
+      cwd: args.cwd,
+      env: { ...process.env, ...this.extraEnv },
+      includePartialMessages: false,
+      mcpServers: {
+        catmax: { type: 'sdk', name: 'catmax', instance: askUser.server },
+      },
+      permissionMode: 'default',
+      sessionId,
+      systemPrompt: { type: 'preset', preset: 'claude_code', append: ASK_USER_GUIDE },
+    }
+    if (args.model) options.model = args.model
+    if (args.effort) options.effort = args.effort === 'none' ? 'low' : args.effort
+    const binaryPath = this.resolveSdkBinaryPath()
+    if (binaryPath !== undefined) options.pathToClaudeCodeExecutable = binaryPath
+
+    try {
+      const sdkQuery = query({ prompt: WARMUP_PROMPT, options })
+      for await (const message of sdkQuery) {
+        if (isSdkResultMessage(message)) {
+          const result = message as unknown as { subtype?: string; is_error?: boolean }
+          log.info('warmup result received', {
+            sessionId,
+            subtype: result.subtype ?? 'unknown',
+            isError: result.is_error ?? false,
+          })
+        }
+        if (isSdkSystemMessage(message) && !this.modelsCache) {
+          try {
+            const init = await sdkQuery.initializationResult()
+            if (init.models.length > 0) this.modelsCache = init.models
+          } catch (error) {
+            log.debug('warmup initializationResult failed:', error)
+          }
+        }
+      }
+      log.info('warmup completed', {
+        sessionId,
+        durationMs: Date.now() - startedAt,
+        cwd: args.cwd,
+        model: args.model ?? 'default',
+      })
+    } finally {
+      clearTimeout(timeout)
+      askUser.rejectAll()
+      await askUser.server
+        .close()
+        .catch((error) => log.debug('warmup ask_user server close failed:', error))
+      try {
+        await deleteSdkSession(sessionId, { dir: args.cwd })
+        log.info('warmup transcript deleted', { sessionId, cwd: args.cwd })
+      } catch (error) {
+        log.warn('warmup transcript cleanup failed:', { sessionId, cwd: args.cwd, error })
+      }
+    }
   }
 
   async listSessions(cwd?: string): Promise<SessionSummary[]> {

@@ -85,6 +85,13 @@ export interface StartSessionArgs {
   initialPrompt?: string
 }
 
+/** 后端预热参数。预热只建立共享缓存，不创建 Catmax 用户会话。 */
+export interface WarmupBackendArgs {
+  cwd: string
+  model?: string
+  effort?: EffortLevel
+}
+
 /** 启动 turn 参数 */
 export interface StartTurnArgs {
   /**
@@ -505,6 +512,8 @@ export interface AgentBackend {
   getCapabilities(): BackendCapabilities
 
   startSession(args: StartSessionArgs): Promise<{ sessionId: string; backendThreadId: string }>
+  /** 可选的后端缓存预热；不得把预热内容写入用户会话。 */
+  warmup?(args: WarmupBackendArgs): Promise<void>
   listSessions(cwd?: string): Promise<SessionSummary[]>
   resumeSession(backendThreadId: string): Promise<{ messages: NormalizedMessage[] }>
 

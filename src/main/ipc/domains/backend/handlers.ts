@@ -4,6 +4,7 @@ import type {
   ApprovalDecision,
   StartTurnArgs,
   TurnConfigUpdate,
+  WarmupBackendArgs,
 } from '@shared/backend/types'
 import type { BackendId } from '@shared/constants'
 
@@ -29,6 +30,10 @@ export const listModelsFor = async (args: { id: BackendId }) => {
 
 export const refreshModels = async () => {
   return ctx.backendManager.refreshModels()
+}
+
+export const warmupBackend = async (args: { id: BackendId; config: WarmupBackendArgs }) => {
+  await ctx.backendManager.warmupBackend(args.id, args.config)
 }
 
 export const startTurn = async (args: StartTurnArgs) => {

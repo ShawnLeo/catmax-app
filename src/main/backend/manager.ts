@@ -25,6 +25,7 @@ import {
   type StartTurnArgs,
   type TurnConfigUpdate,
   type TurnEvent,
+  type WarmupBackendArgs,
 } from '@shared/backend/types'
 import type { BackendId } from '@shared/constants'
 import type { AppSettings } from '@shared/settings-schema'
@@ -241,6 +242,21 @@ export class BackendManager {
     const adapter = this.getCurrent()
     adapter.invalidateModelsCache?.()
     return adapter.listModels()
+  }
+
+  /** 预热指定 backend，不依赖可能已切换的 currentBackendId。 */
+  async warmupBackend(id: BackendId, args: WarmupBackendArgs): Promise<void> {
+    const adapter = this.adapters.get(id)
+    if (!adapter?.warmup) {
+      log.debug('warmup ignored: backend does not support it', id)
+      return
+    }
+    log.info('warmup requested', id, {
+      cwd: args.cwd,
+      model: args.model ?? 'default',
+      effort: args.effort ?? 'default',
+    })
+    await adapter.warmup(args)
   }
 
   /** 启动会话 */

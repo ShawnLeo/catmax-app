@@ -10,6 +10,7 @@ import type {
   StartTurnArgs,
   TurnConfigUpdate,
   TurnEvent,
+  WarmupBackendArgs,
 } from '../backend/types'
 import type { BackendId } from '../constants'
 
@@ -25,6 +26,7 @@ export type BackendHandlers = {
    */
   'backend.listModelsFor': (args: { id: BackendId }) => Promise<ModelOption[]>
   'backend.refreshModels': () => Promise<ModelOption[]>
+  'backend.warmup': (args: { id: BackendId; config: WarmupBackendArgs }) => Promise<void>
   'backend.startTurn': (args: StartTurnArgs) => Promise<{ turnId: string }>
   'backend.interruptTurn': (args: { turnId: string }) => Promise<void>
   'backend.respondApproval': (args: ApprovalDecision) => Promise<void>
