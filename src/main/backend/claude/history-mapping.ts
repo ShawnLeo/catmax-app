@@ -94,6 +94,49 @@ function isSystemSentinel(text: string): boolean {
   return false
 }
 
+/**
+ * 把一条 assistant jsonl 行的 content blocks 追加进目标 NormalizedMessage。
+ *
+ * 抽出独立函数服务 Same-Id Merge：同一条 API assistant message 被 claude 拆成
+ * 多行写进 jsonl（每行含部分 content blocks），合并时需要对每行重复这套
+ * text→textBlocks / thinking→textBlocks(reasoning) / tool_use→toolBlocks 的处理。
+ *
+ * 不处理的 block 类型（server_tool_use / 服务端 tool_result / 未知类型）直接跳过——
+ * 它们是 claude 服务端工具（如 webReader）的内部块，本项目不渲染。调用方负责在
+ * 合并完成后丢弃没有任何可见 block 的空消息。
+ */
+function appendAssistantBlocks(
+  target: NormalizedMessage,
+  assistantMsg: AssistantMessage,
+  pendingToolUseIds: Map<string, { info: ToolCallInfo; messageId: string }>,
+): void {
+  for (const block of assistantMsg.message.content) {
+    if (block.type === 'text') {
+      const text = (block as TextContent).text
+      if (text) {
+        target.textBlocks!.push({ id: randomUUID(), text, kind: 'text' })
+      }
+    } else if (block.type === 'thinking') {
+      const text = (block as ThinkingContent).thinking
+      if (text) {
+        target.textBlocks!.push({ id: randomUUID(), text, kind: 'reasoning' })
+      }
+    } else if (block.type === 'tool_use') {
+      const tu = block as ToolUseContent
+      const info = toolUseToInfo(tu)
+      target.toolBlocks!.push({
+        id: tu.id,
+        info,
+        status: 'running', // 等 tool_result 改成 completed/failed
+        // 历史回放没有精确 startedAt，但 UI 可以从 taskStats.totalDurationMs 反推（非必须）
+      })
+      // 即使 target 还没 flush，也按 id 索引——后面在 result 里查找
+      pendingToolUseIds.set(tu.id, { info, messageId: target.id })
+    }
+    // 其他 block 类型（server_tool_use / 服务端 tool_result / 未知）跳过
+  }
+}
+
 /** 把重放的 claude 消息流转成 NormalizedMessage[] */
 export function claudeReplayToMessages(messages: ClaudeStreamMessage[]): NormalizedMessage[] {
   const result: NormalizedMessage[] = []
@@ -111,19 +154,38 @@ export function claudeReplayToMessages(messages: ClaudeStreamMessage[]): Normali
 
   function flushAssistant(): void {
     if (currentAssistant) {
-      result.push(currentAssistant)
+      // Empty Message Guard: 合并后仍无任何可见 block 的 assistant 消息不 push——
+      // 历史里只含 server_tool_use / 服务端 tool_result / 空文本的行（claude 服务端
+      // 工具的内部块，本项目不渲染）会产出空气泡：UI 画色点但消息体为空。丢弃它们。
+      const hasText = (currentAssistant.textBlocks?.length ?? 0) > 0
+      const hasTool = (currentAssistant.toolBlocks?.length ?? 0) > 0
+      const hasOtherBlocks = (currentAssistant.blocks?.length ?? 0) > 0
+      if (hasText || hasTool || hasOtherBlocks) {
+        result.push(currentAssistant)
+      }
       currentAssistant = null
     }
   }
 
   for (const msg of messages) {
     if (msg.type === 'assistant') {
-      // 新 assistant message——先 flush 上一个
-      flushAssistant()
+      const assistantMsg = msg as AssistantMessage
       // 命令展开标志只在"紧接的下一条 user 文本"生效；遇到 assistant 自动清掉
       // （说明这条 user 不是命令的展开 prompt，而是新一轮真实输入）
       lastWasCommandInvocation = false
-      const assistantMsg = msg as AssistantMessage
+      // Same-Id Merge: claude 把同一条 API assistant message 的内容按 content block
+      // 分多行写进 jsonl（thinking 一行、text 一行、tool_use 一行……共享同一个
+      // message.id）。若每行都新建一条 NormalizedMessage，同一条 API 消息会被拆成
+      // 多条 → UI 上画出多个紧挨着的色点，其中只含 server_tool_use / tool_result 等
+      // 未渲染类型的行还变成空消息（只画点没内容）。
+      // 这里按 message.id 合并：id 与 currentAssistant 相同 → 把本行 blocks 追加进去，
+      // 不新建消息；id 变了 → flush 旧的，新建。
+      if (currentAssistant && currentAssistant.id === assistantMsg.message.id) {
+        appendAssistantBlocks(currentAssistant, assistantMsg, pendingToolUseIds)
+        continue
+      }
+      // 新 assistant message——先 flush 上一个
+      flushAssistant()
       const assistant: NormalizedMessage = {
         id: assistantMsg.message.id,
         role: 'assistant',
@@ -132,31 +194,7 @@ export function claudeReplayToMessages(messages: ClaudeStreamMessage[]): Normali
         toolBlocks: [],
         createdAt: 0,
       }
-      for (const block of assistantMsg.message.content) {
-        if (block.type === 'text') {
-          const text = (block as TextContent).text
-          if (text) {
-            assistant.textBlocks!.push({ id: randomUUID(), text, kind: 'text' })
-          }
-        } else if (block.type === 'thinking') {
-          const text = (block as ThinkingContent).thinking
-          if (text) {
-            assistant.textBlocks!.push({ id: randomUUID(), text, kind: 'reasoning' })
-          }
-        } else if (block.type === 'tool_use') {
-          const tu = block as ToolUseContent
-          const info = toolUseToInfo(tu)
-          assistant.toolBlocks!.push({
-            id: tu.id,
-            info,
-            status: 'running', // 等 tool_result 改成 completed/failed
-            // 历史回放没有精确 startedAt，但 UI 可以从 taskStats.totalDurationMs 反推（非必须）
-          })
-          // 即使 assistant 还没 flush，也按 id 索引——后面在 result 里查找
-          pendingToolUseIds.set(tu.id, { info, messageId: assistant.id })
-        }
-        // 其他 block 类型（未知）跳过
-      }
+      appendAssistantBlocks(assistant, assistantMsg, pendingToolUseIds)
       currentAssistant = assistant
     } else if (msg.type === 'user') {
       // user message 可能含 tool_result（配对之前 assistant 的 tool_use）

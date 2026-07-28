@@ -357,4 +357,125 @@ describe('claude history mapping', () => {
     // 中断 sentinel 原样保留（让 renderer 能识别）
     expect(userMsgs[1]!.textBlocks?.[0]?.text).toBe('[Request interrupted by user]')
   })
+
+  test('Same-Id Merge：同一条 API message 拆成多行 jsonl 时合并成一条', () => {
+    // claude 把同一条 assistant API message 的内容按 content block 分多行写进 jsonl，
+    // 共享同一个 message.id。之前每行都新建一条 NormalizedMessage → 同一条 API 消息
+    // 变成多条 → UI 画出多个紧挨着的色点。修复后按 id 合并成一条。
+    const messages = claudeReplayToMessages([
+      {
+        type: 'user',
+        message: { role: 'user', content: [{ type: 'text', text: 'hi' }] },
+      },
+      // 同一个 id 'm1' 的三行——thinking / text / tool_use 各一行
+      {
+        type: 'assistant',
+        message: {
+          id: 'm1',
+          type: 'message',
+          role: 'assistant',
+          content: [{ type: 'thinking', thinking: '先想想' }],
+        },
+      },
+      {
+        type: 'assistant',
+        message: {
+          id: 'm1',
+          type: 'message',
+          role: 'assistant',
+          content: [{ type: 'text', text: '我来执行' }],
+        },
+      },
+      {
+        type: 'assistant',
+        message: {
+          id: 'm1',
+          type: 'message',
+          role: 'assistant',
+          content: [{ type: 'tool_use', id: 'tu1', name: 'Bash', input: { command: 'ls' } }],
+        },
+      },
+    ])
+    const assistantMsgs = messages.filter((m) => m.role === 'assistant')
+    // 三行同 id 合并成一条 assistant 消息（不再是 3 条）
+    expect(assistantMsgs).toHaveLength(1)
+    // thinking + text 两个 textBlocks + 一个 toolBlock
+    expect(assistantMsgs[0]!.textBlocks).toHaveLength(2)
+    expect(assistantMsgs[0]!.textBlocks?.[0]?.kind).toBe('reasoning')
+    expect(assistantMsgs[0]!.textBlocks?.[1]?.kind).toBe('text')
+    expect(assistantMsgs[0]!.toolBlocks).toHaveLength(1)
+  })
+
+  test('Same-Id Merge：中间夹的 tool_result（user 行）不打断同 id 合并', () => {
+    // 真实 jsonl 里同 id 的 assistant 行之间可能夹着 user tool_result 行
+    // （服务端工具结果直接写进 assistant message 序列）。合并只看 assistant 行的 id，
+    // 不被中间的 user 行打断。
+    const messages = claudeReplayToMessages([
+      {
+        type: 'assistant',
+        message: {
+          id: 'm1',
+          type: 'message',
+          role: 'assistant',
+          content: [{ type: 'text', text: '查一下' }],
+        },
+      },
+      // 中间夹一条 user tool_result（配对前一个 tool_use，这里只是模拟穿插）
+      {
+        type: 'user',
+        message: {
+          role: 'user',
+          content: [{ type: 'tool_result', tool_use_id: 'tu_prev', content: 'prev result' }],
+        },
+      },
+      // 同 id m1 的后续行——应继续合并到第一条 m1
+      {
+        type: 'assistant',
+        message: {
+          id: 'm1',
+          type: 'message',
+          role: 'assistant',
+          content: [{ type: 'text', text: '继续' }],
+        },
+      },
+    ])
+    const assistantMsgs = messages.filter((m) => m.role === 'assistant')
+    expect(assistantMsgs).toHaveLength(1)
+    expect(assistantMsgs[0]!.textBlocks).toHaveLength(2)
+  })
+
+  test('Empty Message Guard：只含 server_tool_use/tool_result 的 assistant 行不产空消息', () => {
+    // claude 服务端工具（webReader 等）的 server_tool_use / tool_result 块本项目不渲染。
+    // 若一条 assistant 行只含这些块，合并后该行不贡献任何可见 block；
+    // 当它是独立 id 时不应产出空气泡（只画色点无内容）。
+    const messages = claudeReplayToMessages([
+      {
+        type: 'user',
+        message: { role: 'user', content: [{ type: 'text', text: '搜一下' }] },
+      },
+      // 这条只含 server_tool_use（passthrough 类型，不被处理）→ 不应产出空消息
+      {
+        type: 'assistant',
+        message: {
+          id: 'm-empty',
+          type: 'message',
+          role: 'assistant',
+          content: [{ type: 'server_tool_use', name: 'webReader', input: {} }],
+        },
+      },
+      {
+        type: 'assistant',
+        message: {
+          id: 'm-real',
+          type: 'message',
+          role: 'assistant',
+          content: [{ type: 'text', text: '搜到了' }],
+        },
+      },
+    ])
+    const assistantMsgs = messages.filter((m) => m.role === 'assistant')
+    // 只剩 m-real 一条（m-empty 被丢弃，不产空气泡）
+    expect(assistantMsgs).toHaveLength(1)
+    expect(assistantMsgs[0]!.id).toBe('m-real')
+  })
 })
