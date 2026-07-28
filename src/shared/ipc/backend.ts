@@ -13,6 +13,17 @@ import type {
   WarmupBackendArgs,
 } from '../backend/types'
 import type { BackendId } from '../constants'
+import type { TurnRunRecord } from '../domain'
+
+/**
+ * renderer → BackendManager 的 turn 启动参数。
+ *
+ * clientTurnId 是 UI 乐观进入 running 状态时生成的稳定 ID，仅由 per-turn 协调器消费；
+ * BackendManager 会在调用 adapter 前移除它，避免协调层元数据渗入 backend 协议。
+ */
+export type CoordinatedStartTurnArgs = StartTurnArgs & {
+  clientTurnId?: string
+}
 
 export type BackendHandlers = {
   'backend.list': () => Promise<BackendStatus[]>
@@ -27,8 +38,10 @@ export type BackendHandlers = {
   'backend.listModelsFor': (args: { id: BackendId }) => Promise<ModelOption[]>
   'backend.refreshModels': () => Promise<ModelOption[]>
   'backend.warmup': (args: { id: BackendId; config: WarmupBackendArgs }) => Promise<void>
-  'backend.startTurn': (args: StartTurnArgs) => Promise<{ turnId: string }>
+  'backend.startTurn': (args: CoordinatedStartTurnArgs) => Promise<{ turnId: string }>
   'backend.interruptTurn': (args: { turnId: string }) => Promise<void>
+  'backend.steerTurn': (args: { turnId: string; prompt: string }) => Promise<void>
+  'backend.listTurnRuns': (args?: { sessionId?: string }) => Promise<TurnRunRecord[]>
   'backend.respondApproval': (args: ApprovalDecision) => Promise<void>
   /** 响应 agent 的问题（ask_user 工具）：把用户答案回流给阻塞中的 handler */
   'backend.respondQuestion': (args: {

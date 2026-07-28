@@ -60,3 +60,25 @@ CREATE TABLE IF NOT EXISTS messages (
 );
 
 CREATE INDEX IF NOT EXISTS idx_messages_session ON messages(session_id, created_at);
+
+-- per-turn 后台任务协调器的可恢复快照。
+-- 本地 Agent 子进程不能跨 App 重启重连；启动恢复时把非终态记录推进 interrupted，
+-- 但保留 background_tasks_json 供 UI/诊断读取。
+CREATE TABLE IF NOT EXISTS turn_runs (
+  id                    TEXT PRIMARY KEY,
+  session_id            TEXT NOT NULL,
+  backend               TEXT NOT NULL,
+  backend_turn_id       TEXT,
+  status                TEXT NOT NULL,
+  background_tasks_json TEXT NOT NULL DEFAULT '[]',
+  created_at            INTEGER NOT NULL,
+  started_at            INTEGER,
+  last_event_at         INTEGER,
+  completed_at          INTEGER,
+  error                 TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_turn_runs_session
+  ON turn_runs(session_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_turn_runs_status
+  ON turn_runs(status, last_event_at);

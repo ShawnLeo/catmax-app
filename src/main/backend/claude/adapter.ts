@@ -52,6 +52,7 @@ import { app } from 'electron'
 import { logger } from '../../service/logger'
 
 import { createAskUserServer } from './ask-user-server'
+import { ClaudeBackgroundTaskState } from './background-task-state'
 import {
   listClaudeSessionsFromDisk,
   readHistoryFromJsonl,
@@ -61,9 +62,9 @@ import { claudePermissionToApprovalRequest } from './mapping'
 import {
   SdkPartialAggregator,
   isSdkAssistantMessage,
+  isSdkInitMessage,
   isSdkPartialMessage,
   isSdkResultMessage,
-  isSdkSystemMessage,
   isSdkUserMessage,
   sdkAssistantToEvents,
   sdkResultToEvent,
@@ -92,8 +93,12 @@ You have an "ask_user" tool (mcp__catmax__ask_user). When the user's request is 
 interface TurnContext {
   /** SDK 的 Query 对象（async iterable + interrupt/setModel/setPermissionMode 等控制方法） */
   query: Query
+  /** Claude 后台 Agent 的 turn 级生命周期状态机。 */
+  backgroundTasks: ClaudeBackgroundTaskState
   /** AbortController，用于 dispose 时强制中断 */
   abortController: AbortController
+  /** interrupt 也需要向当前 turn 的事件队列推送本地 stopped 快照。 */
+  pushEvent: (event: TurnEvent) => void
   /**
    * pending 权限审批：requestId → { resolver, suggestions }。requestId 格式 `${turnId}:${nonce}`。
    * suggestions 是 SDK canUseTool 给的 PermissionUpdate[]，approve_always 时作为 updatedPermissions 回传，
@@ -111,7 +116,10 @@ interface TurnContext {
   /** 当前 turn 对应的 catmax session id（用于回填 sessionIdMap） */
   sessionId: string
   /** streaming-input 的输入控制句柄：close() 让输入迭代器结束，query 自然完成 */
-  inputController: { close: () => void }
+  inputController: {
+    close: () => void
+    push: (prompt: string) => boolean
+  }
   /**
    * ask_user MCP server 句柄——提供 agent 问用户问题的能力。
    * respondQuestion 用它把用户的回答 resolve 给阻塞中的 handler。
@@ -340,7 +348,7 @@ export class ClaudeAdapter implements AgentBackend {
             isError: result.is_error ?? false,
           })
         }
-        if (isSdkSystemMessage(message) && !this.modelsCache) {
+        if (isSdkInitMessage(message) && !this.modelsCache) {
           try {
             const init = await sdkQuery.initializationResult()
             if (init.models.length > 0) this.modelsCache = init.models
@@ -437,6 +445,7 @@ export class ClaudeAdapter implements AgentBackend {
     const spawnCwd = args.cwd ?? this.opts.cwd
     const abortController = new AbortController()
     const aggregator = new SdkPartialAggregator(internalTurnId)
+    const backgroundTasks = new ClaudeBackgroundTaskState()
     let sawStreamEvents = false
 
     // pendingApprovals：canUseTool 回调 await 这里的 promise，respondApproval resolve 它。
@@ -576,6 +585,17 @@ export class ClaudeAdapter implements AgentBackend {
         inputClosed = true
         resolveInputWait?.()
       },
+      push: (prompt: string): boolean => {
+        if (inputClosed) return false
+        inputQueue.push({
+          type: 'user',
+          message: { role: 'user', content: prompt },
+          parent_tool_use_id: null,
+          origin: { kind: 'human' },
+        })
+        resolveInputWait?.()
+        return true
+      },
     }
     async function* inputStream(): AsyncIterable<SDKUserMessage> {
       // 第一条：用户本次的消息
@@ -583,16 +603,18 @@ export class ClaudeAdapter implements AgentBackend {
         type: 'user',
         message: { role: 'user', content: args.prompt },
         parent_tool_use_id: null,
+        origin: { kind: 'human' },
       }
       // 保持开启，等 close 或后续 push（用于 steer 等场景）
       while (!inputClosed) {
+        while (inputQueue.length > 0) {
+          yield inputQueue.shift()!
+        }
+        if (inputClosed) break
         await new Promise<void>((resolve) => {
           resolveInputWait = resolve
         })
         resolveInputWait = null
-        while (inputQueue.length > 0) {
-          yield inputQueue.shift()!
-        }
       }
     }
 
@@ -616,7 +638,9 @@ export class ClaudeAdapter implements AgentBackend {
 
     const ctx: TurnContext = {
       query: sdkQuery,
+      backgroundTasks,
       abortController,
+      pushEvent,
       pendingApprovals,
       interrupted: false,
       sessionId: args.sessionId,
@@ -631,20 +655,53 @@ export class ClaudeAdapter implements AgentBackend {
     // ---- 后台异步消费 SDK 流，把事件推入 queue ----
     const streamDone = { value: false, error: null as Error | null }
     void (async () => {
+      let terminalQueued = false
       try {
         for await (const msg of sdkQuery) {
+          // 终态已经入队后只排空 SDK 的收尾帧，避免重复生成 turn_completed。
+          if (terminalQueued) continue
           const events = this.processSdkMessage(
             msg,
             internalTurnId,
             args.sessionId,
             aggregator,
+            backgroundTasks,
             () => {
               sawStreamEvents = true
             },
             sawStreamEvents,
           )
           for (const ev of events) pushEvent(ev)
-          if (events.some((e) => e.type === 'turn_completed')) break
+          if (events.some((event) => event.type === 'turn_completed')) {
+            terminalQueued = true
+            // 先正常关闭 streaming input，让 SDK 自然收尾。直接 break async iterator
+            // 可能被 SDK 视为宿主提前中断，并在 transcript 留下 user interrupted。
+            inputController.close()
+          }
+        }
+        if (!terminalQueued) {
+          if (backgroundTasks.isCancelling()) {
+            pushEvent({
+              type: 'turn_completed',
+              turnId: internalTurnId,
+              status: 'interrupted',
+              usage: backgroundTasks.accumulatedUsage(),
+            })
+          } else {
+            pushEvent({
+              type: 'error',
+              turnId: internalTurnId,
+              message: 'Claude SDK stream ended before a terminal result',
+              recoverable: false,
+            })
+            pushEvent({
+              type: 'turn_completed',
+              turnId: internalTurnId,
+              status: 'error',
+              usage: backgroundTasks.accumulatedUsage(),
+            })
+          }
+          terminalQueued = true
         }
         // turn 正常结束后，缓存可用模型列表（initializationResult 复用首次连接结果，零额外开销）
         // 这样下次 listModels() 能返回真实列表而非静态 fallback。
@@ -661,13 +718,29 @@ export class ClaudeAdapter implements AgentBackend {
         }
       } catch (e) {
         streamDone.error = e instanceof Error ? e : new Error(String(e))
-        pushEvent({
-          type: 'error',
-          turnId: internalTurnId,
-          message: streamDone.error.message,
-          recoverable: false,
-        })
-        pushEvent({ type: 'turn_completed', turnId: internalTurnId, status: 'error' })
+        if (!terminalQueued) {
+          if (backgroundTasks.isCancelling()) {
+            pushEvent({
+              type: 'turn_completed',
+              turnId: internalTurnId,
+              status: 'interrupted',
+              usage: backgroundTasks.accumulatedUsage(),
+            })
+          } else {
+            pushEvent({
+              type: 'error',
+              turnId: internalTurnId,
+              message: streamDone.error.message,
+              recoverable: false,
+            })
+            pushEvent({
+              type: 'turn_completed',
+              turnId: internalTurnId,
+              status: 'error',
+              usage: backgroundTasks.accumulatedUsage(),
+            })
+          }
+        }
       } finally {
         streamDone.value = true
         waker.resolve?.()
@@ -675,12 +748,13 @@ export class ClaudeAdapter implements AgentBackend {
     })()
 
     // ---- generator 主循环：从 queue yield 事件 ----
+    let terminalYielded = false
     try {
       while (!streamDone.value || queue.length > 0) {
         while (queue.length > 0) {
           const event = queue.shift()!
           yield event
-          if (event.type === 'turn_completed') return
+          if (event.type === 'turn_completed') terminalYielded = true
         }
         // queue 空了但流还没结束，等待唤醒
         if (!streamDone.value) {
@@ -701,8 +775,9 @@ export class ClaudeAdapter implements AgentBackend {
       askUser.rejectAll()
       // 关闭 ask_user MCP server（释放资源）
       void askUser.server.close().catch((e) => log.debug('ask_user server close failed:', e))
-      // 如果 generator 被提前 return/break（流还没结束），确保 abort
-      if (!streamDone.value) {
+      // 消费方提前取消时才强制 abort。正常终态要等 pump 完成 finally，
+      // 避免刚 yield turn_completed 就把已成功的 query 误标成 user interrupted。
+      if (!streamDone.value && !terminalYielded) {
         ctx.interrupted = true
         abortController.abort()
       }
@@ -720,12 +795,27 @@ export class ClaudeAdapter implements AgentBackend {
     turnId: string,
     sessionId: string,
     aggregator: SdkPartialAggregator,
+    backgroundTasks: ClaudeBackgroundTaskState,
     markStreamed: () => void,
     sawStreamEvents: boolean,
   ): TurnEvent[] {
     const events: TurnEvent[] = []
 
-    if (isSdkSystemMessage(msg)) {
+    if (msg.type === 'system') {
+      switch (msg.subtype) {
+        case 'background_tasks_changed':
+        case 'task_started':
+        case 'task_progress':
+        case 'task_notification': {
+          for (const task of backgroundTasks.handle(msg)) {
+            events.push({ type: 'background_task_updated', turnId, task })
+          }
+          return events
+        }
+      }
+    }
+
+    if (isSdkInitMessage(msg)) {
       const sid = sdkSystemSessionId(msg)
       if (sid) {
         // 回填真实 session id + 触发 onRealSessionId（manager 用来回写 db）
@@ -757,17 +847,34 @@ export class ClaudeAdapter implements AgentBackend {
     }
 
     if (isSdkUserMessage(msg)) {
+      for (const task of backgroundTasks.handleUserMessage(msg)) {
+        events.push({ type: 'background_task_updated', turnId, task })
+      }
       // tool_result → tool_call_completed
       events.push(...sdkUserToolResultToEvents(msg, turnId))
       return events
     }
 
     if (isSdkResultMessage(msg)) {
-      // turn 结束。先 flush 兜底 tool_use，再推 turn_completed。
+      // result 是一次模型回合边界。存在后台任务时，首个 result 不是 CatMax turn 终态；
+      // 等 task_notification 自动触发的汇总回合结束后才推 turn_completed。
       if (sawStreamEvents) {
         events.push(...aggregator.flushPendingToolUse())
       }
-      const resultEvent = sdkResultToEvent(msg, turnId)
+      if (backgroundTasks.classifyResult(msg) === 'intermediate') {
+        log.debug('keeping Claude turn open for background tasks', {
+          turnId,
+          activeTaskIds: backgroundTasks.activeTaskIds(),
+        })
+        return events
+      }
+
+      const resultEvent = sdkResultToEvent(
+        msg,
+        turnId,
+        backgroundTasks.accumulatedUsage(),
+        backgroundTasks.isCancelling() ? 'interrupted' : undefined,
+      )
       // result 是 error 时，先推 error 事件让 UI 显示可读错误（Bug D-2）
       if (resultEvent.type === 'turn_completed' && resultEvent.status === 'error') {
         events.push({
@@ -832,6 +939,17 @@ export class ClaudeAdapter implements AgentBackend {
     }
   }
 
+  async steer(turnId: string, prompt: string): Promise<void> {
+    const ctx = this.turnContexts.get(turnId)
+    if (!ctx || ctx.interrupted) {
+      log.debug('steer: no active context for turn', turnId)
+      return
+    }
+    if (!ctx.inputController.push(prompt)) {
+      log.debug('steer: input already closed for turn', turnId)
+    }
+  }
+
   async interrupt(turnId: string): Promise<void> {
     const ctx = this.turnContexts.get(turnId)
     if (!ctx) {
@@ -840,6 +958,21 @@ export class ClaudeAdapter implements AgentBackend {
     }
     if (ctx.interrupted) return
     ctx.interrupted = true
+    const activeTaskIds = ctx.backgroundTasks.activeTaskIds()
+    for (const task of ctx.backgroundTasks.markCancelling()) {
+      ctx.pushEvent({ type: 'background_task_updated', turnId, task })
+    }
+
+    // 先显式停止后台任务，再中断父 query，避免留下脱离 UI 生命周期的子 Agent。
+    const stopResults = await Promise.allSettled(
+      activeTaskIds.map((taskId) => ctx.query.stopTask(taskId)),
+    )
+    stopResults.forEach((result, index) => {
+      if (result.status === 'rejected') {
+        log.warn('stopTask failed:', activeTaskIds[index], result.reason)
+      }
+    })
+
     // SDK 的 interrupt 是协作式的——发中断信号让 query 流尽快结束。
     try {
       await ctx.query.interrupt()

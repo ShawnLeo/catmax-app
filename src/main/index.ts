@@ -34,6 +34,7 @@ void app.whenReady().then(async () => {
 
   // 初始化持久化
   ctx.db.migrate()
+  ctx.backendManager.recoverInterruptedTurns()
   ctx.settingsStore.load()
   // 把 settings.json 里的 defaultBackend / backendPaths 注入到 BackendManager。
   // 关键：必须在 createMainWindow() 之前——否则渲染层 onMounted 里的

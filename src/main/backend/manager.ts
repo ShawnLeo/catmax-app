@@ -4,7 +4,7 @@
  * 职责：
  * - 持有所有 adapter 实例（按 BackendId）
  * - 路由当前后端到对应 adapter
- * - 维护 activeTurns（turnId → sessionId 映射）
+ * - 把 turn 生命周期委托给 PerTurnCoordinator
  * - 把 adapter 的 TurnEvent 经 IPC 推送到 renderer
  * - 接收 renderer 的 interrupt / approval 调用，转给 adapter
  */
@@ -22,12 +22,12 @@ import {
   type NormalizedMessage,
   type SessionSummary,
   type StartSessionArgs,
-  type StartTurnArgs,
   type TurnConfigUpdate,
-  type TurnEvent,
   type WarmupBackendArgs,
 } from '@shared/backend/types'
 import type { BackendId } from '@shared/constants'
+import type { TurnRunRecord } from '@shared/domain'
+import type { CoordinatedStartTurnArgs } from '@shared/ipc/backend'
 import type { AppSettings } from '@shared/settings-schema'
 
 import { registerMainBackendPlugins } from './plugin-loader'
@@ -36,13 +36,20 @@ import {
   type BackendPluginContext,
   type MainBackendPlugin,
 } from './plugin-registry'
+import { PerTurnCoordinator, type PerTurnCoordinatorOptions } from './turn/per-turn-coordinator'
 
 const log = logger.domain('backend-manager')
+
+export interface BackendManagerOptions {
+  turnCoordinator?: PerTurnCoordinator
+  turnCoordinatorOptions?: PerTurnCoordinatorOptions
+}
 
 export class BackendManager {
   private adapters = new Map<BackendId, AgentBackend>()
   private plugins = new Map<BackendId, MainBackendPlugin>()
   private currentBackendId: BackendId = 'codex'
+  private readonly turnCoordinator: PerTurnCoordinator
   /**
    * claude 内部 sessionId（startSession 生成的占位 UUID）→ claude 真实 session_id 的映射。
    * 由 onRealSessionId 回调写入，refreshClaudeSessionTitle 用它把 args.sessionId
@@ -50,7 +57,13 @@ export class BackendManager {
    */
   private claudeSessionIdMap = new Map<string, string>()
 
-  constructor(plugins?: MainBackendPlugin[]) {
+  constructor(plugins?: MainBackendPlugin[], options: BackendManagerOptions = {}) {
+    this.turnCoordinator =
+      options.turnCoordinator ??
+      new PerTurnCoordinator({
+        ...options.turnCoordinatorOptions,
+        onError: (error) => log.error('turn coordinator error:', error),
+      })
     registerMainBackendPlugins()
     const context: BackendPluginContext = {
       onBackendThreadIdResolved: (backendId, internalId, realId) => {
@@ -272,8 +285,9 @@ export class BackendManager {
    *
    * envelope 带 sessionId——多 turn 并发时 renderer 用它把事件路由到对应 session 状态。
    */
-  async startTurn(args: StartTurnArgs): Promise<{ turnId: string }> {
-    const turnId = randomUUID()
+  async startTurn(args: CoordinatedStartTurnArgs): Promise<{ turnId: string }> {
+    const { clientTurnId, ...backendArgs } = args
+    const turnId = clientTurnId ?? randomUUID()
     const adapter = this.getCurrent()
     const backendId = this.currentBackendId
     // envelope 的 sessionId 用 clientSessionId（catmax session.id）——renderer 的
@@ -281,41 +295,45 @@ export class BackendManager {
     // clientSessionId 不传时 fallback 到 args.sessionId（向后兼容）。
     const routeSessionId = args.clientSessionId ?? args.sessionId
 
-    // 后台驱动事件流
-    void (async () => {
-      try {
-        for await (const event of adapter.startTurn(args)) {
-          ctx.broadcast('backend:turnEvent', { turnId, sessionId: routeSessionId, event })
+    this.turnCoordinator.enqueue({
+      id: turnId,
+      sessionId: routeSessionId,
+      backend: backendId,
+      run: async (sink) => {
+        for await (const event of adapter.startTurn(backendArgs)) {
+          sink.publish(event)
         }
-        // turn 成功完成——回写会话配置到 db。
+      },
+      interrupt: async (backendTurnId) => {
+        await adapter.interrupt(backendTurnId)
+      },
+      onEvent: (event) => {
+        ctx.broadcast('backend:turnEvent', { turnId, sessionId: routeSessionId, event })
+      },
+      onSettled: (record) => {
+        // 实际启动过的 turn 结束后回写会话配置到 db。
         // routeSessionId 是 catmax session.id（db PK），用它而非 args.sessionId
         // （claude 第一次 turn 时 args.sessionId 是占位 UUID）。
         // thinking 已合并进 effort（'none' 档），无需单独字段。
         // COALESCE 保证 undefined 不覆盖已有值（model/effort/permissionMode 都 optional）。
-        ctx.db.bumpSessionTurn(
-          routeSessionId,
-          Date.now(),
-          args.model,
-          args.effort,
-          args.permissionMode,
-        )
+        if (record.startedAt !== null) {
+          ctx.db.bumpSessionTurn(
+            routeSessionId,
+            record.completedAt ?? Date.now(),
+            backendArgs.model,
+            backendArgs.effort,
+            backendArgs.permissionMode,
+          )
+        }
         // turn 正常结束后，触发 aiTitle 刷新（claude 在 jsonl 里写了 ai-title 行）
         // 失败不阻塞——title 刷新失败不影响主流程
-        if (backendId === 'claude') {
-          void this.refreshClaudeSessionTitle(args.sessionId, args.cwd).catch((e) =>
+        if (backendId === 'claude' && record.startedAt !== null) {
+          void this.refreshClaudeSessionTitle(backendArgs.sessionId, backendArgs.cwd).catch((e) =>
             log.warn('refreshClaudeSessionTitle failed:', e),
           )
         }
-      } catch (e) {
-        const errorEvent: TurnEvent = {
-          type: 'error',
-          turnId,
-          message: e instanceof Error ? e.message : String(e),
-          recoverable: false,
-        }
-        ctx.broadcast('backend:turnEvent', { turnId, sessionId: routeSessionId, event: errorEvent })
-      }
-    })()
+      },
+    })
 
     return { turnId }
   }
@@ -358,12 +376,17 @@ export class BackendManager {
 
   /** 中断 turn */
   async interruptTurn(turnId: string): Promise<void> {
-    return this.getCurrent().interrupt(turnId)
+    if (await this.turnCoordinator.interrupt(turnId)) return
+    // 兼容协调器接入前启动、但尚未结束的 adapter turn。
+    await this.getCurrent().interrupt(turnId)
   }
 
   /** 响应 approval */
   async respondApproval(decision: ApprovalDecision): Promise<void> {
-    return this.getCurrent().respondApproval(decision)
+    const backendId = this.turnCoordinator.findBackendByRequestId(decision.requestId)
+    const adapter = backendId ? this.adapters.get(backendId) : this.getCurrent()
+    if (!adapter) return
+    await adapter.respondApproval(decision)
   }
 
   /** 响应 agent 的问题（ask_user 工具） */
@@ -372,19 +395,64 @@ export class BackendManager {
     requestId: string
     answer: AgentAnswer
   }): Promise<void> {
-    const adapter = this.getCurrent()
-    if (!adapter.respondQuestion) return
-    return adapter.respondQuestion(args)
+    const backendId =
+      this.turnCoordinator.findBackendByRequestId(args.requestId) ??
+      this.turnCoordinator.findBackend(args.turnId)
+    const adapter = backendId ? this.adapters.get(backendId) : this.getCurrent()
+    if (!adapter?.respondQuestion) return
+    await adapter.respondQuestion({
+      ...args,
+      turnId: this.turnCoordinator.getBackendTurnId(args.turnId) ?? args.turnId,
+    })
   }
 
   /** 运行中热切换 turn 配置（model/effort/permissionMode） */
   async updateTurnConfig(turnId: string, config: TurnConfigUpdate): Promise<void> {
+    const backendId = this.turnCoordinator.findBackend(turnId)
+    if (backendId) {
+      const adapter = this.adapters.get(backendId)
+      if (!adapter?.updateTurnConfig) return
+      this.turnCoordinator.dispatchWhenBound(turnId, (backendTurnId) =>
+        adapter.updateTurnConfig!(backendTurnId, config),
+      )
+      return
+    }
+
     const adapter = this.getCurrent()
     if (!adapter.updateTurnConfig) {
       // 当前 backend 不支持热切换，静默忽略（UI 侧应已根据 supportsHotSwap 判断）
       return
     }
-    return adapter.updateTurnConfig(turnId, config)
+    await adapter.updateTurnConfig(turnId, config)
+  }
+
+  /** 向运行中的 turn 追加用户指令；按协调器记录路由到启动它的 backend。 */
+  async steerTurn(turnId: string, prompt: string): Promise<void> {
+    const backendId = this.turnCoordinator.findBackend(turnId)
+    if (backendId) {
+      const adapter = this.adapters.get(backendId)
+      if (!adapter?.steer) return
+      this.turnCoordinator.dispatchWhenBound(turnId, (backendTurnId) =>
+        adapter.steer!(backendTurnId, prompt),
+      )
+      return
+    }
+
+    const adapter = this.getCurrent()
+    if (adapter.steer) await adapter.steer(turnId, prompt)
+  }
+
+  listTurnRuns(sessionId?: string): TurnRunRecord[] {
+    return this.turnCoordinator.list(sessionId)
+  }
+
+  /** App 启动、数据库 migrate 后调用。 */
+  recoverInterruptedTurns(): TurnRunRecord[] {
+    const recovered = this.turnCoordinator.recoverInterrupted()
+    if (recovered.length > 0) {
+      log.warn('recovered stale turn runs as interrupted:', recovered.length)
+    }
+    return recovered
   }
 
   /**
@@ -478,6 +546,7 @@ export class BackendManager {
 
   /** dispose 所有 adapter（app 退出时调） */
   async dispose(): Promise<void> {
+    await this.turnCoordinator.dispose()
     for (const adapter of this.adapters.values()) {
       try {
         await adapter.dispose()

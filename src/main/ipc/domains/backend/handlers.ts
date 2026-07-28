@@ -2,11 +2,11 @@ import { ctx } from '@main/context'
 import type {
   AgentAnswer,
   ApprovalDecision,
-  StartTurnArgs,
   TurnConfigUpdate,
   WarmupBackendArgs,
 } from '@shared/backend/types'
 import type { BackendId } from '@shared/constants'
+import type { CoordinatedStartTurnArgs } from '@shared/ipc/backend'
 
 export const listBackends = async () => {
   return ctx.backendManager.listStatuses()
@@ -36,12 +36,20 @@ export const warmupBackend = async (args: { id: BackendId; config: WarmupBackend
   await ctx.backendManager.warmupBackend(args.id, args.config)
 }
 
-export const startTurn = async (args: StartTurnArgs) => {
+export const startTurn = async (args: CoordinatedStartTurnArgs) => {
   return ctx.backendManager.startTurn(args)
 }
 
 export const interruptTurn = async (args: { turnId: string }) => {
   await ctx.backendManager.interruptTurn(args.turnId)
+}
+
+export const steerTurn = async (args: { turnId: string; prompt: string }) => {
+  await ctx.backendManager.steerTurn(args.turnId, args.prompt)
+}
+
+export const listTurnRuns = async (args?: { sessionId?: string }) => {
+  return ctx.backendManager.listTurnRuns(args?.sessionId)
 }
 
 export const respondApproval = async (args: ApprovalDecision) => {

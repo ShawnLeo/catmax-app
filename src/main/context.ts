@@ -5,6 +5,7 @@
 import type { BrowserWindow } from 'electron'
 
 import { BackendManager } from './backend/manager'
+import { DatabaseTurnRunRepository } from './backend/turn/turn-run-repository'
 import { DatabaseService } from './service/database'
 import { logger } from './service/logger'
 import { PtyManager } from './service/pty-manager'
@@ -22,7 +23,11 @@ class Context {
   constructor() {
     this.db = new DatabaseService()
     this.settingsStore = new SettingsStore()
-    this.backendManager = new BackendManager()
+    this.backendManager = new BackendManager(undefined, {
+      turnCoordinatorOptions: {
+        repository: new DatabaseTurnRunRepository(this.db),
+      },
+    })
     this.ptyManager = new PtyManager({
       onData: (id, data) => {
         this.broadcast('pty:data', { id, data })

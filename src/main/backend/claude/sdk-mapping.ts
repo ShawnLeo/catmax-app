@@ -23,7 +23,7 @@ import type {
   SDKSystemMessage,
   SDKUserMessage,
 } from '@anthropic-ai/claude-agent-sdk'
-import type { ToolCallInfo, TurnEvent } from '@shared/backend/types'
+import type { TokenUsage, ToolCallInfo, TurnEvent } from '@shared/backend/types'
 
 import { toolResultToOutput, toolUseResultToStats, toolUseToInfo } from './mapping'
 
@@ -114,6 +114,9 @@ export function* sdkUserToolResultToEvents(
 ): Iterable<TurnEvent> {
   const content = (msg.message as { content: unknown }).content
   if (!Array.isArray(content)) return
+  // Agent/Task 转到后台时，SDK 会立刻返回 async_launched / remote_launched。
+  // 这只是启动确认，不是执行完成；真实终态由后续 task_notification 给出。
+  if (isAsyncToolLaunch(msg.tool_use_result)) return
   const stats = toolUseResultToStats(msg.tool_use_result)
   for (const block of content) {
     if (typeof block !== 'object' || block === null) continue
@@ -129,6 +132,16 @@ export function* sdkUserToolResultToEvents(
       }
     }
   }
+}
+
+function isAsyncToolLaunch(toolUseResult: unknown): boolean {
+  if (toolUseResult === null || typeof toolUseResult !== 'object') return false
+  const result = toolUseResult as Record<string, unknown>
+  return (
+    result.status === 'async_launched' ||
+    result.status === 'remote_launched' ||
+    result.isAsync === true
+  )
 }
 
 // ============ SdkPartialAggregator：stream_event → TurnEvent 状态机 ============
@@ -291,19 +304,26 @@ export class SdkPartialAggregator {
 // ============ result / system 消息 ============
 
 /** SDKResultMessage → turn_completed 事件 */
-export function sdkResultToEvent(msg: SDKResultMessage, turnId: string): TurnEvent {
+export function sdkResultToEvent(
+  msg: SDKResultMessage,
+  turnId: string,
+  usageOverride?: TokenUsage,
+  statusOverride?: 'completed' | 'interrupted' | 'error',
+): TurnEvent {
   // SDK 的 result subtype 是 'success' | 'error_during_execution' | ...（没有单纯的 'error' 或 'interrupted'）
   // is_error 才是判断错误的权威字段
   const isErr = msg.is_error
-  const status: 'completed' | 'interrupted' | 'error' = isErr ? 'error' : 'completed'
-  const usage = {
-    ...(msg.usage.input_tokens !== undefined ? { inputTokens: msg.usage.input_tokens } : {}),
-    ...(msg.usage.output_tokens !== undefined ? { outputTokens: msg.usage.output_tokens } : {}),
-    ...(msg.usage.cache_read_input_tokens !== undefined
-      ? { cacheReadTokens: msg.usage.cache_read_input_tokens }
-      : {}),
-    ...(msg.total_cost_usd !== undefined ? { costUsd: msg.total_cost_usd } : {}),
-  }
+  const status = statusOverride ?? (isErr ? 'error' : 'completed')
+  const usage =
+    usageOverride ??
+    ({
+      ...(msg.usage.input_tokens !== undefined ? { inputTokens: msg.usage.input_tokens } : {}),
+      ...(msg.usage.output_tokens !== undefined ? { outputTokens: msg.usage.output_tokens } : {}),
+      ...(msg.usage.cache_read_input_tokens !== undefined
+        ? { cacheReadTokens: msg.usage.cache_read_input_tokens }
+        : {}),
+      ...(msg.total_cost_usd !== undefined ? { costUsd: msg.total_cost_usd } : {}),
+    } satisfies TokenUsage)
   return {
     type: 'turn_completed',
     turnId,
@@ -347,7 +367,7 @@ export function isSdkResultMessage(msg: SDKMessage): msg is SDKResultMessage {
   return msg.type === 'result'
 }
 
-/** 判断 SDKMessage 是否是 system 消息 */
-export function isSdkSystemMessage(msg: SDKMessage): msg is SDKSystemMessage {
-  return msg.type === 'system'
+/** 判断 SDKMessage 是否是 init system 消息（其他 system subtype 有各自结构）。 */
+export function isSdkInitMessage(msg: SDKMessage): msg is SDKSystemMessage {
+  return msg.type === 'system' && msg.subtype === 'init'
 }

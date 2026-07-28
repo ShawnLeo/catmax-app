@@ -3,7 +3,13 @@ import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 import type { BackendId } from '@shared/constants'
-import type { MessagePreview, SessionRecord, WorkspaceRecord } from '@shared/domain'
+import type {
+  MessagePreview,
+  SessionRecord,
+  TurnRunRecord,
+  TurnRunStatus,
+  WorkspaceRecord,
+} from '@shared/domain'
 import Database from 'better-sqlite3'
 import { app } from 'electron'
 
@@ -328,6 +334,72 @@ export class DatabaseService {
     return record
   }
 
+  // ===== Turn Run =====
+
+  upsertTurnRun(record: TurnRunRecord): void {
+    this.db
+      .prepare(
+        `INSERT INTO turn_runs (
+           id, session_id, backend, backend_turn_id, status, background_tasks_json,
+           created_at, started_at, last_event_at, completed_at, error
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT(id) DO UPDATE SET
+           backend_turn_id = excluded.backend_turn_id,
+           status = excluded.status,
+           background_tasks_json = excluded.background_tasks_json,
+           started_at = excluded.started_at,
+           last_event_at = excluded.last_event_at,
+           completed_at = excluded.completed_at,
+           error = excluded.error`,
+      )
+      .run(
+        record.id,
+        record.sessionId,
+        record.backend,
+        record.backendTurnId,
+        record.status,
+        JSON.stringify(record.backgroundTasks),
+        record.createdAt,
+        record.startedAt,
+        record.lastEventAt,
+        record.completedAt,
+        record.error,
+      )
+  }
+
+  listTurnRuns(sessionId?: string): TurnRunRecord[] {
+    const rows = (
+      sessionId
+        ? this.db
+            .prepare('SELECT * FROM turn_runs WHERE session_id = ? ORDER BY created_at DESC')
+            .all(sessionId)
+        : this.db.prepare('SELECT * FROM turn_runs ORDER BY created_at DESC').all()
+    ) as TurnRunRow[]
+    return rows.map(rowToTurnRunRecord)
+  }
+
+  listRecoverableTurnRuns(): TurnRunRecord[] {
+    const rows = this.db
+      .prepare(
+        `SELECT * FROM turn_runs
+         WHERE status IN ('queued', 'running', 'cancelling')
+         ORDER BY created_at`,
+      )
+      .all() as TurnRunRow[]
+    return rows.map(rowToTurnRunRecord)
+  }
+
+  deleteTurnRunsCompletedBefore(timestamp: number): number {
+    return this.db
+      .prepare(
+        `DELETE FROM turn_runs
+         WHERE completed_at IS NOT NULL
+           AND completed_at < ?
+           AND status IN ('completed', 'interrupted', 'error')`,
+      )
+      .run(timestamp).changes
+  }
+
   close(): void {
     this.db.close()
     log.info('closed')
@@ -360,6 +432,20 @@ interface MessageRow {
   created_at: number
 }
 
+interface TurnRunRow {
+  id: string
+  session_id: string
+  backend: string
+  backend_turn_id: string | null
+  status: string
+  background_tasks_json: string
+  created_at: number
+  started_at: number | null
+  last_event_at: number | null
+  completed_at: number | null
+  error: string | null
+}
+
 function rowToSessionRecord(row: SessionRow): SessionRecord {
   return {
     id: row.id,
@@ -385,5 +471,30 @@ function rowToMessagePreview(row: MessageRow): MessagePreview {
     textPreview: row.text_preview,
     toolCallCount: row.tool_call_count,
     createdAt: row.created_at,
+  }
+}
+
+function rowToTurnRunRecord(row: TurnRunRow): TurnRunRecord {
+  let backgroundTasks: TurnRunRecord['backgroundTasks'] = []
+  try {
+    const parsed: unknown = JSON.parse(row.background_tasks_json)
+    if (Array.isArray(parsed)) {
+      backgroundTasks = parsed as TurnRunRecord['backgroundTasks']
+    }
+  } catch {
+    // 损坏的诊断快照不应阻止应用启动；协调器会从空集合继续。
+  }
+  return {
+    id: row.id,
+    sessionId: row.session_id,
+    backend: row.backend as TurnRunRecord['backend'],
+    backendTurnId: row.backend_turn_id,
+    status: row.status as TurnRunStatus,
+    backgroundTasks,
+    createdAt: row.created_at,
+    startedAt: row.started_at,
+    lastEventAt: row.last_event_at,
+    completedAt: row.completed_at,
+    error: row.error,
   }
 }

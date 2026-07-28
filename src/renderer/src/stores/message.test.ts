@@ -104,3 +104,115 @@ describe('message store Codex activity streaming', () => {
     expect(store.messages[2]?.blocks?.[0]?.type).toBe('codex_activity')
   })
 })
+
+describe('message store Claude background tasks', () => {
+  beforeEach(() => {
+    setActivePinia(createPinia())
+  })
+
+  test('后台 Agent 从 running 更新到 completed，并保留统计信息', () => {
+    const store = useMessageStore()
+    store.setCurrentSession('session-1')
+    store.applyEvent('session-1', {
+      type: 'tool_call_started',
+      turnId: 'turn-1',
+      itemId: 'tool-a',
+      tool: {
+        kind: 'task',
+        title: 'Agent',
+        task: {
+          description: '分析代理层',
+          prompt: '检查代理实现',
+        },
+      },
+    })
+    store.applyEvent('session-1', {
+      type: 'background_task_updated',
+      turnId: 'turn-1',
+      task: {
+        taskId: 'agent-a',
+        toolUseId: 'tool-a',
+        status: 'running',
+        summary: '正在读取文件',
+        stats: {
+          agentId: 'agent-a',
+          status: 'running',
+          totalTokens: 50,
+          progressSummary: '正在读取文件',
+        },
+      },
+    })
+
+    expect(store.messages[0]?.toolBlocks?.[0]).toMatchObject({
+      id: 'tool-a',
+      status: 'running',
+      taskStats: {
+        agentId: 'agent-a',
+        status: 'running',
+        progressSummary: '正在读取文件',
+      },
+    })
+
+    store.applyEvent('session-1', {
+      type: 'background_task_updated',
+      turnId: 'turn-1',
+      task: {
+        taskId: 'agent-a',
+        toolUseId: 'tool-a',
+        status: 'completed',
+        summary: '代理分析完成',
+        stats: {
+          agentId: 'agent-a',
+          status: 'completed',
+          totalTokens: 120,
+          totalDurationMs: 2_000,
+        },
+      },
+    })
+
+    expect(store.messages[0]?.toolBlocks?.[0]).toMatchObject({
+      status: 'completed',
+      output: { ok: true, summary: '代理分析完成' },
+      taskStats: {
+        status: 'completed',
+        totalTokens: 120,
+        totalDurationMs: 2_000,
+      },
+    })
+  })
+
+  test('用户停止后台 Agent 时显示 stopped，而不是 completed', () => {
+    const store = useMessageStore()
+    store.setCurrentSession('session-1')
+    store.applyEvent('session-1', {
+      type: 'tool_call_started',
+      turnId: 'turn-1',
+      itemId: 'tool-a',
+      tool: {
+        kind: 'task',
+        title: 'Agent',
+        task: {
+          description: '分析协议',
+          prompt: '检查协议',
+        },
+      },
+    })
+    store.applyEvent('session-1', {
+      type: 'background_task_updated',
+      turnId: 'turn-1',
+      task: {
+        taskId: 'agent-a',
+        toolUseId: 'tool-a',
+        status: 'stopped',
+        summary: '用户已停止任务',
+        stats: { agentId: 'agent-a', status: 'stopped' },
+      },
+    })
+
+    expect(store.messages[0]?.toolBlocks?.[0]).toMatchObject({
+      status: 'failed',
+      output: { ok: false, summary: '用户已停止任务' },
+      taskStats: { status: 'stopped' },
+    })
+  })
+})

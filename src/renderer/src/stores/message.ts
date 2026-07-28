@@ -350,6 +350,40 @@ export const useMessageStore = defineStore('message', () => {
         }
         break
       }
+      case 'background_task_updated': {
+        const itemId = event.task.toolUseId
+        if (!itemId) break
+        const msg = findMessageByItemId(s, event.turnId, itemId)
+        const isCompleted = event.task.status === 'completed'
+        const toolStatus =
+          event.task.status === 'running' ? 'running' : isCompleted ? 'completed' : 'failed'
+        const output = {
+          ok: isCompleted,
+          summary:
+            event.task.summary ??
+            (isCompleted
+              ? '后台 Agent 已完成'
+              : event.task.status === 'stopped'
+                ? '后台 Agent 已停止'
+                : '后台 Agent 执行失败'),
+        }
+
+        const contentBlock = msg?.blocks?.find(
+          (block) => block.type === 'tool_call' && block.id === itemId,
+        )
+        if (contentBlock?.type === 'tool_call') {
+          contentBlock.status = toolStatus
+          contentBlock.taskStats = event.task.stats
+          if (event.task.status !== 'running') contentBlock.output = output
+        }
+        const toolBlock = msg?.toolBlocks?.find((block) => block.id === itemId)
+        if (toolBlock) {
+          toolBlock.status = toolStatus
+          toolBlock.taskStats = event.task.stats
+          if (event.task.status !== 'running') toolBlock.output = output
+        }
+        break
+      }
       case 'approval_requested': {
         // 按 source 分发——claude 走 pendingClaudePermission（PermissionPanel），
         // codex（不带 source）走 pendingApproval（PermissionPanel）。

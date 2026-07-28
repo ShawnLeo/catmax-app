@@ -549,6 +549,23 @@ watch(
 async function onSend(text: string, attachments: ContextBlock[]): Promise<void> {
   if ((!text.trim() && attachments.length === 0) || !workspaceStore.currentWorkspace) return
 
+  // 运行中再次发送不是新开并发 turn，而是 steer 到当前 turn。
+  // 协调器仍保持同 session 单 active turn；用户补充要求会进入当前 backend 的输入流。
+  if (messageStore.isRunning && messageStore.currentTurnId) {
+    if (!backendStore.current?.capabilities.supportsSteer) return
+    const activeTurnId = messageStore.currentTurnId
+    messageStore.pushUserMessage(
+      activeTurnId,
+      text,
+      attachments.length > 0 ? attachments : undefined,
+    )
+    await window.api.backend.steerTurn({
+      turnId: activeTurnId,
+      prompt: serializeContextTags(text, attachments),
+    })
+    return
+  }
+
   const model = runtimeConfig.value.model
   const effort = runtimeConfig.value.effort
 
@@ -618,6 +635,7 @@ async function onSend(text: string, attachments: ContextBlock[]): Promise<void> 
   // 不能复用 sessionId：backendThreadId 跟 catmax session.id 不是同一个 key，
   // applyEvent 会路由到不存在的 session 导致流式输出看不到。
   const startArgs: Parameters<typeof window.api.backend.startTurn>[0] = {
+    clientTurnId: turnId,
     sessionId: session.backendThreadId,
     clientSessionId: sessionId,
     prompt: fullPrompt,

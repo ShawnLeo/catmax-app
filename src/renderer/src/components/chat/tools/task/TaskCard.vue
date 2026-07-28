@@ -2,13 +2,14 @@
   <!--
     Task 工具卡片--子 agent 调用。
 
-    三态显示（把子 Agent 从黑盒变成可观测）：
+    四态显示（把子 Agent 从黑盒变成可观测）：
       - running：显示 description + 实时计时器"已运行 12s"（子 Agent 可能跑几十秒到几分钟）
       - completed：显示 description + 统计摘要"153s · 31.6k tokens · 5 次工具调用"
       - failed：同 completed 但标红
+      - stopped：用户停止后显示"已停止"
 
     prompt 仍然可折叠展示（这是子 Agent 接到的任务描述）。
-    统计数据来自 claude CLI 的 tool_use_result 顶层字段（耗时/token/工具分类计数）。
+    实时状态和统计来自 Claude Agent SDK 的 task_started / task_progress / task_notification。
 
     完成后有 agentId 时显示"展开子会话"按钮，点击读取 subagent jsonl 并渲染为嵌套消息列表。
   -->
@@ -20,9 +21,47 @@
         task.description
       }}</span>
       <!-- 右侧状态/统计摘要 -->
-      <span class="flex-shrink-0 text-[11px] font-mono" :class="statusTextClass">
+      <span
+        class="flex-shrink-0 text-[11px] font-mono"
+        :class="statusTextClass"
+        :title="progressDetail"
+      >
         {{ statusSummary }}
       </span>
+      <!-- running 态展开实时进度（SDK task_progress 给的 summary + 累计指标） -->
+      <button
+        v-if="tool.status === 'running' && tool.taskStats"
+        class="flex-shrink-0 text-muted-foreground hover:text-foreground ml-0.5 inline-flex items-center"
+        :title="liveProgressExpanded ? '收起实时进度' : '展开实时进度'"
+        @click="liveProgressExpanded = !liveProgressExpanded"
+      >
+        <ChevronDownIcon
+          class="w-3 h-3 transition-transform"
+          :class="liveProgressExpanded ? 'rotate-180' : ''"
+        />
+      </button>
+    </div>
+
+    <!-- 实时进度详情（仅 running 展开时）：summary + 累计指标，证明子 Agent 还在动 -->
+    <div
+      v-if="tool.status === 'running' && liveProgressExpanded && tool.taskStats"
+      class="pl-5 py-1 space-y-0.5"
+    >
+      <div
+        v-if="tool.taskStats.progressSummary"
+        class="flex items-start gap-1.5 text-[12px] text-muted-foreground"
+      >
+        <LoaderCircleIcon class="w-3 h-3 mt-0.5 animate-spin flex-shrink-0 text-primary" />
+        <span class="min-w-0 break-words">{{ tool.taskStats.progressSummary }}</span>
+      </div>
+      <div v-else class="flex items-center gap-1.5 text-[12px] text-muted-foreground/70">
+        <LoaderCircleIcon class="w-3 h-3 animate-spin flex-shrink-0" />
+        <span>子 Agent 运行中</span>
+      </div>
+      <!-- 累计指标行（始终显示，作为"它还活着"的强信号 + 无 summary 时的兜底）-->
+      <div v-if="liveMetrics" class="text-[11px] font-mono text-muted-foreground/70 pl-4.5">
+        {{ liveMetrics }}
+      </div>
     </div>
 
     <!-- prompt（可折叠） -->
@@ -75,9 +114,8 @@
 
 <script setup lang="ts">
 import { useBackendStore } from '@renderer/stores/backend'
-import type { ToolTaskInfo, ToolTaskStats } from '@shared/backend/types'
-import type { NormalizedMessage } from '@shared/backend/types'
-import { BotIcon } from 'lucide-vue-next'
+import type { NormalizedMessage, ToolTaskInfo } from '@shared/backend/types'
+import { BotIcon, ChevronDownIcon, LoaderCircleIcon } from 'lucide-vue-next'
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 
 import MessageItem from '../../messages/MessageItem.vue'
@@ -93,6 +131,7 @@ const props = defineProps<{
 }>()
 
 const expanded = ref(false)
+const liveProgressExpanded = ref(false)
 const subagentExpanded = ref(false)
 const subagentMessages = ref<NormalizedMessage[]>([])
 const loadingSubagent = ref(false)
@@ -166,6 +205,14 @@ watch(
   { immediate: true },
 )
 
+// 离开 running 时复位实时进度展开态，避免下次同卡片残留展开。
+watch(
+  () => props.tool.status,
+  (status) => {
+    if (status !== 'running') liveProgressExpanded.value = false
+  },
+)
+
 onBeforeUnmount(() => {
   if (timer !== null) clearInterval(timer)
 })
@@ -193,30 +240,52 @@ const elapsedSec = computed(() => {
   return typeof ms === 'number' ? Math.max(0, Math.floor(ms / 1000)) : null
 })
 
+/**
+ * 实时累计指标（运行中详情块用）。
+ * SDK 没给 summary 时这行是主要信息，证明子 Agent 还在动。
+ */
+const liveMetrics = computed(() => {
+  const stats = props.tool.taskStats
+  if (!stats) return ''
+  const parts: string[] = []
+  if (typeof stats.totalTokens === 'number') parts.push(`${formatTokens(stats.totalTokens)} tokens`)
+  if (typeof stats.totalToolUseCount === 'number') parts.push(`${stats.totalToolUseCount} 次工具`)
+  if (elapsedSec.value !== null) parts.push(formatSeconds(elapsedSec.value))
+  return parts.join(' · ')
+})
+
 /** 状态摘要文本 */
 const statusSummary = computed(() => {
   if (props.tool.status === 'running') {
     return elapsedSec.value !== null ? `运行中 ${formatSeconds(elapsedSec.value)}` : '运行中'
   }
   const stats = props.tool.taskStats
+  const lifecycleLabel =
+    stats?.status === 'stopped'
+      ? '已停止'
+      : stats?.status === 'failed' || props.tool.status === 'failed'
+        ? '失败'
+        : '完成'
   if (!stats) {
-    return props.tool.status === 'failed' ? '失败' : '完成'
+    return lifecycleLabel
   }
   const parts: string[] = []
   if (elapsedSec.value !== null) parts.push(formatSeconds(elapsedSec.value))
   if (typeof stats.totalTokens === 'number') parts.push(`${formatTokens(stats.totalTokens)} tokens`)
   if (typeof stats.totalToolUseCount === 'number') parts.push(`${stats.totalToolUseCount} 次工具`)
-  return parts.length > 0 ? parts.join(' · ') : props.tool.status === 'failed' ? '失败' : '完成'
+  if (lifecycleLabel !== '完成') parts.unshift(lifecycleLabel)
+  return parts.length > 0 ? parts.join(' · ') : lifecycleLabel
 })
+
+const progressDetail = computed(() => props.tool.taskStats?.progressSummary)
 
 const statusTextClass = computed(() => {
   if (props.tool.status === 'running') return 'text-muted-foreground animate-pulse'
-  if (props.tool.status === 'failed') return 'text-destructive'
+  if (props.tool.status === 'failed' && props.tool.taskStats?.status !== 'stopped') {
+    return 'text-destructive'
+  }
   return 'text-muted-foreground/80'
 })
-
-// 消除未使用 import 警告（ToolTaskStats 类型只用于文档注释语义）
-void (null as unknown as ToolTaskStats)
 </script>
 
 <style scoped>

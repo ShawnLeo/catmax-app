@@ -202,8 +202,10 @@ export interface ToolTaskInfo {
  * 让子 Agent 不再是完全黑盒。
  */
 export interface ToolTaskStats {
-  /** 子 Agent id（完成时从 tool_use_result.agentId 拿到），用于读 ~/.claude/projects/.../subagents/agent-<id>.jsonl */
+  /** 子 Agent id，用于读 ~/.claude/projects/.../subagents/agent-<id>.jsonl */
   agentId?: string
+  /** 后台子 Agent 的真实生命周期状态。 */
+  status?: 'running' | 'completed' | 'failed' | 'stopped'
   /** 子 Agent 总耗时（毫秒） */
   totalDurationMs?: number
   /** 子 Agent 总 token 数（input + output + cache） */
@@ -212,6 +214,10 @@ export interface ToolTaskStats {
   totalToolUseCount?: number
   /** 子 Agent 类型（"general-purpose" / "Explore" / ...） */
   agentType?: string
+  /** SDK 周期性生成的进度摘要。 */
+  progressSummary?: string
+  /** 子 Agent 最近调用的工具名。 */
+  lastToolName?: string
   /** 子 Agent 内部工具使用分类计数 */
   toolStats?: {
     readCount?: number
@@ -222,6 +228,16 @@ export interface ToolTaskStats {
     linesRemoved?: number
     otherToolCount?: number
   }
+}
+
+/** Claude 后台任务事件的归一化快照。 */
+export interface BackgroundTaskSnapshot {
+  taskId: string
+  toolUseId?: string
+  status: 'running' | 'completed' | 'failed' | 'stopped'
+  description?: string
+  summary?: string
+  stats: ToolTaskStats
 }
 
 /**
@@ -393,6 +409,17 @@ export type TurnEvent =
       taskStats?: ToolTaskStats
     }
   | {
+      /**
+       * Claude 后台 Agent 生命周期更新。
+       *
+       * Agent 工具在 async_launched 时仍是 running；只有 task_notification
+       * 才会把它推进 completed / failed / stopped。
+       */
+      type: 'background_task_updated'
+      turnId: string
+      task: BackgroundTaskSnapshot
+    }
+  | {
       type: 'approval_requested'
       turnId: string
       requestId: string
@@ -474,7 +501,7 @@ export interface NormalizedMessage {
     /**
      * Task（子 Agent）完成统计--仅当 info.kind === 'task' 时存在。
      * 历史回放路径由 history-mapping 从 jsonl 的 tool_use_result 提取；
-     * 实时流路径由 messageStore 从 tool_call_completed 事件写入。
+     * 实时流路径由 messageStore 从 tool_call_completed / background_task_updated 事件写入。
      * 前端 TaskCard 完成态显示"153s · 31.6k tokens · 5 次工具调用"。
      */
     taskStats?: ToolTaskStats

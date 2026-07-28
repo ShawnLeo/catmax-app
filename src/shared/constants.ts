@@ -47,6 +47,8 @@ export const IPC = {
   BACKEND_WARMUP: 'backend.warmup',
   BACKEND_START_TURN: 'backend.startTurn',
   BACKEND_INTERRUPT_TURN: 'backend.interruptTurn',
+  BACKEND_STEER_TURN: 'backend.steerTurn',
+  BACKEND_LIST_TURN_RUNS: 'backend.listTurnRuns',
   BACKEND_RESPOND_APPROVAL: 'backend.respondApproval',
   BACKEND_RESPOND_QUESTION: 'backend.respondQuestion',
   BACKEND_UPDATE_TURN_CONFIG: 'backend.updateTurnConfig',

@@ -8,10 +8,12 @@ import {
   listBackends,
   listModels,
   listModelsFor,
+  listTurnRuns,
   refreshModels,
   respondApproval,
   respondQuestion,
   startTurn,
+  steerTurn,
   switchBackend,
   updateTurnConfig,
   warmupBackend,
@@ -35,6 +37,11 @@ export function registerBackendHandlers(): void {
   handleRendererRequest<BackendHandlers, 'backend.interruptTurn'>(
     'backend.interruptTurn',
     interruptTurn,
+  )
+  handleRendererRequest<BackendHandlers, 'backend.steerTurn'>('backend.steerTurn', steerTurn)
+  handleRendererRequest<BackendHandlers, 'backend.listTurnRuns'>(
+    'backend.listTurnRuns',
+    listTurnRuns,
   )
   handleRendererRequest<BackendHandlers, 'backend.respondApproval'>(
     'backend.respondApproval',

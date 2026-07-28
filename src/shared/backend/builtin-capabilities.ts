@@ -32,7 +32,7 @@ export const CODEX_CAPABILITIES: BackendCapabilities = {
 export const CLAUDE_CAPABILITIES: BackendCapabilities = {
   supportsInterrupt: true,
   supportsApproval: true,
-  supportsSteer: false,
+  supportsSteer: true,
   supportsThreadFork: false,
   supportsModelSelection: true,
   supportsEffort: true,

@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
 import { DatabaseService } from '@main/service/database'
-import type { MessagePreview, SessionRecord, WorkspaceRecord } from '@shared/domain'
+import type { MessagePreview, SessionRecord, TurnRunRecord, WorkspaceRecord } from '@shared/domain'
 import { describe, expect, test, beforeEach, afterEach } from 'vitest'
 
 let db: DatabaseService
@@ -264,5 +264,87 @@ describe('DatabaseService Message', () => {
     } satisfies MessagePreview)
     db.deleteSession('s1')
     expect(db.listMessages('s1')).toHaveLength(0)
+  })
+})
+
+describe('DatabaseService Turn Run', () => {
+  function makeTurnRun(overrides: Partial<TurnRunRecord> = {}): TurnRunRecord {
+    return {
+      id: 'turn-1',
+      sessionId: 'session-1',
+      backend: 'claude',
+      backendTurnId: 'backend-turn-1',
+      status: 'running',
+      backgroundTasks: [
+        {
+          taskId: 'agent-a',
+          toolUseId: 'tool-a',
+          status: 'running',
+          stats: { agentId: 'agent-a', status: 'running' },
+        },
+      ],
+      createdAt: 100,
+      startedAt: 110,
+      lastEventAt: 120,
+      completedAt: null,
+      error: null,
+      ...overrides,
+    }
+  }
+
+  test('upsertTurnRun 持久化状态和后台任务快照', () => {
+    db.upsertTurnRun(makeTurnRun())
+    db.upsertTurnRun(
+      makeTurnRun({
+        status: 'completed',
+        completedAt: 200,
+        backgroundTasks: [
+          {
+            taskId: 'agent-a',
+            toolUseId: 'tool-a',
+            status: 'completed',
+            summary: '完成',
+            stats: { agentId: 'agent-a', status: 'completed', totalTokens: 42 },
+          },
+        ],
+      }),
+    )
+
+    expect(db.listTurnRuns('session-1')).toEqual([
+      expect.objectContaining({
+        id: 'turn-1',
+        status: 'completed',
+        completedAt: 200,
+        backgroundTasks: [
+          expect.objectContaining({
+            taskId: 'agent-a',
+            status: 'completed',
+            stats: expect.objectContaining({ totalTokens: 42 }),
+          }),
+        ],
+      }),
+    ])
+  })
+
+  test('listRecoverableTurnRuns 只返回非终态', () => {
+    db.upsertTurnRun(makeTurnRun({ id: 'running', status: 'running' }))
+    db.upsertTurnRun(makeTurnRun({ id: 'queued', status: 'queued', startedAt: null }))
+    db.upsertTurnRun(makeTurnRun({ id: 'done', status: 'completed', completedAt: 200 }))
+
+    expect(
+      db
+        .listRecoverableTurnRuns()
+        .map((record) => record.id)
+        .sort(),
+    ).toEqual(['queued', 'running'])
+  })
+
+  test('deleteTurnRunsCompletedBefore 只清理过期终态', () => {
+    db.upsertTurnRun(makeTurnRun({ id: 'old', status: 'completed', completedAt: 100 }))
+    db.upsertTurnRun(makeTurnRun({ id: 'new', status: 'completed', completedAt: 300 }))
+    db.upsertTurnRun(makeTurnRun({ id: 'running', status: 'running', completedAt: null }))
+
+    expect(db.deleteTurnRunsCompletedBefore(200)).toBe(1)
+    expect(db.listTurnRuns().map((record) => record.id)).toEqual(['new', 'running'])
   })
 })
