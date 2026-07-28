@@ -595,14 +595,29 @@ export class CodexAdapter implements AgentBackend {
     try {
       await this.sendRequest('thread/resume', { threadId: backendThreadId })
     } catch (e) {
-      // resume 失败不阻塞 read——rollout 文件还在就能读到历史。极端情况
-      // （文件损坏 / 外部删除）下 read 自己会抛错。
-      log.warn('thread/resume failed before read, continuing anyway', backendThreadId, e)
+      if (isUnmaterializedThreadError(e)) {
+        // thread/start 已分配 id、但首个 turn 尚在协调器队列中时还没有 rollout。
+        // 这是合法的“新空会话”，切换页面读取历史不应打印错误或阻塞后续 turn。
+        log.debug('thread not materialized before history read', backendThreadId)
+      } else {
+        // resume 失败不阻塞 read——rollout 文件还在就能读到历史。极端情况
+        // （文件损坏 / 外部删除）下 read 自己会抛错。
+        log.warn('thread/resume failed before read, continuing anyway', backendThreadId, e)
+      }
     }
-    const result = await this.sendRequest('thread/read', {
-      threadId: backendThreadId,
-      includeTurns: true,
-    })
+    let result: unknown
+    try {
+      result = await this.sendRequest('thread/read', {
+        threadId: backendThreadId,
+        includeTurns: true,
+      })
+    } catch (e) {
+      if (isUnmaterializedThreadError(e)) {
+        log.info('history not materialized yet, returning empty', backendThreadId)
+        return { messages: [] }
+      }
+      throw e
+    }
     const turns = extractTurns(result)
     const messages = codexTurnsToMessages(turns)
     const merged = mergeAssistantAndToolMessages(messages)
@@ -890,7 +905,14 @@ export class CodexAdapter implements AgentBackend {
           status: 'inProgress',
           changes: r.data.changes,
         } as CodexItem)
-        return block ? { type: 'content_block_upsert', turnId: internalTurnId, block } : null
+        return block
+          ? {
+              type: 'content_block_upsert',
+              turnId: internalTurnId,
+              itemId: r.data.itemId,
+              block,
+            }
+          : null
       }
       case 'turn/diff/updated': {
         const r = turnDiffUpdatedParamsSchema.safeParse(params)
@@ -919,7 +941,9 @@ export class CodexAdapter implements AgentBackend {
 
   private translateItemStarted(item: CodexItem, turnId: string): TurnEvent | null {
     const block = codexItemToContentBlock(item)
-    if (block) return { type: 'content_block_upsert', turnId, block }
+    if (block) {
+      return { type: 'content_block_upsert', turnId, itemId: item.id, block }
+    }
 
     const itemId = ensureItemId(item.id, randomUUID())
     const toolInfo = codexItemToToolCallInfo(item)
@@ -936,7 +960,15 @@ export class CodexAdapter implements AgentBackend {
 
   private translateItemCompleted(item: CodexItem, turnId: string): TurnEvent | null {
     const block = codexItemToContentBlock(item)
-    if (block) return { type: 'content_block_upsert', turnId, block }
+    if (block) {
+      return {
+        type: 'content_block_upsert',
+        turnId,
+        itemId: item.id,
+        block,
+        completed: true,
+      }
+    }
 
     const itemId = ensureItemId(item.id, randomUUID())
     const toolInfo = codexItemToToolCallInfo(item)
@@ -1138,6 +1170,14 @@ export class CodexAdapter implements AgentBackend {
  * codex 自己不会通过 stdout 把 API 错误通知给客户端（catmax），只在 stderr 打日志——
  * 所以这里要从 stderr 主动抓取并转成 error event 推给 UI，否则用户要等 60s idle 超时。
  */
+function isUnmaterializedThreadError(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error)
+  return (
+    message.includes('no rollout found for thread id') ||
+    message.includes('is not materialized yet')
+  )
+}
+
 function friendlyApiError(httpCode: string, detail: string): string {
   // 常见模式："The 'XXX' model is not supported when using Codex with a ChatGPT account."
   const modelMatch = detail.match(/'([^']+)' model is not supported/)

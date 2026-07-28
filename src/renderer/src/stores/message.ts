@@ -38,6 +38,12 @@ interface PendingAgentQuestion {
  */
 interface SessionState {
   messages: NormalizedMessage[]
+  /**
+   * 已收到 item/completed 文本快照的 item。
+   * HTTP/SSE 下 completed 偶尔早于 delta；最终快照到达后忽略该 item 的晚到 delta，
+   * 避免完整正文再次被追加一遍。
+   */
+  completedTextItemIds: Set<string>
   currentTurnId: string | null
   isRunning: boolean
   /** codex approval 请求 */
@@ -74,6 +80,7 @@ interface SessionState {
 function createEmptySessionState(): SessionState {
   return {
     messages: [],
+    completedTextItemIds: new Set(),
     currentTurnId: null,
     isRunning: false,
     pendingApproval: null,
@@ -216,6 +223,7 @@ export const useMessageStore = defineStore('message', () => {
         break
       }
       case 'text_delta': {
+        if (s.completedTextItemIds.has(turnItemKey(event.turnId, event.itemId))) break
         const msg = findOrCreateAssistantMessage(s, event.turnId, event.itemId)
         if (!msg.blocks) msg.blocks = []
         const contentBlock = msg.blocks.find(
@@ -289,11 +297,17 @@ export const useMessageStore = defineStore('message', () => {
           upsertCodexActivityBlock(s, event.turnId, event.block)
           break
         }
-        const msg = findOrCreateAssistantMessage(s, event.turnId, event.block.id)
+        // block.id 是渲染块 id（文本通常为 `${itemId}-text`），不能拿它当消息 id。
+        // delta 使用原始 itemId；两者不对齐会把同一文本拆成两条 assistant 消息。
+        const messageItemId = event.itemId ?? event.block.id
+        const msg = findOrCreateAssistantMessage(s, event.turnId, messageItemId)
         if (!msg.blocks) msg.blocks = []
         const index = msg.blocks.findIndex((block) => block.id === event.block.id)
         if (index === -1) msg.blocks.push(event.block)
         else msg.blocks[index] = event.block
+        if (event.completed && event.block.type === 'text') {
+          s.completedTextItemIds.add(turnItemKey(event.turnId, messageItemId))
+        }
         break
       }
       case 'codex_activity_output_delta': {
@@ -442,6 +456,7 @@ export const useMessageStore = defineStore('message', () => {
         // 这里防止面板卡住（比如 turn 因各种原因提前结束时）。
         s.pendingClaudePermission = null
         s.pendingAgentQuestion = null
+        clearCompletedTextItems(s, event.turnId)
         break
       }
     }
@@ -609,12 +624,20 @@ export const useMessageStore = defineStore('message', () => {
     }
   }
 
-  /** 加一条用户消息到当前 session（在发 turn 之前）。
+  /** 加一条用户消息到指定 session（在发 turn 之前）。
    *  contextBlocks 可选——如果传入，UI 会把对应 tag 渲染成专门的卡片
    *  （IDE selection / opened file / environment_context 等），跟气泡平级展示。 */
-  function pushUserMessage(turnId: string, text: string, contextBlocks?: ContextBlock[]): void {
-    if (!currentSessionId.value) return
-    const s = cur()
+  function pushUserMessageToSession(
+    sessionId: string,
+    turnId: string,
+    text: string,
+    contextBlocks?: ContextBlock[],
+  ): void {
+    let s = sessionStates.get(sessionId)
+    if (!s) {
+      s = createEmptySessionState()
+      sessionStates.set(sessionId, s)
+    }
     s.messages.push({
       id: randomUUID(),
       role: 'user',
@@ -631,6 +654,12 @@ export const useMessageStore = defineStore('message', () => {
       ...(contextBlocks && contextBlocks.length > 0 ? { contextBlocks } : {}),
       createdAt: Date.now(),
     })
+  }
+
+  /** 当前 session 便捷入口；后台异步流程应使用 pushUserMessageToSession。 */
+  function pushUserMessage(turnId: string, text: string, contextBlocks?: ContextBlock[]): void {
+    if (!currentSessionId.value) return
+    pushUserMessageToSession(currentSessionId.value, turnId, text, contextBlocks)
   }
 
   /**
@@ -658,11 +687,20 @@ export const useMessageStore = defineStore('message', () => {
    * 调用时机：onSend 检测到用户发的是 /compact 命令时调用，
    * **不**走 pushUserMessage（/compact 那行消息不展示）。
    */
-  function startCompact(turnId: string): void {
-    if (!currentSessionId.value) return
-    const s = cur()
+  function startCompactForSession(sessionId: string, turnId: string): void {
+    let s = sessionStates.get(sessionId)
+    if (!s) {
+      s = createEmptySessionState()
+      sessionStates.set(sessionId, s)
+    }
     s.compactTurnId = turnId
     s.compactDone = false
+  }
+
+  /** 当前 session 便捷入口；后台异步流程应使用 startCompactForSession。 */
+  function startCompact(turnId: string): void {
+    if (!currentSessionId.value) return
+    startCompactForSession(currentSessionId.value, turnId)
   }
 
   /**
@@ -692,10 +730,25 @@ export const useMessageStore = defineStore('message', () => {
    * 替换当前 session 的 messages（loadHistory 调）。
    * 不动其他 session 状态。
    */
+  function setMessagesForSession(sessionId: string, newMessages: NormalizedMessage[]): void {
+    let s = sessionStates.get(sessionId)
+    if (!s) {
+      s = createEmptySessionState()
+      sessionStates.set(sessionId, s)
+    }
+    s.messages = newMessages
+    s.completedTextItemIds.clear()
+  }
+
+  /** session 已有实时/乐观消息时返回 true，切页应复用它而不是重新拉空历史覆盖。 */
+  function hasLocalMessages(sessionId: string): boolean {
+    return (sessionStates.get(sessionId)?.messages.length ?? 0) > 0
+  }
+
+  /** 当前 session 便捷入口。 */
   function setMessages(newMessages: NormalizedMessage[]): void {
     if (!currentSessionId.value) return
-    const s = cur()
-    s.messages = newMessages
+    setMessagesForSession(currentSessionId.value, newMessages)
   }
 
   /** 显式清空某个 session 的状态——删除 session 时调 */
@@ -722,8 +775,16 @@ export const useMessageStore = defineStore('message', () => {
       globalError.value = msg
       return
     }
-    // 写到当前 session——ChatView 渲染 lastError 时能正确读到
-    const s = cur()
+    setErrorForSession(currentSessionId.value, msg)
+  }
+
+  /** 异步请求失败时写回发起请求的 session，避免切页后把错误显示到另一会话。 */
+  function setErrorForSession(sessionId: string, msg: string | null): void {
+    let s = sessionStates.get(sessionId)
+    if (!s) {
+      s = createEmptySessionState()
+      sessionStates.set(sessionId, s)
+    }
     s.lastError = msg
   }
 
@@ -745,16 +806,32 @@ export const useMessageStore = defineStore('message', () => {
     // 方法
     applyEvent,
     pushUserMessage,
+    pushUserMessageToSession,
     startCompact,
+    startCompactForSession,
     markTurnStarting,
     setCurrentSession,
     setMessages,
+    setMessagesForSession,
+    hasLocalMessages,
     clearSession,
     resetAll,
     setLoading,
     setError,
+    setErrorForSession,
   }
 })
+
+function turnItemKey(turnId: string, itemId: string): string {
+  return `${turnId}\u0000${itemId}`
+}
+
+function clearCompletedTextItems(s: SessionState, turnId: string): void {
+  const prefix = `${turnId}\u0000`
+  for (const key of s.completedTextItemIds) {
+    if (key.startsWith(prefix)) s.completedTextItemIds.delete(key)
+  }
+}
 
 function mergeCodexActivity(existing: CodexActivity, incoming: CodexActivity): CodexActivity {
   if (existing.kind !== incoming.kind) return incoming

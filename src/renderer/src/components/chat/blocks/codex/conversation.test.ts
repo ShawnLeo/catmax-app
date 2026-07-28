@@ -159,4 +159,30 @@ describe('Codex conversation composition', () => {
     ])
     expect(sections.finalBlocks).toEqual([])
   })
+
+  test('deduplicates legacy completed snapshot and delta messages by block id', () => {
+    const sections = splitCodexTurn([
+      message('message-1-text', 'assistant', 't1', [
+        {
+          id: 'message-1-text',
+          type: 'text',
+          text: 'checking',
+          phase: 'commentary',
+        },
+      ]),
+      message('message-1', 'assistant', 't1', [
+        { id: 'message-1-text', type: 'text', text: 'checking' },
+      ]),
+    ])
+
+    expect(sections.processBlocks).toEqual([
+      {
+        id: 'message-1-text',
+        type: 'text',
+        text: 'checking',
+        phase: 'commentary',
+      },
+    ])
+    expect(sections.finalBlocks).toEqual([])
+  })
 })

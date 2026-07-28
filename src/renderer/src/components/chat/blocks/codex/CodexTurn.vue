@@ -1,6 +1,8 @@
 <template>
   <section class="min-w-0">
+    <!-- 处理中态始终展示；已完成态仅在展开有内容时展示，避免空"已处理"行。 -->
     <button
+      v-if="running || sections.processBlocks.length"
       type="button"
       class="flex w-full items-center gap-1.5 border-b border-border/70 pb-2 text-left text-[13px] text-muted-foreground hover:text-foreground"
       :aria-expanded="open"
@@ -13,18 +15,6 @@
         :class="open ? 'rotate-180' : '-rotate-90'"
       />
     </button>
-
-    <!-- Codex Turn Thinking: 发送后立即反馈，覆盖首个流式事件到达前的空窗期。 -->
-    <div
-      v-if="running"
-      class="flex items-center gap-2 pt-3 text-[13px] text-muted-foreground"
-      role="status"
-      aria-live="polite"
-    >
-      <span class="size-1.5 rounded-full bg-current animate-pulse" aria-hidden="true" />
-      <span>正在思考</span>
-      <LoadingDots :dot-size="3" :duration="1.6" />
-    </div>
 
     <div v-if="open && sections.processBlocks.length" class="space-y-4 pt-4">
       <template v-for="block in sections.processBlocks" :key="block.id">
@@ -53,6 +43,18 @@
     </div>
 
     <CodexChangesCard v-if="changedFiles.length" :files="changedFiles" :stats="changeStats" />
+
+    <!-- Codex Turn Thinking: 始终跟在当前已输出内容之后，保持为回合最末状态。 -->
+    <div
+      v-if="running"
+      class="flex items-center gap-2 pt-3 text-[13px] text-muted-foreground"
+      role="status"
+      aria-live="polite"
+    >
+      <span class="size-1.5 rounded-full bg-current animate-pulse" aria-hidden="true" />
+      <span>正在思考</span>
+      <LoadingDots :dot-size="3" :duration="1.6" />
+    </div>
   </section>
 </template>
 

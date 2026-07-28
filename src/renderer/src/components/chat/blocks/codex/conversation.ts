@@ -57,7 +57,9 @@ export function buildCodexConversationEntries(
  * for older histories without it, the last text item is treated as the final answer.
  */
 export function splitCodexTurn(messages: NormalizedMessage[]): CodexTurnSections {
-  const blocks = messages.flatMap(messageBlocks)
+  // 防御旧实时状态：历史实现分别用 block id（`${itemId}-text`）和原始 itemId
+  // 创建消息，同一块会出现两遍。以 block id 去重，并优先保留带 phase 的完成快照。
+  const blocks = dedupeBlocks(messages.flatMap(messageBlocks))
   const explicitFinal = blocks.filter(
     (block): block is TextContentBlock => block.type === 'text' && block.phase === 'final_answer',
   )
@@ -93,6 +95,32 @@ export function splitCodexTurn(messages: NormalizedMessage[]): CodexTurnSections
   )
 
   return { processBlocks, finalBlocks, reasoningBlocks }
+}
+
+function dedupeBlocks(blocks: ContentBlock[]): ContentBlock[] {
+  const result: ContentBlock[] = []
+  const indexById = new Map<string, number>()
+
+  for (const block of blocks) {
+    const existingIndex = indexById.get(block.id)
+    if (existingIndex === undefined) {
+      indexById.set(block.id, result.length)
+      result.push(block)
+      continue
+    }
+
+    const existing = result[existingIndex]!
+    if (existing.type === 'text' && block.type === 'text') {
+      if (existing.phase !== undefined && block.phase === undefined) continue
+      if (block.phase !== undefined || block.text.length >= existing.text.length) {
+        result[existingIndex] = block
+      }
+      continue
+    }
+    result[existingIndex] = block
+  }
+
+  return result
 }
 
 /** Consecutive app-server items form one visual activity row; commentary starts a new segment. */

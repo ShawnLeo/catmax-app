@@ -572,6 +572,7 @@ async function onSend(text: string, attachments: ContextBlock[]): Promise<void> 
   // 如果还没 session，先创建
   let sessionId = sessionStore.currentSession?.id
   if (!sessionId) {
+    const selectionVersionBeforeCreate = sessionStore.selectionVersion
     // observability：currentSessionId 被设过但找不到对应 session——这是可疑状态
     // （可能是 selectSession race / store 不一致），但为了不阻塞用户发消息仍然创建。
     // 真正的新建场景（点"新建会话"按钮 / 切 backend tab）currentSessionId === null/''。
@@ -597,10 +598,15 @@ async function onSend(text: string, attachments: ContextBlock[]): Promise<void> 
     if (model !== null) createArgs.model = model
     if (effort !== null) createArgs.effort = effort
     sessionId = await sessionStore.create(createArgs)
-    sessionStore.setCurrent(sessionId)
-    // messageStore 的 currentSessionId 跟 sessionStore 是两套 ref——
-    // 必须同时设，否则后续 pushUserMessage / 流式 events 都路由不到正确 session。
-    messageStore.setCurrentSession(sessionId)
+    // 创建期间用户可能已经点了“新建会话”或选择了别的历史会话。
+    // 只有选择版本没变化时才自动进入刚创建的 session；无论是否仍选中，
+    // 本次发送后续都固定写入局部 sessionId，不会污染当前页面。
+    if (sessionStore.selectionVersion === selectionVersionBeforeCreate) {
+      sessionStore.setCurrent(sessionId)
+      // messageStore 的 currentSessionId 跟 sessionStore 是两套 ref——
+      // 当前页面仍是原 draft 时同步选中刚创建的 session。
+      messageStore.setCurrentSession(sessionId)
+    }
   }
 
   // 找 backendThreadId（session.detail 已经能拿到；MVP 简化：直接用 backendThreadId 字段）
@@ -613,9 +619,14 @@ async function onSend(text: string, attachments: ContextBlock[]): Promise<void> 
   // "正在压缩上下文 / 上下文已压缩"分隔线。turn_completed 时自动从呼吸切到静态。
   // 严格匹配 trim 后的 /compact——带参数的（/compact focus on X）走普通消息。
   if (text.trim() === '/compact') {
-    messageStore.startCompact(turnId)
+    messageStore.startCompactForSession(sessionId, turnId)
   } else {
-    messageStore.pushUserMessage(turnId, text, attachments.length > 0 ? attachments : undefined)
+    messageStore.pushUserMessageToSession(
+      sessionId,
+      turnId,
+      text,
+      attachments.length > 0 ? attachments : undefined,
+    )
   }
 
   // 乐观标记 turn 已开始——发消息后立刻让 UI 进入"agent 正在干活"状态

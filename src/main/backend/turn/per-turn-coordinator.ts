@@ -17,6 +17,11 @@ export interface CoordinatedTurnRequest {
   id: string
   sessionId: string
   backend: BackendId
+  /**
+   * 可选执行通道。默认按 sessionId 串行；不支持并发 turn 的 backend
+   * 可以让多个 session 共用同一 lane，同时仍保留各自 sessionId 做事件路由。
+   */
+  laneKey?: string
   run(sink: TurnEventSink): Promise<void>
   interrupt(backendTurnId: string): Promise<void>
   onEvent(event: TurnEvent): void
@@ -104,7 +109,7 @@ export class PerTurnCoordinator {
       completedAt: null,
       error: null,
     }
-    const laneKey = request.sessionId
+    const laneKey = request.laneKey ?? request.sessionId
     const entry: TurnEntry = {
       request,
       record,

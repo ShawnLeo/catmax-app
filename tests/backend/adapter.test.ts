@@ -122,12 +122,34 @@ describe('CodexAdapter', () => {
             params: { turn: { id: 'codex_turn_1', status: 'in_progress', items: [] } },
           })
           pushLine(stdout, {
+            method: 'item/started',
+            params: {
+              item: {
+                type: 'agentMessage',
+                id: 'msg_1',
+                text: '',
+                phase: null,
+              },
+            },
+          })
+          pushLine(stdout, {
             method: 'item/agentMessage/delta',
             params: { itemId: 'msg_1', delta: 'hello' },
           })
           pushLine(stdout, {
             method: 'item/agentMessage/delta',
             params: { itemId: 'msg_1', delta: ' world' },
+          })
+          pushLine(stdout, {
+            method: 'item/completed',
+            params: {
+              item: {
+                type: 'agentMessage',
+                id: 'msg_1',
+                text: 'hello world',
+                phase: 'final_answer',
+              },
+            },
           })
           pushLine(stdout, {
             method: 'turn/completed',
@@ -151,6 +173,15 @@ describe('CodexAdapter', () => {
       events.some(
         (e): e is Extract<TurnEvent, { type: 'turn_completed' }> =>
           e.type === 'turn_completed' && e.status === 'completed',
+      ),
+    ).toBe(true)
+    expect(
+      events.some(
+        (e): e is Extract<TurnEvent, { type: 'content_block_upsert' }> =>
+          e.type === 'content_block_upsert' &&
+          e.itemId === 'msg_1' &&
+          e.block.id === 'msg_1-text' &&
+          e.completed === true,
       ),
     ).toBe(true)
   })
@@ -722,5 +753,39 @@ describe('CodexAdapter', () => {
     // resume 带正确的 threadId
     const resumeReq = requests.find((r) => r.method === 'thread/resume')
     expect((resumeReq?.params as { threadId?: string }).threadId).toBe('thr_resume')
+  })
+
+  test('getHistory 将首个 turn 尚未执行的 thread 视为空历史', async () => {
+    const { spawner, stdout, stdin } = createMockSpawner()
+    const adapter = new CodexAdapter({ spawner })
+
+    stdin.on('data', (data) => {
+      const lines = data.toString().split('\n').filter(Boolean)
+      for (const line of lines) {
+        const msg = JSON.parse(line)
+        if (msg.method === 'initialize') {
+          pushLine(stdout, { id: msg.id, result: { ok: true } })
+        } else if (msg.method === 'thread/resume' && msg.id !== undefined) {
+          pushLine(stdout, {
+            id: msg.id,
+            error: {
+              code: -32000,
+              message: 'no rollout found for thread id thr_pending',
+            },
+          })
+        } else if (msg.method === 'thread/read' && msg.id !== undefined) {
+          pushLine(stdout, {
+            id: msg.id,
+            error: {
+              code: -32000,
+              message:
+                'thread thr_pending is not materialized yet; includeTurns is unavailable before first user message',
+            },
+          })
+        }
+      }
+    })
+
+    await expect(adapter.getHistory('thr_pending')).resolves.toEqual({ messages: [] })
   })
 })

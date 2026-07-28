@@ -116,22 +116,15 @@
             发送按钮可点击时反相为 foreground/background（夜间白底黑箭头，日间黑底白箭头），
             禁用时保持弱化的 primary 灰阶。
           -->
-          <template v-if="messageStore.isRunning">
-            <Button
-              v-if="supportsSteer"
-              size="icon"
-              class="h-7 w-7 rounded-md"
-              :class="canSend ? 'bg-foreground text-background hover:bg-foreground/90' : ''"
-              :disabled="!canSend"
-              title="追加指令 (Enter)"
-              @click="onSend"
-            >
-              <ArrowUpIcon class="w-4 h-4" />
-            </Button>
-            <Button size="icon" class="h-7 w-7 rounded-md" title="停止" @click="onInterrupt">
-              <SquareIcon class="w-3 h-3 fill-current" />
-            </Button>
-          </template>
+          <Button
+            v-if="messageStore.isRunning"
+            size="icon"
+            class="h-7 w-7 rounded-md"
+            title="停止"
+            @click="onInterrupt"
+          >
+            <SquareIcon class="w-3 h-3 fill-current" />
+          </Button>
           <Button
             v-else
             size="icon"
@@ -199,8 +192,6 @@ const canSend = computed(
   () =>
     (prompt.value.trim().length > 0 || chatInput.pendingAttachments.length > 0) && !props.disabled,
 )
-
-const supportsSteer = computed(() => backendStore.current?.capabilities.supportsSteer ?? false)
 
 const supportedEfforts = computed<EffortLevel[]>(() => {
   return backendStore.current?.capabilities.supportedEfforts ?? ['low', 'medium', 'high']

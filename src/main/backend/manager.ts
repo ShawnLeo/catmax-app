@@ -299,6 +299,10 @@ export class BackendManager {
       id: turnId,
       sessionId: routeSessionId,
       backend: backendId,
+      // CodexAdapter 当前由一个 app-server 进程承载，内部只有一个活动事件 sink。
+      // 不同 CatMax session 若并发启动会互相覆盖 sink，导致实时消息串流；
+      // 共用 backend lane 串行执行，同时 envelope 仍按 routeSessionId 分发。
+      ...(backendId === 'codex' ? { laneKey: 'backend:codex' } : {}),
       run: async (sink) => {
         for await (const event of adapter.startTurn(backendArgs)) {
           sink.publish(event)

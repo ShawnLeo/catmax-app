@@ -378,7 +378,21 @@ export type TurnEvent =
       text: string
       completedLabel?: string
     }
-  | { type: 'content_block_upsert'; turnId: string; block: ContentBlock }
+  | {
+      type: 'content_block_upsert'
+      turnId: string
+      block: ContentBlock
+      /**
+       * 原始 backend item id。文本 block 会派生出 `${itemId}-text` 作为 block id，
+       * 但消息聚合必须继续使用原始 item id，才能和 text_delta 落到同一条消息。
+       */
+      itemId?: string
+      /**
+       * true 表示 block 来自 item/completed，是该 item 的权威最终快照。
+       * 某些 HTTP/SSE 路径会在晚到的 delta 之前先送达 completed。
+       */
+      completed?: boolean
+    }
   | {
       type: 'codex_activity_output_delta'
       turnId: string

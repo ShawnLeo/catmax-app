@@ -7,6 +7,12 @@ import { ref, computed } from 'vue'
 export const useSessionStore = defineStore('session', () => {
   const sessions = ref<SessionView[]>([])
   const currentSessionId = ref<string | null>(null)
+  /**
+   * 每次用户/程序切换会话都会递增。
+   * 首条消息创建 session 是异步的；完成时用版本号判断用户是否已经点了“新建会话”
+   * 或切到别处，避免旧请求把当前页面强行切回去。
+   */
+  const selectionVersion = ref(0)
   const loading = ref(false)
 
   const currentSession = computed(() => sessions.value.find((s) => s.id === currentSessionId.value))
@@ -53,20 +59,27 @@ export const useSessionStore = defineStore('session', () => {
     sessions.value = sessions.value.filter((s) => s.id !== sessionId)
     if (currentSessionId.value === sessionId) {
       currentSessionId.value = null
+      selectionVersion.value++
     }
   }
 
   function setCurrent(sessionId: string): void {
     currentSessionId.value = sessionId
+    selectionVersion.value++
   }
 
   async function loadHistory(sessionId: string): Promise<void> {
     const { useMessageStore } = await import('@renderer/stores/message')
     const messageStore = useMessageStore()
+    // 新建 session 的首条 turn 可能仍在 Codex 全局 lane 中排队，此时 backend thread
+    // 已有 id 但尚未生成 rollout。内存里已经有乐观 user 消息和后续实时事件，
+    // 直接复用；否则 thread/read 的空结果会覆盖页面，造成切换时数据消失/乱串。
+    if (messageStore.hasLocalMessages(sessionId)) return
     messageStore.setLoading(true)
     try {
       const detail = await window.api.session.detail({ sessionId })
-      messageStore.setMessages(detail.messages)
+      // 必须写回请求发起时的 session；用户可能在 await 期间已切到另一个会话。
+      messageStore.setMessagesForSession(sessionId, detail.messages)
 
       // 后端给了 aiTitle 且 db 里之前没有标题时，main handler 已经回写 db。
       // 这里同步更新本地 sessions 数组里的 title，让侧边栏立即显示新标题。
@@ -77,7 +90,7 @@ export const useSessionStore = defineStore('session', () => {
         }
       }
     } catch (e) {
-      messageStore.setError(e instanceof Error ? e.message : String(e))
+      messageStore.setErrorForSession(sessionId, e instanceof Error ? e.message : String(e))
     } finally {
       messageStore.setLoading(false)
     }
@@ -86,6 +99,7 @@ export const useSessionStore = defineStore('session', () => {
   return {
     sessions,
     currentSessionId,
+    selectionVersion,
     loading,
     currentSession,
     load,

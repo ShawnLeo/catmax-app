@@ -103,6 +103,105 @@ describe('message store Codex activity streaming', () => {
     expect(store.messages[1]?.blocks?.[0]?.type).toBe('text')
     expect(store.messages[2]?.blocks?.[0]?.type).toBe('codex_activity')
   })
+
+  test('completed 文本快照和晚到 delta 聚合到同一消息且不重复正文', () => {
+    const store = useMessageStore()
+    store.setCurrentSession('session-1')
+
+    store.applyEvent('session-1', {
+      type: 'content_block_upsert',
+      turnId: 'turn-1',
+      itemId: 'message-1',
+      completed: true,
+      block: {
+        id: 'message-1-text',
+        type: 'text',
+        text: '最终正文',
+        phase: 'final_answer',
+      },
+    })
+    store.applyEvent('session-1', {
+      type: 'text_delta',
+      turnId: 'turn-1',
+      itemId: 'message-1',
+      text: '最终正文',
+    })
+
+    expect(store.messages).toHaveLength(1)
+    expect(store.messages[0]).toMatchObject({
+      id: 'message-1',
+      blocks: [
+        {
+          id: 'message-1-text',
+          type: 'text',
+          text: '最终正文',
+          phase: 'final_answer',
+        },
+      ],
+    })
+  })
+
+  test('先到 delta 后到 completed 时用最终快照覆盖流式文本', () => {
+    const store = useMessageStore()
+    store.setCurrentSession('session-1')
+
+    store.applyEvent('session-1', {
+      type: 'text_delta',
+      turnId: 'turn-1',
+      itemId: 'message-1',
+      text: '最终',
+    })
+    store.applyEvent('session-1', {
+      type: 'content_block_upsert',
+      turnId: 'turn-1',
+      itemId: 'message-1',
+      completed: true,
+      block: {
+        id: 'message-1-text',
+        type: 'text',
+        text: '最终正文',
+        phase: 'final_answer',
+      },
+    })
+    store.applyEvent('session-1', {
+      type: 'text_delta',
+      turnId: 'turn-1',
+      itemId: 'message-1',
+      text: '正文',
+    })
+
+    expect(store.messages).toHaveLength(1)
+    expect(store.messages[0]?.blocks?.[0]).toMatchObject({
+      id: 'message-1-text',
+      text: '最终正文',
+      phase: 'final_answer',
+    })
+  })
+
+  test('异步发送和历史加载始终写入指定 session，不污染当前页面', () => {
+    const store = useMessageStore()
+    store.setCurrentSession('session-2')
+
+    store.pushUserMessageToSession('session-1', 'turn-1', '第一会话')
+    store.setMessagesForSession('session-1', [
+      {
+        id: 'history-1',
+        role: 'assistant',
+        turnId: 'turn-1',
+        blocks: [{ id: 'history-1-text', type: 'text', text: '第一会话回复' }],
+        createdAt: 0,
+      },
+    ])
+
+    expect(store.messages).toEqual([])
+    store.setCurrentSession('session-1')
+    expect(store.messages).toEqual([
+      expect.objectContaining({
+        id: 'history-1',
+        blocks: [expect.objectContaining({ text: '第一会话回复' })],
+      }),
+    ])
+  })
 })
 
 describe('message store Claude background tasks', () => {

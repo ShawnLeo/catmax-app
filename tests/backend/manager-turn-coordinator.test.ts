@@ -167,4 +167,53 @@ describe('BackendManager per-turn coordinator integration', () => {
     )
     expect(contextMocks.bumpSessionTurn).toHaveBeenCalledOnce()
   })
+
+  test('不同 session 的 Codex turn 共用单一 backend lane，避免 app-server sink 串流', async () => {
+    const completeFirst = deferred()
+    const startedSessions: string[] = []
+    const codex = makePlugin('codex', async function* (args) {
+      startedSessions.push(args.sessionId)
+      yield {
+        type: 'turn_started',
+        turnId: `turn-${args.sessionId}`,
+        sessionId: args.sessionId,
+      }
+      if (args.sessionId === 'backend-session-1') await completeFirst.promise
+      yield {
+        type: 'turn_completed',
+        turnId: `turn-${args.sessionId}`,
+        status: 'completed',
+      }
+    })
+    const manager = new BackendManager([codex.plugin])
+
+    await manager.startTurn({
+      clientTurnId: 'client-turn-1',
+      clientSessionId: 'catmax-session-1',
+      sessionId: 'backend-session-1',
+      prompt: 'one',
+    })
+    await manager.startTurn({
+      clientTurnId: 'client-turn-2',
+      clientSessionId: 'catmax-session-2',
+      sessionId: 'backend-session-2',
+      prompt: 'two',
+    })
+    await flushTasks()
+
+    expect(startedSessions).toEqual(['backend-session-1'])
+
+    completeFirst.resolve()
+    await flushTasks()
+    await flushTasks()
+
+    expect(startedSessions).toEqual(['backend-session-1', 'backend-session-2'])
+    expect(contextMocks.broadcast).toHaveBeenCalledWith(
+      'backend:turnEvent',
+      expect.objectContaining({
+        sessionId: 'catmax-session-2',
+        event: expect.objectContaining({ type: 'turn_completed' }),
+      }),
+    )
+  })
 })
