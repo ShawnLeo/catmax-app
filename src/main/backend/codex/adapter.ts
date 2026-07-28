@@ -1164,7 +1164,6 @@ export class CodexAdapter implements AgentBackend {
   }
 }
 
-/** 把 PermissionMode 翻译成 codex 的 approvalPolicy */
 /**
  * 把 codex stderr 里的 OpenAI API 错误（"error=http 400: ..."）翻译成对用户友好的中文提示。
  * codex 自己不会通过 stdout 把 API 错误通知给客户端（catmax），只在 stderr 打日志——
@@ -1218,9 +1217,11 @@ function permissionToApproval(mode?: string): CodexApprovalPolicy | undefined {
     case 'default':
       return 'untrusted'
     case 'acceptEdits':
-      return 'on-failure'
     case 'auto':
-      return 'on-failure'
+      // 旧 codex 用 'on-failure'（沙箱失败时才询问）；新 codex 已移除该变体，
+      // 只接受 untrusted|on-request|granular|never。改用 'on-request'（agent
+      // 主动请求时询问）——这是语义最接近的合法值，避免 "unknown variant" 报错。
+      return 'on-request'
     case 'plan':
       return 'never'
     case 'dontAsk':

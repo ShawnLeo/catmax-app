@@ -138,21 +138,22 @@ function dotFillClass(level: EffortLevel): string {
   return 'bg-muted-foreground/30'
 }
 
-/** 档位 → UI 文案（用于 trigger 按钮显示和 tooltip） */
+/** 档位 → UI 文案（用于 trigger 按钮显示和 tooltip）。
+ *  与设置面板 BackendSection.vue 的 effortLabel 保持一致：关闭/低/中/高/超高/最高。 */
 function tierLabel(level: EffortLevel): string {
   switch (level) {
     case 'none':
-      return 'off'
+      return '关闭'
     case 'low':
-      return 'low'
+      return '低'
     case 'medium':
-      return 'med'
+      return '中'
     case 'high':
-      return 'high'
+      return '高'
     case 'xhigh':
-      return 'xhigh'
+      return '超高'
     case 'max':
-      return 'max'
+      return '最高'
   }
 }
 

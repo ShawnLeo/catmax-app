@@ -18,10 +18,16 @@
     <button
       type="button"
       :title="triggerTitle"
-      class="flex items-center justify-center w-7 h-7 rounded-md text-sm transition-colors bg-secondary text-secondary-foreground hover:bg-accent hover:text-accent-foreground focus:outline-none focus-visible:ring-1 focus-visible:ring-ring cursor-pointer"
+      class="perm-trigger-btn flex items-center gap-2 px-3 py-2 rounded-md text-sm transition-colors bg-secondary text-secondary-foreground hover:bg-accent hover:text-accent-foreground focus:outline-none focus-visible:ring-1 focus-visible:ring-ring cursor-pointer"
       @click="open = !open"
     >
-      <component :is="shieldIcon" class="w-4 h-4 flex-shrink-0" :class="shieldColor" />
+      <!-- 盾牌图标比 Brain 留白多,同尺寸视觉偏小;+2px 到 18px 与脑图标视觉平衡。
+           bypassPermissions 时图标+文字都跟随 amber 警告色(shieldColor)。 -->
+      <component :is="shieldIcon" class="w-[18px] h-[18px] flex-shrink-0" :class="shieldColor" />
+      <!-- 当前模式文字:Composer 宽度足够时显示,窄屏由容器查询隐藏(只留盾牌图标)。
+           perm-label class 供外部精确选中此 span,不影响弹层选项。
+           bypassPermissions 时跟随图标变 amber 警告色。 -->
+      <span class="perm-label truncate" :class="shieldColor">{{ currentLabel }}</span>
     </button>
 
     <!-- 弹层:权限选项列表(向上展开,避开窗口底部)
@@ -111,11 +117,14 @@ const shieldColor = computed(() => {
   return ''
 })
 
+/** trigger 按钮里显示的当前模式文字(从 options 里取当前选中项的 label)。 */
+const currentLabel = computed(() => {
+  return props.options.find((o) => o.value === props.modelValue)?.label ?? props.modelValue
+})
+
 const triggerTitle = computed(() => {
-  const current = props.options.find((o) => o.value === props.modelValue)
-  const label = current?.label ?? props.modelValue
   const suffix = props.modelValue === 'bypassPermissions' ? '(⚠ 完全跳过权限)' : ''
-  return `权限模式: ${label} ${suffix}`
+  return `权限模式: ${currentLabel.value} ${suffix}`
 })
 
 function onSelect(value: PermissionMode): void {

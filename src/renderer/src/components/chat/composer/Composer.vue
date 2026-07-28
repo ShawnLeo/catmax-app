@@ -88,9 +88,10 @@
             @update:model-value="onEffortSelect"
           />
 
-          <!-- Permission Mode:盾牌图标按钮(无文字),始终显示。
-               bypassPermissions(完全跳过)时盾牌变 amber 警告色。
-               不再用 DropdownMenu——换成图标按钮,避免窄屏被折叠隐藏。 -->
+          <!-- Permission Mode:盾牌图标 + 当前模式文字。
+               Composer 宽度够时显示文字(默认/自动接受编辑/计划模式...),
+               < 30rem 时只留盾牌图标(见下方容器查询)。
+               bypassPermissions(完全跳过)时盾牌变 amber 警告色。 -->
           <PermissionShieldButton
             :model-value="modelValue.permissionMode"
             :options="
@@ -320,7 +321,7 @@ function onPermissionModeSelect(value: PermissionMode): void {
  */
 .composer-model-trigger > :deep(button),
 .composer-effort-trigger > :deep(button.effort-trigger-btn),
-.composer-perm > :deep(button) {
+.composer-perm > :deep(button.perm-trigger-btn) {
   height: 1.75rem; /* h-7 = 28px,与发送按钮一致 */
   padding-top: 0;
   padding-bottom: 0;
@@ -329,7 +330,7 @@ function onPermissionModeSelect(value: PermissionMode): void {
 }
 .composer-model-trigger > :deep(button:hover),
 .composer-effort-trigger > :deep(button.effort-trigger-btn:hover),
-.composer-perm > :deep(button:hover) {
+.composer-perm > :deep(button.perm-trigger-btn:hover) {
   background-color: var(--color-accent);
   color: var(--color-accent-foreground);
 }
@@ -405,6 +406,18 @@ function onPermissionModeSelect(value: PermissionMode): void {
   }
 }
 .composer-effort-trigger :deep(button.effort-trigger-btn > svg:last-child) {
+  @container (width < 30rem) {
+    display: none;
+  }
+}
+
+/*
+ * Permission Mode trigger:< 30rem 隐藏模式文字,只留盾牌图标。
+ * 必须用 .perm-label 精确匹配——否则 :deep(button > span) 会匹配到弹层里
+ * 选项 button 内的 span(选项文字/对勾占位),把它们也隐藏掉。
+ * 与 Effort 同档(30rem)收窄,保持两个 trigger 在窄屏下视觉一致。
+ */
+.composer-perm :deep(button.perm-trigger-btn > .perm-label) {
   @container (width < 30rem) {
     display: none;
   }
