@@ -28,6 +28,7 @@ import type {
 } from '@shared/backend/claude-schema'
 import { sharedContextTagExtractors } from '@shared/backend/context-tag-handlers'
 import { extractContextTags } from '@shared/backend/context-tags'
+import { matchInterruptMarker } from '@shared/backend/interrupt-marker'
 import { upgradeMessageBlocks } from '@shared/backend/normalize-blocks'
 import type { NormalizedMessage, ToolCallInfo } from '@shared/backend/types'
 
@@ -218,6 +219,24 @@ export function claudeReplayToMessages(messages: ClaudeStreamMessage[]): Normali
         if (isSystemSentinel(rawText)) {
           // 不清 lastWasCommandInvocation——caveat/stdout 可能跟在 command 后，
           // 标志逻辑会处理。
+          continue
+        }
+
+        // 中断标记：Claude SDK 在用户中断回合后写入的 sentinel
+        // （`[Request interrupted by user]` / `... for tool use]`）。
+        // 仍 push 一条 user message，但 textBlocks[0].text 保留 sentinel 原文——
+        // renderer（MessageItem.vue）在 <article> 外层识别后交给
+        // InterruptedHistoryEntry.vue 用特殊胶囊样式渲染，绕过 user 气泡布局。
+        // （复刻 /compact 的拦截渲染模式。）命中后清掉命令展开标志并跳过后续分支。
+        if (matchInterruptMarker(rawText)) {
+          lastWasCommandInvocation = false
+          result.push({
+            id: randomUUID(),
+            role: 'user',
+            turnId: 'history',
+            textBlocks: [{ id: randomUUID(), text: rawText.trim(), kind: 'text' }],
+            createdAt: 0,
+          })
           continue
         }
 

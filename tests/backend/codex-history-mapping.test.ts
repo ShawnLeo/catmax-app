@@ -342,4 +342,24 @@ describe('codex history mapping', () => {
       })
     }
   })
+
+  test('中断 sentinel 保留原文构造 user message（防御性，与 claude 一致）', () => {
+    // codex rollout 实际不会产生这种文本，但命中时仍构造标记消息——
+    // renderer 识别后用 InterruptedHistoryEntry 特殊样式渲染，绕过 user 气泡布局。
+    const messages = codexTurnsToMessages([
+      {
+        id: 'turn_interrupt',
+        items: [
+          {
+            type: 'user_message',
+            id: 'u-interrupt',
+            content: [{ type: 'text', text: '[Request interrupted by user for tool use]' }],
+          },
+        ],
+      },
+    ])
+    expect(messages).toHaveLength(1)
+    expect(messages[0]!.role).toBe('user')
+    expect(messages[0]!.textBlocks?.[0]?.text).toBe('[Request interrupted by user for tool use]')
+  })
 })

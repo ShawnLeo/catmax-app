@@ -319,4 +319,42 @@ describe('claude history mapping', () => {
     expect(userMsgs[0]!.textBlocks).toHaveLength(2)
     expect(userMsgs[0]!.textBlocks?.[1]?.text).toContain('This session is being continued')
   })
+
+  test('中断 sentinel 保留原文构造 user message（交给 renderer 特殊渲染）', () => {
+    // Claude SDK 在用户中断回合后往 transcript 写 sentinel：
+    //   `[Request interrupted by user]`
+    //   `[Request interrupted by user for tool use]`
+    // history-mapping 识别后仍 push 一条 role:'user' 消息，textBlocks[0].text
+    // 保留 sentinel 原文——renderer（MessageItem.vue）识别后用 InterruptedHistoryEntry
+    // 特殊胶囊样式渲染，绕过 user 气泡布局。
+    const messages = claudeReplayToMessages([
+      {
+        type: 'user',
+        message: {
+          role: 'user',
+          content: [{ type: 'text', text: '开始任务' }],
+        },
+      },
+      {
+        type: 'assistant',
+        message: {
+          id: 'm1',
+          type: 'message',
+          role: 'assistant',
+          content: [{ type: 'text', text: '正在执行...' }],
+        },
+      },
+      {
+        type: 'user',
+        message: {
+          role: 'user',
+          content: [{ type: 'text', text: '[Request interrupted by user]' }],
+        },
+      },
+    ])
+    const userMsgs = messages.filter((m) => m.role === 'user')
+    expect(userMsgs).toHaveLength(2)
+    // 中断 sentinel 原样保留（让 renderer 能识别）
+    expect(userMsgs[1]!.textBlocks?.[0]?.text).toBe('[Request interrupted by user]')
+  })
 })

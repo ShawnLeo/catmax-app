@@ -9,6 +9,14 @@
   <CompactHistoryEntry v-if="isCompactHistoryEntry" :summary="compactSummary" />
 
   <!--
+    历史「用户中断」条目：history-mapping 把 Claude SDK 写入的中断 sentinel
+    （`[Request interrupted by user]` / `... for tool use]`）构造成 role:'user' +
+    textBlocks[0].text=原文。这里识别该模式并交给 InterruptedHistoryEntry 渲染
+    （不再走 user 气泡布局）——复刻 /compact 的拦截渲染模式。
+  -->
+  <InterruptedHistoryEntry v-else-if="isInterruptedEntry" :variant="interruptVariant" />
+
+  <!--
     消息项布局：
     - user：靠右，单个淡灰气泡（bg-user-bubble，对齐 Claude Code #222222）
     - assistant：靠左，**时间轴布局**——左侧竖线 + 每个事件一个色点串起来
@@ -19,8 +27,11 @@
     :class="[
       'flex gap-3',
       message.role === 'user'
-        ? // user 消息:靠右,底部留呼吸空间分隔对话轮次
-          'flex-row-reverse mb-4'
+        ? // user 消息:靠右。
+          // mt-4 补 assistant→user 方向的间距（上一轮回复 → 这一轮提问）；
+          // user→assistant 方向靠 mb-4。连续 assistant 之间仍零间距，竖线不断。
+          // first:mt-0：对话首条通常是 user 提问，去掉顶部 margin 避免与容器 py-4 叠加。
+          'flex-row-reverse mb-4 mt-4 first:mt-0'
         : 'flex-row relative border-l-2 border-border/60 pt-3',
       // assistant 首尾遮罩必须能同时生效：只有一条（含仅 thinking）时隐藏整条连线。
       {
@@ -139,6 +150,7 @@ import type {
   TextContentBlock,
   ToolCallContentBlock,
 } from '@shared/backend/blocks'
+import { matchInterruptMarker } from '@shared/backend/interrupt-marker'
 import { messageBlocks } from '@shared/backend/normalize-blocks'
 import type { NormalizedMessage } from '@shared/backend/types'
 import { CheckIcon, CopyIcon } from 'lucide-vue-next'
@@ -147,6 +159,7 @@ import { computed, ref } from 'vue'
 import { getBlockRenderer } from '../blocks/registry'
 
 import CompactHistoryEntry from './CompactHistoryEntry.vue'
+import InterruptedHistoryEntry from './InterruptedHistoryEntry.vue'
 
 type TextBlock = ReasoningContentBlock
 
@@ -192,6 +205,21 @@ const compactSummary = computed(() => {
   const texts = blocks.value.filter((block): block is TextContentBlock => block.type === 'text')
   return texts[1]?.text
 })
+
+/**
+ * 检测这条消息是否是历史回放的中断 sentinel——Claude SDK 写入 transcript 的
+ * `[Request interrupted by user]` / `[Request interrupted by user for tool use]`。
+ * history-mapping 把它构造成 role:'user' + 首个 text block 文本 = 原文。
+ * 命中时 UI 不渲染用户气泡，交给 InterruptedHistoryEntry 用居中胶囊样式渲染。
+ */
+const interruptMatch = computed(() => {
+  if (props.message.role !== 'user') return null
+  const first = blocks.value.find((block) => block.type === 'text')
+  if (first?.type !== 'text') return null
+  return matchInterruptMarker(first.text)
+})
+const isInterruptedEntry = computed(() => interruptMatch.value !== null)
+const interruptVariant = computed(() => interruptMatch.value?.variant ?? 'user')
 
 /**
  * reasoning 块（kind==='reasoning'）。

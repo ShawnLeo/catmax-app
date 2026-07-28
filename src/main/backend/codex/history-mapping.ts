@@ -26,6 +26,7 @@ import type { CodexActivityContentBlock, CodexUserInputContentBlock } from '@sha
 import { contextBlocks as createContextBlocks } from '@shared/backend/blocks'
 import { sharedContextTagExtractors } from '@shared/backend/context-tag-handlers'
 import { extractContextTags } from '@shared/backend/context-tags'
+import { matchInterruptMarker } from '@shared/backend/interrupt-marker'
 import type { CodexItem } from '@shared/backend/schema'
 import type { NormalizedMessage, ToolOutput } from '@shared/backend/types'
 
@@ -137,6 +138,19 @@ function mapItemToMessage(
     case 'user_message': {
       const content = (item as unknown as UserMessageItem).content
       const userContent = extractCodexUserContent(content, itemId)
+      // 防御性识别中断 sentinel（Claude SDK 写入的 `[Request interrupted by user]` 等）。
+      // codex rollout 实际不会产生这种文本，但命中时保留原文构造标记消息——
+      // renderer 会用特殊胶囊样式渲染，绕过 user 气泡布局（与 claude 路径一致）。
+      if (matchInterruptMarker(userContent.text)) {
+        return {
+          id: itemId,
+          role: 'user',
+          turnId,
+          blocks: [{ id: `${itemId}-text`, type: 'text', text: userContent.text.trim() }],
+          textBlocks: [{ id: `${itemId}-text`, text: userContent.text.trim(), kind: 'text' }],
+          createdAt: 0,
+        }
+      }
       // 提取 context tag（codex 注入的 <environment_context> 等）
       const { text, blocks: contextTags } = extractContextTags(
         userContent.text,

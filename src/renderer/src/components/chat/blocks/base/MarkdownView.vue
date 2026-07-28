@@ -210,9 +210,9 @@ function markFileReference(element: HTMLElement, reference: string): void {
 }
 
 /* ============ 段落 / 首尾间距归零 ============ */
-/* 段落间距压到最小（4px）——聊天回复的多段文字应紧凑成流，不要每段都呼吸 */
+/* 段落间距 8px——聊天多段文字紧凑成流，又留出可分辨的呼吸（与 codex 版一致）。 */
 .markdown-body :deep(p) {
-  @apply my-1;
+  @apply my-2;
 }
 
 .markdown-body :deep(:first-child) {
