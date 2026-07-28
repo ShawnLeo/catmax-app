@@ -1,39 +1,203 @@
-# Repository Guidelines
+# AGENTS.md
 
-## Project Structure & Module Organization
+This file provides guidance to AI coding agents when working with code in this repository.
 
-This Electron + Vue 3 desktop application is organized by process boundary:
+## Essential Development Commands
 
-- `src/main/`: Electron main process, backends, IPC handlers, and services.
-- `src/preload/`: typed renderer bridge.
-- `src/renderer/src/`: Vue views, components, stores, styles, and assets.
-- `src/shared/`: cross-process types, constants, and IPC contracts.
-- `tests/`: Vitest suites; `resources/` and `build/`: packaging assets.
-- `docs/`: architecture notes; `poc/`: standalone experiments.
+```bash
+# Core development
+pnpm dev              # Start dev server (HMR + Electron); auto-runs rebuild:native first
+pnpm build            # Production build (outputs to out/)
+pnpm typecheck        # tsc for main/preload/shared (tsconfig.node.json) + vue-tsc for renderer (tsconfig.web.json)
+pnpm lint             # ESLint check
+pnpm lint:fix         # ESLint auto-fix
+pnpm format           # Prettier formatting
 
-Keep renderer code browser-safe: do not import Electron, Node APIs, `src/main`, or `src/preload`. Use typed `window.api` IPC. Normalize backend-specific protocols under `src/main/backend/<backend>/` before data reaches the UI.
+# Testing (IMPORTANT: dual ABI handling required)
+pnpm rebuild:node     # Rebuild native modules for Node — REQUIRED before running tests
+pnpm test             # Run all tests (vitest, ~47 files under tests/**/*.test.ts and src/**/*.test.ts)
+pnpm test:watch       # Watch mode
 
-## Build, Test, and Development Commands
+# Run a single test file / single test
+pnpm rebuild:node && npx vitest run tests/backend/turn/per-turn-coordinator.test.ts
+pnpm rebuild:node && npx vitest run -t "test name substring"
 
-- `pnpm install`: install dependencies (Node 20.19+, pnpm 10).
-- `pnpm dev`: rebuild native modules for Electron and launch development mode with HMR.
-- `pnpm build`: create the production build in `out/`.
-- `pnpm typecheck`: check both main/preload and renderer TypeScript projects.
-- `pnpm lint` / `pnpm lint:fix`: report or fix ESLint issues.
-- `pnpm format`: format source files with Prettier.
-- `pnpm rebuild:node && pnpm test`: rebuild native modules, then run Vitest.
-- `pnpm dist:mac` or `pnpm dist:win`: build platform installers.
+# Native modules for Electron (auto-run by dev/build, not needed manually)
+pnpm rebuild:native   # Rebuild better-sqlite3 + node-pty for Electron ABI
 
-## Coding Style & Naming Conventions
+# Packaging
+pnpm dist:mac         # macOS dmg (arm64 + x64)
+pnpm dist:win         # Windows nsis installer
+```
 
-Prettier enforces two spaces, single quotes, no semicolons, trailing commas, 100-character lines, and LF endings. ESLint enforces grouped, alphabetized imports and type-only imports. Use `PascalCase.vue` for components, `camelCase` for symbols, and kebab-case for services and utilities (for example, `settings-store.ts`). Prefix intentionally unused parameters with `_`.
+**Critical**: Always run `pnpm rebuild:node` before running tests. `better-sqlite3` and `node-pty` are native modules; Electron and Node use different V8/ABI versions, so the same modules must be recompiled when switching between running the app (Electron ABI) and running vitest (Node ABI). Forgetting this produces native binding errors, not test failures.
 
-Comment architectural boundaries and non-obvious state, security, compatibility, or fallback logic. Use searchable feature labels such as `// File Preview Tabs: ...` or `<!-- File Tree Body: ... -->`. Explain intent and invariants, not syntax; update stale comments with the code.
+## Architecture Overview
 
-## Testing Guidelines
+### Three-Layer Process Model
 
-Vitest uses `happy-dom` and discovers `tests/**/*.test.ts` and `src/**/*.test.ts`. Name tests after the unit, such as `git-service.test.ts`. Cover service logic, IPC changes, protocol mapping, and errors. No threshold is configured; maintain or improve relevant coverage.
+```
+┌─────────────────────────────────────────────────────────────┐
+│ Layer 1: RENDERER  (Vue3 + Pinia + Tailwind v4)              │
+│   Zero business logic — all side-effects via IPC             │
+└──────────────────────────┬────────────────────────────────────┘
+                           │ Typed IPC (window.api.*)
+                           ▼
+┌─────────────────────────────────────────────────────────────┐
+│ Layer 2: MAIN  (Node.js + Electron)                          │
+│   BackendManager + PerTurnCoordinator + plugin-based adapters│
+│   + IPC handlers + services (db/git/pty/settings/...)        │
+└──────────────────────────┬────────────────────────────────────┘
+                           │ spawn/SDK + newline-delimited JSON
+                           ▼
+┌─────────────────────────────────────────────────────────────┐
+│ Layer 3: BACKEND  (codex app-server JSON-RPC / claude via    │
+│   @anthropic-ai/claude-agent-sdk)                             │
+└─────────────────────────────────────────────────────────────┘
+```
 
-## Commit & Pull Request Guidelines
+### Key Architectural Principles
 
-Use Conventional Commits: `feat(chat): ...`, `fix(backend): ...`, `refactor: ...`, or `chore(lint): ...`. Keep commits focused. PRs should explain the change, tests, and architectural impact; link issues and include screenshots for UI changes. Before review, run `pnpm typecheck`, `pnpm lint`, and relevant tests.
+**1. Backend Plugin System (not just a bare adapter interface)**
+
+Backends are registered as `MainBackendPlugin`s, not just `AgentBackend` instances:
+
+```ts
+interface MainBackendPlugin {
+  manifest: BackendPluginManifest        // id, displayName, version, blockTypes[], capabilities
+  createAdapter: (context: BackendPluginContext) => AgentBackend
+  applySettings?: (adapter: AgentBackend, settings: AppSettings) => void
+}
+```
+
+- `src/main/backend/builtin-plugins.ts` registers the two built-in plugins (`codex`, `claude`) via `src/main/backend/plugin-loader.ts` (`registerMainBackendPlugins`), which is the composition root run before `BackendManager` is constructed. `plugin-registry.ts` validates each manifest (`src/shared/backend/plugin.ts`) and holds the registry.
+- `BackendManager` (`src/main/backend/manager.ts`, singleton on `ctx`) iterates registered plugins, calls `plugin.createAdapter(context)`, and enforces at construction time that (a) `adapter.id === plugin.manifest.id`, and (b) every block type the live adapter's `capabilities.chat.blockTypes` reports is a subset of `plugin.manifest.blockTypes` — a plugin can never emit an undeclared block type. The renderer mirrors this with a non-throwing warning (`registerRendererBackendBlocks` in `src/renderer/src/components/chat/blocks/plugin-registry.ts`).
+- `BackendPluginContext.onBackendThreadIdResolved` lets an adapter report "this internal placeholder session id now has a real backend-assigned id" (needed because Claude only learns its real `session_id` after the SDK stream starts); `BackendManager` persists this mapping to sqlite.
+- `applySettings` is how `settings.backendPaths.<id>` (binary path) and `proxySettingsToEnv(settings.httpProxy)` (see `src/main/backend/proxy-env.ts`) get pushed into a live adapter.
+- `src/main/backend/health-check.ts` runs `<binary> --version` to classify backend availability (`not-installed` / `killed-by-os` / `timeout` / `non-zero-exit`) so the UI can explain *why* a backend is unavailable.
+
+**2. Turn Coordination Is Backend-Agnostic (`PerTurnCoordinator`)**
+
+`src/main/backend/turn/per-turn-coordinator.ts` sits between `BackendManager` and every adapter. It does NOT parse any backend protocol; it guarantees things no adapter can be trusted to provide on its own:
+- **Per-session serialization**: turns for the same session queue in a `SessionLane`; different sessions run concurrently.
+- **Idle watchdog**: a turn producing no events for 30 min (`DEFAULT_TURN_IDLE_TIMEOUT_MS`) is force-errored.
+- **Cooperative cancel + grace**: `cancel()` calls the adapter's `interrupt`, then force-synthesizes a terminal `turn_completed(interrupted)` after a 15s grace period if the adapter never cleanly stops.
+- **Checkpointing**: high-frequency delta events are throttled to ~1s persistence; structural events (`turn_started`, `approval_requested`, `error`, `turn_completed`, ...) persist immediately.
+- **Exactly-one terminal event guarantee**: even if an adapter's iterator throws or ends silently, exactly one `turn_completed` always fires.
+- **Startup recovery**: `recoverInterrupted()` force-marks any turn left `queued`/`running`/`cancelling` from a previous process as `interrupted` (the local CLI/SDK process is gone, so it can never be reconnected).
+
+Persistence goes through the narrow `TurnRunRepository` interface (`turn-run-repository.ts`) — `DatabaseTurnRunRepository` (sqlite) in production, `InMemoryTurnRunRepository` for tests — keeping the coordinator decoupled from storage.
+
+**3. Message Content Model: Blocks + Context Tags**
+
+- **Blocks** (`src/shared/backend/blocks/`): `NormalizedMessage.blocks: ContentBlock[]` is the ordered, backend-agnostic message content model, replacing an older `textBlocks`/`toolBlocks`/`contextBlocks` shape (still read for backward compatibility via `normalize-blocks.ts`'s `messageBlocks()`/`upgradeMessageBlocks()`, which never mutate old data). Base types live in `base.ts` (`TextContentBlock`, `ReasoningContentBlock`, `ToolCallContentBlock`, `ContextContentBlock`, `CompactDividerContentBlock`); backend-specific block types are added via TypeScript module augmentation in `codex.ts` (e.g. `PlanContentBlock`, `CodexActivityContentBlock`) and `claude.ts` (currently a stub — Claude reuses base `tool_call` blocks). `index.ts` assembles the `ContentBlockMap`/`BlockType` union that is the source of truth.
+- **Context tags** (`context-tags.ts`, `context-tag-types.ts`, `context-tag-handlers.ts`) are a distinct, narrower concept: IDE-injected markers in raw user text (`<ide_selection>`, `<ide_opened_file>`, `<environment_context>`). `extractContextTags`/`serializeContextTags` are pure functions shared between main (`history-mapping`) and renderer (which wraps them with a richer `ContextTagHandler` in `src/renderer/src/lib/context-tag-registry.ts`) — kept Vue-free so main can import them too.
+- See `docs/superpowers/specs/2026-07-25-chat-block-architecture-design.md` for the full design rationale (status: implemented, compat migration period; more backends like "pi agent"/"grok build" are planned to reuse this same block contract).
+
+**4. Type-Safe IPC**
+- Handler function signatures are the contract; `src/preload/api.ts` derives `window.api.*` from `src/shared/ipc/<domain>.ts` contracts, so changing a handler signature breaks renderer compilation instead of failing silently at runtime.
+- **Never** call `ipcRenderer.invoke` directly in renderer code — always go through `window.api.*`.
+
+**5. Cross-Layer Import Rules (enforced by both ESLint and tsconfig, not just convention)**
+```
+renderer/  →  Can import: shared/, renderer/, browser-safe packages
+              Forbidden (ESLint no-restricted-imports + tsconfig.web.json has no @main/@preload alias):
+              electron, node:*, better-sqlite3, @main/*, @preload/*
+
+main/      →  Can import: shared/, main/, electron, node:*, any package
+              Forbidden: renderer/
+
+preload/   →  Can import: shared/, electron (contextBridge/ipcRenderer only)
+
+shared/    →  Can import: shared/, type-only packages
+              Forbidden: main/, renderer/, preload/, electron, node:*
+```
+The renderer restriction is enforced twice: an ESLint `overrides` block for `src/renderer/**`, and `tsconfig.web.json` simply not defining `@main`/`@preload` path aliases.
+
+**6. BackendManager Singleton**
+- Single instance on `ctx` (`src/main/context.ts`), which also holds `db`, `settingsStore`, and `ptyManager`.
+- Routes backend operations, delegates turn lifecycle to `PerTurnCoordinator`, broadcasts `TurnEvent` over IPC (`backend:turnEvent`).
+- Sessions always belong to their creating backend (immutable).
+
+## Backend Adapters — Not Structurally Identical
+
+Don't assume both adapters have the same file layout:
+
+- **Codex** (`src/main/backend/codex/`): pure hand-rolled JSON-RPC over a long-lived spawned `codex app-server` process. `protocol.ts` is a business-logic-free framing layer (`LineBuffer` for newline-delimited JSON, `parseFrame` with Zod validation that never throws on bad input, request/response/notification encode/decode). `adapter.ts` handshakes (`initialize`), then per-session `thread/start`, per-turn `turn/start` + `item/*` notification subscription, `turn/interrupt`. `mapping.ts` translates Codex `item`s to blocks; `history-mapping.ts` reconstructs history from rollout files.
+- **Claude** (`src/main/backend/claude/`): migrated OFF spawning the `claude` CLI and parsing raw stream-json onto `@anthropic-ai/claude-agent-sdk`. The SDK still spawns a bundled claude binary internally, but exposes a typed `SDKMessage` stream and an in-process `canUseTool` callback for permissions — this eliminated the old ApprovalBridge / Unix socket / separate MCP-server subprocess / temp mcp-config machinery (electron.vite.config.ts's main entry used to have a separate `mcp-server` bundle, since deleted). `interrupt` calls the SDK's `query.interrupt()` directly. `sdk-mapping.ts` reuses most translation logic from `mapping.ts` since `SDKMessage` is structurally isomorphic to the old CLI stream-json shapes, just re-typed. Other files: `ask-user-server.ts` (custom `ask_user` MCP tool for clarifying questions), `background-task-state.ts` (subagent/background task tracking), `jsonl-reader.ts` (reads `~/.claude/projects/**/*.jsonl` for history independent of the live SDK connection).
+
+When adding a new backend: add to `BackendId` (`src/shared/constants.ts`), create a plugin in the style of `builtin-plugins.ts` with a manifest declaring `blockTypes`, implement `AgentBackend`, register it in `plugin-loader.ts`. The renderer needs a matching entry in `src/renderer/src/backend-plugins/index.ts` that registers block-renderer components — a mismatch degrades to `FallbackBlockView`/`BlockErrorView` per block (warning, not a crash) rather than an app-wide failure.
+
+## IPC Domains
+
+8 domains under `src/main/ipc/domains/` (there is **no `credential` domain** — this app does not store API keys/credentials at all; both backends manage their own auth externally, e.g. `codex login` / `claude login`, and catmax-app only persists the CLI binary path and proxy settings):
+
+| Domain | Purpose |
+|---|---|
+| `backend` | Turn lifecycle (start/interrupt/approvals/agent questions), backend status/switch, models, turn-run listing |
+| `session` | Chat session create/resume, runtime config snapshot (model/effort/permissionMode/backend) |
+| `git` | Read-only git status/diff/commit info |
+| `fs` | Filesystem browsing + file preview (text/markdown/table/image/pdf/audio/video/document/archive/binary) |
+| `pty` | Terminal process management (create/write/resize/kill + `pty:data` push) |
+| `settings` | `settings.get` / `update` (patch) / `reset` against the `AppSettings` Zod schema |
+| `system` | Platform info, native dialogs, system HTTP proxy detection |
+| `workspace` | Workspace CRUD, per-workspace default editor |
+
+Each domain: contract in `src/shared/ipc/<domain>.ts`, handlers in `src/main/ipc/domains/<domain>/handlers.ts`, registration in `src/main/ipc/domains/<domain>/index.ts`, aggregated in `src/main/ipc/register.ts`, exposed via `src/preload/api.ts`.
+
+**Adding a new IPC method** (6 steps): 1) contract in `src/shared/ipc/<domain>.ts` → 2) implement in `handlers.ts` → 3) register in domain `index.ts` → 4) aggregate in `register.ts` → 5) expose in `src/preload/api.ts` → 6) use via `window.api.<domain>.<method>()`.
+
+## Renderer Structure Notes
+
+- **Stores** (`src/renderer/src/stores/`, Pinia): `message.ts` (~29KB, the core chat/turn state machine) and `files.ts` (~17KB, file tree/preview state) are the largest and most central. Also: `backend`, `session`, `settings`, `workspace`, `git`, `terminal`, `ui`, `chat-input`, `image-preview`.
+- **Composables**: `useTheme`, `useStreamMessage`, `useShortcut`.
+- **`components/chat/blocks/`**: mirrors the shared block-type contract — `base/`, `codex/`, `claude/` subfolders plus `registry.ts` (renderer block-type → component map, with `getBlockRenderer` falling back gracefully) and `plugin-registry.ts` (validates renderer registrations against each backend plugin's manifest, warns on gaps).
+- **`lib/context-tag-registry.ts`** / **`lib/context-tag-handlers.ts`**: renderer-side wrapper around the shared context-tag extractors, adding a `component` field for rendering.
+
+## Theme System
+
+Three-layer token architecture (`src/renderer/src/assets/styles/themes.css`):
+- Layer 1: raw tokens — OKLCH color primitives (neutral gray scale + a small number of intentional accent colors, e.g. purple reserved solely for "max effort" emphasis, blue reserved solely for unread-activity indicators — kept semantically distinct from success/danger green/red)
+- Layer 2: semantic tokens (`--background`, `--foreground`, etc.) — components may ONLY reference this layer
+- Layer 3: component tokens (optional, for specific component needs)
+
+Switching themes = changing `<html data-theme="dark|light|system|...">`; CSS variables recalculate automatically, no component code changes needed (`src/renderer/src/composables/useTheme.ts`).
+
+## Native Module Handling
+
+`better-sqlite3` and `node-pty` require native compilation, and Electron/Node use different V8 versions:
+- `pnpm rebuild:native` — for Electron (auto-run before dev/build)
+- `pnpm rebuild:node` — for Node/vitest (run manually before `pnpm test`)
+
+## Testing
+
+- Vitest, `happy-dom` environment, discovers `tests/**/*.test.ts` and `src/**/*.test.ts` (both locations are intentional — co-located tests live alongside stores/lib in `src/renderer/src/`, everything else lives under `tests/{backend,renderer,shared,ipc,service}/`).
+- Tests mock spawned subprocesses/SDK calls — no real CLI dependency needed to run the suite.
+- Always `pnpm rebuild:node` first (see Native Module Handling above).
+- Path aliases (`@shared`, `@main`, `@renderer`) are declared separately in both `electron.vite.config.ts` and `vitest.config.ts` — keep them in sync manually if adding new aliases.
+
+## Coding Conventions
+
+- Prettier: no semicolons, single quotes, trailing commas, 100-char lines, LF.
+- ESLint: grouped + alphabetized imports, type-only imports written inline (`import { type Foo, bar }`), `PascalCase.vue` components, kebab-case service/util filenames (e.g. `settings-store.ts`), `_`-prefixed unused params/vars allowed.
+- Comment architectural boundaries and non-obvious state/security/compatibility/fallback logic with searchable feature labels, e.g. `// File Preview Tabs: ...` or `<!-- File Tree Body: ... -->`. Explain intent/invariants, not syntax; keep comments in sync with the code.
+- Commits: Conventional Commits (`feat(chat): ...`, `fix(backend): ...`, `refactor: ...`, `chore(lint): ...`), one focused change per commit.
+- Before requesting review: `pnpm typecheck`, `pnpm lint`, and relevant tests should pass.
+- `Zod` is only for validating untrusted input at boundaries (subprocess messages, disk JSON, HTTP responses) — not for IPC parameters, where TS types already suffice.
+- Time values use Unix milliseconds; IDs use UUID v4.
+
+## Important Files to Reference
+
+- `src/shared/backend/types.ts` — `AgentBackend` interface, `TurnEvent`, `NormalizedMessage`
+- `src/shared/backend/plugin.ts` — `MainBackendPlugin`/manifest types and validation
+- `src/main/backend/manager.ts` — `BackendManager` singleton, plugin/adapter wiring
+- `src/main/backend/turn/per-turn-coordinator.ts` — turn queueing/watchdog/cancel/recovery
+- `src/main/ipc/typed.ts` — type-safe IPC foundation
+- `src/shared/constants.ts` — IPC channels, storage keys, backend IDs
+- `src/shared/settings-schema.ts` — `AppSettings` Zod schema
+
+## Design Docs
+
+- `docs/superpowers/specs/2026-07-18-catmax-app-design.md` — original architecture design (process model, adapter abstraction, typed IPC).
+- `docs/superpowers/specs/2026-07-25-chat-block-architecture-design.md` — the block/content-model design described above.
+- `docs/superpowers/plans/plan-{1..5}-*[-smoke-test].md` — the phased implementation plan the app was originally built from (foundation → backend/chat → claude/sidebar → git/files/editor → terminal/cmdk → history/packaging/shortcuts).
