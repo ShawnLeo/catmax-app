@@ -176,7 +176,18 @@ import { computed, onMounted, ref } from 'vue'
 
 const settings = useSettingsStore()
 const backendStore = useBackendStore()
-const backendIds = computed(() => backendStore.statuses.map((status) => status.id))
+// 默认后端选择器的展示顺序——claude 在前、codex 在后，未列出的后端按原顺序排在最后
+const BACKEND_DISPLAY_ORDER: BackendId[] = ['claude', 'codex']
+const backendIds = computed(() =>
+  [...backendStore.statuses]
+    .sort((a, b) => displayRank(a.id) - displayRank(b.id))
+    .map((status) => status.id),
+)
+
+function displayRank(id: BackendId): number {
+  const index = BACKEND_DISPLAY_ORDER.indexOf(id)
+  return index === -1 ? BACKEND_DISPLAY_ORDER.length : index
+}
 
 const defaultBackend = computed(() => settings.settings?.defaultBackend ?? 'codex')
 
