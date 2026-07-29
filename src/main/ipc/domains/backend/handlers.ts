@@ -1,9 +1,20 @@
+import { existsSync, mkdirSync } from 'node:fs'
+import { dirname } from 'node:path'
+
 import { ctx } from '@main/context'
+import {
+  listBackendConfigFiles as listConfigFiles,
+  readBackendConfigFile as readConfigFile,
+  resolveBackendConfigPath as resolveConfigPath,
+  validateBackendConfigContent as validateConfigContent,
+  writeBackendConfigFile as writeConfigFile,
+} from '@main/service/backend-config-files'
 import {
   cancelBackendInstall as cancelInstall,
   installBackend as runBackendInstall,
 } from '@main/service/backend-installer'
 import { logger } from '@main/service/logger'
+import { getBackendConfigFileDescriptor } from '@shared/backend/config-files'
 import type { BackendInstallResult } from '@shared/backend/install'
 import type {
   AgentAnswer,
@@ -13,6 +24,7 @@ import type {
 } from '@shared/backend/types'
 import { PUSH, type BackendId } from '@shared/constants'
 import type { CoordinatedStartTurnArgs } from '@shared/ipc/backend'
+import { shell } from 'electron'
 
 const log = logger.domain('backend-handler')
 
@@ -113,4 +125,42 @@ export const installBackend = async (args: { id: BackendId }): Promise<BackendIn
 
 export const cancelBackendInstall = async (args: { id: BackendId }) => {
   cancelInstall(args.id)
+}
+
+// Backend Config Files: 直接编辑后端自己的本地配置文件。
+// 全部按稳定 id 查表解析路径——renderer 传不进任意路径（见 service/backend-config-files.ts 顶部注释）。
+
+export const listBackendConfigFiles = async () => {
+  return listConfigFiles()
+}
+
+export const readBackendConfigFile = async (args: { id: string }) => {
+  return readConfigFile(args.id)
+}
+
+export const writeBackendConfigFile = async (args: {
+  id: string
+  content: string
+  expectedMtimeMs: number | null
+  force?: boolean
+}) => {
+  return writeConfigFile(args)
+}
+
+export const validateBackendConfigFile = async (args: { id: string; content: string }) => {
+  return validateConfigContent(args.id, args.content)
+}
+
+export const revealBackendConfigFile = async (args: { id: string }) => {
+  const descriptor = getBackendConfigFileDescriptor(args.id)
+  if (!descriptor) throw new Error(`未知的后端配置文件 id: ${args.id}`)
+  const filePath = resolveConfigPath(descriptor)
+  // 文件还没创建时 showItemInFolder 会 no-op，退化成打开所在目录
+  if (existsSync(filePath)) {
+    shell.showItemInFolder(filePath)
+    return
+  }
+  const dir = dirname(filePath)
+  mkdirSync(dir, { recursive: true, mode: 0o700 })
+  await shell.openPath(dir)
 }

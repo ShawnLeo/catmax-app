@@ -130,11 +130,11 @@ When adding a new backend: add to `BackendId` (`src/shared/constants.ts`), creat
 
 ## IPC Domains
 
-8 domains under `src/main/ipc/domains/` (there is **no `credential` domain** — this app does not store API keys/credentials at all; both backends manage their own auth externally, e.g. `codex login` / `claude login`, and catmax-app only persists the CLI binary path and proxy settings):
+8 domains under `src/main/ipc/domains/` (there is **no `credential` domain** — this app does not store API keys/credentials at all; both backends manage their own auth externally, e.g. `codex login` / `claude login`, and catmax-app only persists the CLI binary path and proxy settings. The `backend.*ConfigFile` handlers let the settings page *edit* the backends' own config files in place — including `~/.codex/auth.json` — but nothing is copied into catmax's own storage, so the "no stored credentials" invariant holds):
 
 | Domain | Purpose |
 |---|---|
-| `backend` | Turn lifecycle (start/interrupt/approvals/agent questions), backend status/switch, models, turn-run listing |
+| `backend` | Turn lifecycle (start/interrupt/approvals/agent questions), backend status/switch, models, turn-run listing, one-click install, and direct editing of the backends' own local config files (`src/shared/backend/config-files.ts` whitelist → `src/main/service/backend-config-files.ts`) |
 | `session` | Chat session create/resume, runtime config snapshot (model/effort/permissionMode/backend) |
 | `git` | Read-only git status/diff/commit info |
 | `fs` | Filesystem browsing + file preview (text/markdown/table/image/pdf/audio/video/document/archive/binary) |

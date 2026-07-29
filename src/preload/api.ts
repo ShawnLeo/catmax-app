@@ -77,6 +77,22 @@ export const api = {
     cancelInstall: requestMain<BackendHandlers, 'backend.cancelInstall'>(
       IPC.BACKEND_CANCEL_INSTALL,
     ),
+    // Backend Config Files: 直接编辑 ~/.codex/config.toml 等后端自己的配置文件
+    listConfigFiles: requestMain<BackendHandlers, 'backend.listConfigFiles'>(
+      IPC.BACKEND_LIST_CONFIG_FILES,
+    ),
+    readConfigFile: requestMain<BackendHandlers, 'backend.readConfigFile'>(
+      IPC.BACKEND_READ_CONFIG_FILE,
+    ),
+    writeConfigFile: requestMain<BackendHandlers, 'backend.writeConfigFile'>(
+      IPC.BACKEND_WRITE_CONFIG_FILE,
+    ),
+    validateConfigFile: requestMain<BackendHandlers, 'backend.validateConfigFile'>(
+      IPC.BACKEND_VALIDATE_CONFIG_FILE,
+    ),
+    revealConfigFile: requestMain<BackendHandlers, 'backend.revealConfigFile'>(
+      IPC.BACKEND_REVEAL_CONFIG_FILE,
+    ),
     /** 订阅 turnEvent 推送 */
     onTurnEvent: (cb: (payload: BackendPushEvents['backend:turnEvent']) => void) =>
       subscribeToMainEvent<BackendPushEvents, 'backend:turnEvent'>(PUSH.BACKEND_TURN_EVENT, cb),

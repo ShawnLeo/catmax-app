@@ -2,6 +2,12 @@
  * backend domain IPC 契约。
  * 函数签名即契约——main 实现，renderer 通过 window.api 调用。
  */
+import type {
+  BackendConfigFileContent,
+  BackendConfigFileInfo,
+  BackendConfigWriteResult,
+  ConfigSyntaxResult,
+} from '../backend/config-files'
 import type { BackendInstallProgress, BackendInstallResult } from '../backend/install'
 import type {
   AgentAnswer,
@@ -60,6 +66,31 @@ export type BackendHandlers = {
   'backend.install': (args: { id: BackendId }) => Promise<BackendInstallResult>
   /** 取消进行中的安装；没有进行中的安装时是 no-op */
   'backend.cancelInstall': (args: { id: BackendId }) => Promise<void>
+  /**
+   * Backend Config Files: 直接读写后端自己的本地配置文件（~/.codex/config.toml 等）。
+   *
+   * `id` 只能是 `BACKEND_CONFIG_FILES` 里的稳定 id——路径由主进程查表算出，
+   * renderer 传不进任意路径，这条 IPC 不是通用文件读写通道。
+   */
+  'backend.listConfigFiles': () => Promise<BackendConfigFileInfo[]>
+  'backend.readConfigFile': (args: { id: string }) => Promise<BackendConfigFileContent>
+  /**
+   * 写回。`expectedMtimeMs` 是读到内容时的 mtime（当时不存在则为 null），
+   * 与磁盘不符时返回 conflict 而不是覆盖；`force` 是用户在冲突提示里选"仍然覆盖"。
+   */
+  'backend.writeConfigFile': (args: {
+    id: string
+    content: string
+    expectedMtimeMs: number | null
+    force?: boolean
+  }) => Promise<BackendConfigWriteResult>
+  /** 编辑过程中的实时语法校验（不写盘）——保存时主进程还会再校验一次 */
+  'backend.validateConfigFile': (args: {
+    id: string
+    content: string
+  }) => Promise<ConfigSyntaxResult>
+  /** 在系统文件管理器里定位该文件；文件不存在时打开其所在目录 */
+  'backend.revealConfigFile': (args: { id: string }) => Promise<void>
 }
 
 /** 主→渲染推送事件类型 */

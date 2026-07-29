@@ -55,6 +55,12 @@ export const IPC = {
   // Backend Install: 下载官方产物到 userData 并写回 backendPaths
   BACKEND_INSTALL: 'backend.install',
   BACKEND_CANCEL_INSTALL: 'backend.cancelInstall',
+  // Backend Config Files: 直接编辑后端自己的本地配置文件（~/.codex/config.toml 等）
+  BACKEND_LIST_CONFIG_FILES: 'backend.listConfigFiles',
+  BACKEND_READ_CONFIG_FILE: 'backend.readConfigFile',
+  BACKEND_WRITE_CONFIG_FILE: 'backend.writeConfigFile',
+  BACKEND_VALIDATE_CONFIG_FILE: 'backend.validateConfigFile',
+  BACKEND_REVEAL_CONFIG_FILE: 'backend.revealConfigFile',
   // session
   SESSION_LIST: 'session.list',
   SESSION_CREATE: 'session.create',

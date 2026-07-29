@@ -1,6 +1,4 @@
-import { readFileSync } from 'node:fs'
-import { join, dirname } from 'node:path'
-import { fileURLToPath } from 'node:url'
+import { join } from 'node:path'
 
 import type { BackendId } from '@shared/constants'
 import type {
@@ -14,10 +12,9 @@ import Database from 'better-sqlite3'
 import { app } from 'electron'
 
 import { logger } from './logger'
+import schemaSql from './schema.sql?raw'
 
 const log = logger.domain('database')
-
-const __dirname = dirname(fileURLToPath(import.meta.url))
 
 interface WorkspaceRow {
   id: string
@@ -60,15 +57,11 @@ export class DatabaseService {
   }
 
   migrate(): void {
-    // 在测试环境，schema.sql 路径解析不同。允许传入 SQL 字符串。
-    let schema: string
-    try {
-      schema = readFileSync(join(__dirname, 'schema.sql'), 'utf-8')
-    } catch {
-      // dev 模式 fallback：从源码读
-      schema = readFileSync(join(process.cwd(), 'src/main/service/schema.sql'), 'utf-8')
-    }
-    this.db.exec(schema)
+    // schema 由 Vite 在构建期内联成字符串（见 src/main/env.d.ts）。
+    // 不能改回运行时读盘：打包后 out/main/ 只有 index.js，schema.sql 不在 asar 里，
+    // 而按 process.cwd() 找源码的兜底只在"从项目根目录启动"时才碰巧成立，
+    // 从 Finder/Dock 启动时 cwd 是 /，迁移必然失败且窗口永远不显示。
+    this.db.exec(schemaSql)
     log.info('migrated')
   }
 

@@ -95,6 +95,13 @@
 
     <div class="h-px bg-sidebar-border my-1" />
 
+    <!-- Backend Config Files: 后端自己的配置文件（~/.codex/config.toml 等），
+         和上面 catmax 自己的「默认运行时配置」是两套东西，所以单独成节；
+         但同样跟着「默认后端」走，只显示当前默认后端的文件。 -->
+    <BackendConfigFilesSection :backend-id="defaultBackend" />
+
+    <div class="h-px bg-sidebar-border my-1" />
+
     <header>
       <h2 class="text-lg font-semibold text-foreground">后端 CLI 路径</h2>
       <p class="text-sm text-muted-foreground">
@@ -173,6 +180,7 @@
 
 <script setup lang="ts">
 import BackendIcon from '@renderer/components/icons/BackendIcon.vue'
+import BackendConfigFilesSection from '@renderer/components/settings/BackendConfigFilesSection.vue'
 import BackendInstallCard from '@renderer/components/settings/BackendInstallCard.vue'
 import { Button } from '@renderer/components/ui/button'
 import { DropdownMenu, type DropdownOption } from '@renderer/components/ui/dropdown-menu'

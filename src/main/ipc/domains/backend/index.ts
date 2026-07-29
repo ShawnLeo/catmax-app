@@ -7,18 +7,23 @@ import {
   getCurrentBackend,
   installBackend,
   interruptTurn,
+  listBackendConfigFiles,
   listBackends,
   listModels,
   listModelsFor,
   listTurnRuns,
+  readBackendConfigFile,
   refreshModels,
   respondApproval,
   respondQuestion,
+  revealBackendConfigFile,
   startTurn,
   steerTurn,
   switchBackend,
   updateTurnConfig,
+  validateBackendConfigFile,
   warmupBackend,
+  writeBackendConfigFile,
 } from './handlers'
 
 export function registerBackendHandlers(): void {
@@ -61,6 +66,26 @@ export function registerBackendHandlers(): void {
   handleRendererRequest<BackendHandlers, 'backend.cancelInstall'>(
     'backend.cancelInstall',
     cancelBackendInstall,
+  )
+  handleRendererRequest<BackendHandlers, 'backend.listConfigFiles'>(
+    'backend.listConfigFiles',
+    listBackendConfigFiles,
+  )
+  handleRendererRequest<BackendHandlers, 'backend.readConfigFile'>(
+    'backend.readConfigFile',
+    readBackendConfigFile,
+  )
+  handleRendererRequest<BackendHandlers, 'backend.writeConfigFile'>(
+    'backend.writeConfigFile',
+    writeBackendConfigFile,
+  )
+  handleRendererRequest<BackendHandlers, 'backend.validateConfigFile'>(
+    'backend.validateConfigFile',
+    validateBackendConfigFile,
+  )
+  handleRendererRequest<BackendHandlers, 'backend.revealConfigFile'>(
+    'backend.revealConfigFile',
+    revealBackendConfigFile,
   )
 }
 
