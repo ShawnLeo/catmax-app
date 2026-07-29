@@ -3,7 +3,9 @@ import type { BackendHandlers } from '@shared/ipc/backend'
 import { handleRendererRequest } from '../../typed'
 
 import {
+  cancelBackendInstall,
   getCurrentBackend,
+  installBackend,
   interruptTurn,
   listBackends,
   listModels,
@@ -54,6 +56,11 @@ export function registerBackendHandlers(): void {
   handleRendererRequest<BackendHandlers, 'backend.updateTurnConfig'>(
     'backend.updateTurnConfig',
     updateTurnConfig,
+  )
+  handleRendererRequest<BackendHandlers, 'backend.install'>('backend.install', installBackend)
+  handleRendererRequest<BackendHandlers, 'backend.cancelInstall'>(
+    'backend.cancelInstall',
+    cancelBackendInstall,
   )
 }
 

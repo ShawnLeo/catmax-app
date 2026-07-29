@@ -2,6 +2,7 @@
  * backend domain IPC 契约。
  * 函数签名即契约——main 实现，renderer 通过 window.api 调用。
  */
+import type { BackendInstallProgress, BackendInstallResult } from '../backend/install'
 import type {
   AgentAnswer,
   ApprovalDecision,
@@ -51,6 +52,14 @@ export type BackendHandlers = {
   }) => Promise<void>
   /** 运行中热切换 model/effort/permissionMode（仅 supportsHotSwap 的 backend） */
   'backend.updateTurnConfig': (args: { turnId: string; config: TurnConfigUpdate }) => Promise<void>
+  /**
+   * Backend Install: 下载并安装后端 CLI（目前只有 codex）。
+   * 整个过程可能几分钟（tarball ~100MB），进度走 `backend:installProgress` 推送。
+   * 成功时会把二进制路径写进 settings.backendPaths 并热应用到 adapter。
+   */
+  'backend.install': (args: { id: BackendId }) => Promise<BackendInstallResult>
+  /** 取消进行中的安装；没有进行中的安装时是 no-op */
+  'backend.cancelInstall': (args: { id: BackendId }) => Promise<void>
 }
 
 /** 主→渲染推送事件类型 */
@@ -62,4 +71,6 @@ export type BackendPushEvents = {
   'backend:turnEvent': { turnId: string; sessionId: string; event: TurnEvent }
   'backend:switched': { id: BackendId }
   'backend:statusChanged': { status: BackendStatus }
+  /** Backend Install: 安装进度（含终态 done/error/cancelled） */
+  'backend:installProgress': BackendInstallProgress
 }

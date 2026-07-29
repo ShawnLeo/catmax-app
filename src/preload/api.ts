@@ -73,6 +73,10 @@ export const api = {
     updateTurnConfig: requestMain<BackendHandlers, 'backend.updateTurnConfig'>(
       IPC.BACKEND_UPDATE_TURN_CONFIG,
     ),
+    install: requestMain<BackendHandlers, 'backend.install'>(IPC.BACKEND_INSTALL),
+    cancelInstall: requestMain<BackendHandlers, 'backend.cancelInstall'>(
+      IPC.BACKEND_CANCEL_INSTALL,
+    ),
     /** 订阅 turnEvent 推送 */
     onTurnEvent: (cb: (payload: BackendPushEvents['backend:turnEvent']) => void) =>
       subscribeToMainEvent<BackendPushEvents, 'backend:turnEvent'>(PUSH.BACKEND_TURN_EVENT, cb),
@@ -81,6 +85,12 @@ export const api = {
     onStatusChanged: (cb: (payload: BackendPushEvents['backend:statusChanged']) => void) =>
       subscribeToMainEvent<BackendPushEvents, 'backend:statusChanged'>(
         PUSH.BACKEND_STATUS_CHANGED,
+        cb,
+      ),
+    /** Backend Install: 订阅安装进度（下载字节数 / 阶段 / 终态） */
+    onInstallProgress: (cb: (payload: BackendPushEvents['backend:installProgress']) => void) =>
+      subscribeToMainEvent<BackendPushEvents, 'backend:installProgress'>(
+        PUSH.BACKEND_INSTALL_PROGRESS,
         cb,
       ),
   },

@@ -1,3 +1,4 @@
+import type { BackendInstallProgress, BackendInstallResult } from '@shared/backend/install'
 import type { BackendStatus, ModelOption } from '@shared/backend/types'
 import { BACKEND_IDS, type BackendId } from '@shared/constants'
 import { defineStore } from 'pinia'
@@ -66,6 +67,76 @@ export const useBackendStore = defineStore('backend', () => {
     models.value = await window.api.backend.refreshModels()
   }
 
+  // ============ Backend Install ============
+
+  /** 按 backend 记的安装进度。null = 从没装过 / 已经消掉。 */
+  const installProgress = ref<Record<BackendId, BackendInstallProgress | null>>({})
+  let unsubscribeInstall: (() => void) | null = null
+
+  /**
+   * 订阅安装进度推送。幂等——设置页每次挂载都会调，重复调不会叠加订阅。
+   * 不放在 store 顶层是因为 store 可能在 window.api 就绪前被创建。
+   */
+  function ensureInstallSubscription(): void {
+    if (unsubscribeInstall) return
+    unsubscribeInstall = window.api.backend.onInstallProgress((progress) => {
+      installProgress.value = { ...installProgress.value, [progress.backendId]: progress }
+    })
+  }
+
+  function isInstalling(id: BackendId): boolean {
+    const phase = installProgress.value[id]?.phase
+    return phase !== undefined && !['done', 'error', 'cancelled'].includes(phase)
+  }
+
+  /**
+   * 一键安装某个 backend。主进程负责下载/校验/解压并写回 settings，
+   * 这里只负责先建好订阅（否则会漏掉最早的几个进度事件）、装完刷状态。
+   */
+  async function install(id: BackendId): Promise<BackendInstallResult> {
+    ensureInstallSubscription()
+    // 乐观置一个 resolving，让按钮立刻进入"安装中"，不用等第一个推送
+    installProgress.value = {
+      ...installProgress.value,
+      [id]: {
+        backendId: id,
+        phase: 'resolving',
+        receivedBytes: 0,
+        totalBytes: null,
+        version: null,
+        error: null,
+      },
+    }
+    const result = await window.api.backend.install({ id })
+    // 主进程的守卫分支（比如"已有安装在进行中"）直接返回，不会推终态进度事件——
+    // 不按返回值兜底的话卡片会永远停在"安装中"。
+    if (isInstalling(id)) {
+      installProgress.value = {
+        ...installProgress.value,
+        [id]: {
+          backendId: id,
+          phase: result.cancelled ? 'cancelled' : result.ok ? 'done' : 'error',
+          receivedBytes: 0,
+          totalBytes: null,
+          version: result.version ?? null,
+          error: result.error ?? null,
+        },
+      }
+    }
+    // 装成功后 statuses 里的 available/error 变了，重拉一次让 UI 收起安装卡片
+    await refresh()
+    return result
+  }
+
+  async function cancelInstall(id: BackendId): Promise<void> {
+    await window.api.backend.cancelInstall({ id })
+  }
+
+  /** 关掉安装卡片上残留的成功/失败提示 */
+  function clearInstallProgress(id: BackendId): void {
+    installProgress.value = { ...installProgress.value, [id]: null }
+  }
+
   return {
     statuses,
     currentId,
@@ -80,5 +151,11 @@ export const useBackendStore = defineStore('backend', () => {
     loadModelsFor,
     loadAllBackendModels,
     refreshModels,
+    installProgress,
+    ensureInstallSubscription,
+    isInstalling,
+    install,
+    cancelInstall,
+    clearInstallProgress,
   }
 })

@@ -52,6 +52,9 @@ export const IPC = {
   BACKEND_RESPOND_APPROVAL: 'backend.respondApproval',
   BACKEND_RESPOND_QUESTION: 'backend.respondQuestion',
   BACKEND_UPDATE_TURN_CONFIG: 'backend.updateTurnConfig',
+  // Backend Install: 下载官方产物到 userData 并写回 backendPaths
+  BACKEND_INSTALL: 'backend.install',
+  BACKEND_CANCEL_INSTALL: 'backend.cancelInstall',
   // session
   SESSION_LIST: 'session.list',
   SESSION_CREATE: 'session.create',
@@ -85,6 +88,8 @@ export const PUSH = {
   BACKEND_TURN_EVENT: 'backend:turnEvent',
   BACKEND_SWITCHED: 'backend:switched',
   BACKEND_STATUS_CHANGED: 'backend:statusChanged',
+  /** Backend Install: 下载/解压进度，设置页的安装卡片消费 */
+  BACKEND_INSTALL_PROGRESS: 'backend:installProgress',
   /** claude turn 完成后从 jsonl 读到 aiTitle 并回写 db 后，告知 renderer 刷新侧边栏标题 */
   SESSION_TITLE_CHANGED: 'session:titleChanged',
   PTY_DATA: 'pty:data',

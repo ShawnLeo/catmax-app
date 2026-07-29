@@ -29,6 +29,15 @@
       </button>
     </div>
 
+    <!-- Backend Install Card: 未安装的后端给一键安装入口，而不是只在 tooltip 里说"去装" -->
+    <BackendInstallCard
+      v-for="id in missingBackendIds"
+      :key="`install-${id}`"
+      :backend-id="id"
+      @pick="pickFile(id)"
+      @refresh="backendStore.refresh()"
+    />
+
     <div class="h-px bg-sidebar-border my-1" />
 
     <header>
@@ -164,12 +173,14 @@
 
 <script setup lang="ts">
 import BackendIcon from '@renderer/components/icons/BackendIcon.vue'
+import BackendInstallCard from '@renderer/components/settings/BackendInstallCard.vue'
 import { Button } from '@renderer/components/ui/button'
 import { DropdownMenu, type DropdownOption } from '@renderer/components/ui/dropdown-menu'
 import { Input } from '@renderer/components/ui/input'
 import { explainBackendError } from '@renderer/lib/backend-error'
 import { useBackendStore } from '@renderer/stores/backend'
 import { useSettingsStore } from '@renderer/stores/settings'
+import { isInstallableBackend } from '@shared/backend/install'
 import type { EffortLevel, PermissionMode } from '@shared/backend/types'
 import type { BackendId } from '@shared/constants'
 import { computed, onMounted, ref } from 'vue'
@@ -188,6 +199,16 @@ function displayRank(id: BackendId): number {
   const index = BACKEND_DISPLAY_ORDER.indexOf(id)
   return index === -1 ? BACKEND_DISPLAY_ORDER.length : index
 }
+
+/**
+ * 需要展示安装卡片的后端：健康检查明确报 'not-installed'，且该后端支持一键安装。
+ * 其它不可用原因（Gatekeeper 拦截、超时…）装一遍也解决不了，交给 tooltip 的修复指引。
+ */
+const missingBackendIds = computed(() =>
+  backendStore.statuses
+    .filter((status) => status.error === 'not-installed' && isInstallableBackend(status.id))
+    .map((status) => status.id),
+)
 
 const defaultBackend = computed(() => settings.settings?.defaultBackend ?? 'codex')
 

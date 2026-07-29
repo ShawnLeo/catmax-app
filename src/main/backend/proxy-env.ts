@@ -11,6 +11,19 @@
 import type { HttpProxy } from '@shared/settings-schema'
 
 /**
+ * 规范化用户填的代理 URL：补全 scheme（用户可能只填了 127.0.0.1:7890）。
+ * 已经带 scheme（http/https/socks5/socks4 等）的原样返回。
+ *
+ * 导出是因为下载后端 CLI 时（backend-installer）也要用同一份规范化规则，
+ * 不然设置页填的地址在两条链路上表现不一致。
+ */
+export function normalizeProxyUrl(url: string): string {
+  const trimmed = url.trim()
+  if (!trimmed) return trimmed
+  return /^[a-z][a-z0-9+.-]*:\/\//i.test(trimmed) ? trimmed : `http://${trimmed}`
+}
+
+/**
  * 把 HttpProxy settings 转成 env 键值对。
  * - enabled = false 或 url 为空时返回空对象（不修改环境）
  * - 否则同时设大小写两套变量（不同工具读不同的）
@@ -20,12 +33,7 @@ export function proxySettingsToEnv(proxy: HttpProxy | null | undefined): Record<
     return {}
   }
 
-  // 规范化 URL：补全 scheme（用户可能只填了 127.0.0.1:7890）
-  let url = proxy.url.trim()
-  // 已经带 scheme（http/https/socks5/socks4 等）的不补
-  if (!/^[a-z][a-z0-9+.-]*:\/\//i.test(url)) {
-    url = `http://${url}`
-  }
+  const url = normalizeProxyUrl(proxy.url)
 
   const env: Record<string, string> = {
     HTTP_PROXY: url,
