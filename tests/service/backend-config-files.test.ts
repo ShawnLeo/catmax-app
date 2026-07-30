@@ -20,6 +20,8 @@ const mocks = vi.hoisted(() => ({ userDataDir: '' }))
 vi.mock('electron', () => ({ app: { getPath: () => mocks.userDataDir } }))
 
 const {
+  catmaxBackendConfigDir,
+  claudeOverrideSettingsPath,
   listBackendConfigFiles,
   readBackendConfigFile,
   resolveBackendConfigDir,
@@ -100,10 +102,84 @@ describe('validateConfigSyntax', () => {
   })
 })
 
+// catmax 覆盖层：这一份文件 catmax 自己拥有，编辑它绝不能碰用户的 ~/.claude。
+// 这几条是整个特性的核心保证，回归了就等于"应用里改配置把用户本地配置覆盖了"。
+describe('claude.catmaxSettings（catmax 覆盖层）', () => {
+  test('落在 catmax userData，而不是后端配置目录', () => {
+    const info = listBackendConfigFiles().find((f) => f.id === 'claude.catmaxSettings')
+    expect(info?.location).toBe('catmax-userdata')
+    expect(info?.path).toBe(join(catmaxBackendConfigDir(), 'claude-settings.json'))
+    // 关键否定断言：不在 CLAUDE_CONFIG_DIR 下
+    expect(info?.path.startsWith(join(tempDir, 'claude'))).toBe(false)
+  })
+
+  test('保存覆盖层不产生 ~/.claude 里的任何文件', () => {
+    const claudeHome = join(tempDir, 'claude')
+    mkdirSync(claudeHome, { recursive: true })
+    writeFileSync(join(claudeHome, 'settings.json'), '{"model":"local-model"}\n')
+
+    const result = writeBackendConfigFile({
+      id: 'claude.catmaxSettings',
+      content: '{"model":"override-model"}\n',
+      expectedMtimeMs: null,
+    })
+    expect(result.ok).toBe(true)
+
+    // 用户本地文件内容一字未改，目录里也没多出文件
+    expect(readFileSync(join(claudeHome, 'settings.json'), 'utf-8')).toBe(
+      '{"model":"local-model"}\n',
+    )
+    expect(readdirSync(claudeHome)).toEqual(['settings.json'])
+  })
+
+  test('声明为 sensitive：写盘强制 0600', () => {
+    writeBackendConfigFile({
+      id: 'claude.catmaxSettings',
+      content: '{"env":{"ANTHROPIC_AUTH_TOKEN":"sk-test"}}\n',
+      expectedMtimeMs: null,
+    })
+    const path = join(catmaxBackendConfigDir(), 'claude-settings.json')
+    expect(statSync(path).mode & 0o777).toBe(0o600)
+  })
+
+  test('claudeOverrideSettingsPath：不存在返回 null，存在返回绝对路径', () => {
+    // 不存在必须是 null——adapter 据此决定不给 SDK 传 settings，
+    // 等价于"完全走用户本地配置"；传不存在的路径会让 SDK 直接报错。
+    expect(claudeOverrideSettingsPath()).toBeNull()
+
+    writeBackendConfigFile({
+      id: 'claude.catmaxSettings',
+      content: '{}\n',
+      expectedMtimeMs: null,
+    })
+    expect(claudeOverrideSettingsPath()).toBe(join(catmaxBackendConfigDir(), 'claude-settings.json'))
+  })
+
+  test('和 claude.settings 是两个互不干扰的文件', () => {
+    writeBackendConfigFile({
+      id: 'claude.settings',
+      content: '{"model":"local"}\n',
+      expectedMtimeMs: null,
+    })
+    writeBackendConfigFile({
+      id: 'claude.catmaxSettings',
+      content: '{"model":"override"}\n',
+      expectedMtimeMs: null,
+    })
+    expect(readBackendConfigFile('claude.settings').content).toBe('{"model":"local"}\n')
+    expect(readBackendConfigFile('claude.catmaxSettings').content).toBe('{"model":"override"}\n')
+  })
+})
+
 describe('listBackendConfigFiles', () => {
   test('文件不存在时 exists=false 且 mtimeMs=null', () => {
     const files = listBackendConfigFiles()
-    expect(files.map((f) => f.id).sort()).toEqual(['claude.settings', 'codex.auth', 'codex.config'])
+    expect(files.map((f) => f.id).sort()).toEqual([
+      'claude.catmaxSettings',
+      'claude.settings',
+      'codex.auth',
+      'codex.config',
+    ])
     for (const file of files) {
       expect(file.exists).toBe(false)
       expect(file.mtimeMs).toBeNull()

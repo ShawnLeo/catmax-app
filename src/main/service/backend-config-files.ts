@@ -1,5 +1,9 @@
 /**
- * Backend Config Files: 读写后端自己的本地配置文件（~/.codex/config.toml、~/.claude/settings.json…）。
+ * Backend Config Files: 读写两类配置文件——
+ * 1. 后端自己的本地文件（~/.codex/config.toml、~/.claude/settings.json…），原地编辑；
+ * 2. catmax 自己拥有的覆盖层（userData/backend-settings/claude-settings.json），
+ *    只影响 catmax 内的会话，不碰用户的后端配置目录。
+ * 由 descriptor 的 `location` 字段区分（见 shared/backend/config-files.ts）。
  *
  * 安全边界：所有入口只接受 `BACKEND_CONFIG_FILES` 里的稳定 id，路径由本模块查表算出。
  * renderer 永远传不进来一个任意路径——否则这条 IPC 就等价于一个任意文件读写通道。
@@ -72,8 +76,40 @@ export function resolveBackendConfigDir(backendId: BackendId): string {
   return join(homedir(), `.${backendId}`)
 }
 
+/**
+ * catmax 自己拥有的后端覆盖配置目录。和 backupRoot() 一样带非 Electron 回退，
+ * 好让 vitest 里不 mock electron 也能跑。
+ */
+export function catmaxBackendConfigDir(): string {
+  try {
+    return join(app.getPath('userData'), 'backend-settings')
+  } catch {
+    return join(homedir(), '.catmax', 'backend-settings')
+  }
+}
+
 export function resolveBackendConfigPath(descriptor: BackendConfigFileDescriptor): string {
-  return join(resolveBackendConfigDir(descriptor.backendId), descriptor.relativePath)
+  const dir =
+    descriptor.location === 'catmax-userdata'
+      ? catmaxBackendConfigDir()
+      : resolveBackendConfigDir(descriptor.backendId)
+  return join(dir, descriptor.relativePath)
+}
+
+/**
+ * catmax 覆盖配置的绝对路径。不存在时返回 null——
+ * 调用方（CladueAdapter）据此决定要不要给 SDK 传 `Options.settings`：
+ * 传一个不存在的路径会让 SDK 报错，而"没有覆盖配置"应当等价于"全部走本地配置"。
+ */
+export function claudeOverrideSettingsPath(): string | null {
+  const descriptor = getBackendConfigFileDescriptor('claude.catmaxSettings')
+  if (!descriptor) return null
+  const path = resolveBackendConfigPath(descriptor)
+  try {
+    return statSync(path).isFile() ? path : null
+  } catch {
+    return null
+  }
 }
 
 /** 备份根目录——放 userData，不污染用户的 ~/.codex / ~/.claude */
@@ -112,6 +148,7 @@ function describeConfigFile(descriptor: BackendConfigFileDescriptor): BackendCon
   return {
     id: descriptor.id,
     backendId: descriptor.backendId,
+    location: descriptor.location,
     label: descriptor.label,
     description: descriptor.description,
     format: descriptor.format,

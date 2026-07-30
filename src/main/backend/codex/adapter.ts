@@ -285,7 +285,7 @@ export class CodexAdapter implements AgentBackend {
       //   error: unexpected argument '--listen' found
       // 这里不带，让两边都兼容（旧版默认行为也是 stdio）。
       // 同时注入 extraEnv（HTTPS_PROXY 等代理环境变量）——由 BackendManager.applySettings 设置。
-      this.proc = this.spawner.spawn({
+      const proc = this.spawner.spawn({
         command: binary,
         // extraArgs 是协议桥的 `-c` 覆盖，放在子命令后面（codex 的 -c 是全局参数，
         // 位置无所谓，但排在后面便于日志里一眼看出哪些是 catmax 加的）
@@ -293,8 +293,26 @@ export class CodexAdapter implements AgentBackend {
         env: { ...this.extraEnv },
         ...(this.opts.cwd !== undefined ? { cwd: this.opts.cwd } : {}),
       })
-      this.proc.child.stdout?.on('data', (chunk: Buffer) => this.onStdoutData(chunk))
-      this.proc.child.stderr?.on('data', (chunk: Buffer) => {
+      this.proc = proc
+
+      /**
+       * 这批 handler 绑在**具体某个子进程**上，但它们操作的是适配器级别的共享状态
+       * （pendingRequests / lineBuffer / initialized）。进程被换掉后，旧进程的迟到事件
+       * 必须忽略，否则会污染新进程。
+       *
+       * 最典型的是重连（协议桥开关翻转会走 reconnectBackend → dispose + initialize）：
+       * dispose 同步 kill，但 exit 事件下一个 tick 才到——那时新进程的握手请求已经挂在
+       * 共享的 pendingRequests 里了，旧进程的 exit handler 一调 rejectAllPending 就会把它
+       * reject 掉，initialize 抛 "codex process exited"，一路冒到 settings.update。
+       */
+      const isStale = (): boolean => this.proc !== proc
+
+      proc.child.stdout?.on('data', (chunk: Buffer) => {
+        if (isStale()) return
+        this.onStdoutData(chunk)
+      })
+      proc.child.stderr?.on('data', (chunk: Buffer) => {
+        if (isStale()) return
         // codex 的 stderr 带 ANSI 控制字符（颜色），先剥掉再处理
         const rawText = chunk.toString('utf-8').trim()
         // eslint-disable-next-line no-control-regex
@@ -333,7 +351,12 @@ export class CodexAdapter implements AgentBackend {
           }
         }
       })
-      this.proc.child.on('exit', (code, signal) => {
+      proc.child.on('exit', (code, signal) => {
+        if (isStale()) {
+          // dispose/重连主动换掉的旧进程，它的退场与当前连接无关
+          log.debug('ignoring exit from stale codex process', { code, signal })
+          return
+        }
         log.warn('codex exited:', { code, signal })
         this.initialized = false
         // 进程死了，缓存的 model 列表也可能过时（比如用户重新登录了别的账户）——清掉。
@@ -407,6 +430,8 @@ export class CodexAdapter implements AgentBackend {
     this.cachedModelsPromise = null
     this.pendingRequests.clear()
     this.pendingApprovals.clear()
+    // 旧进程可能死在半行 JSON 上，残留内容会把新进程的第一行拼坏——和 killAndClearProc 一致地重置
+    this.lineBuffer = new LineBuffer()
     log.info('disposed')
   }
 
