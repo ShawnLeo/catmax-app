@@ -200,7 +200,14 @@ export interface BridgeStatus {
   port: number | null
   /** 写进 codex config.toml 的 base_url */
   baseUrl: string | null
-  /** 当前启用的 provider id；null 表示未选任何配置 */
+  /**
+   * 当前启用的 provider id；null 表示未选任何配置。
+   *
+   * 注意与 BridgeSettings.currentProviderId 的 sentinel 区别：settings 里用空串 ''
+   * 表示未选（Zod string 默认值，落盘 settings.json）；这里是运行时状态，用 null
+   * 表示「没有当前 provider」，和本接口其它可空字段（port/baseUrl 等）保持一致。
+   * 二者由 manager.status() 在边界处转换：settings.currentProviderId 为 '' 时这里回 null。
+   */
   currentProviderId: string | null
   upstreamProtocol: BridgeUpstreamProtocol | null
   upstreamBaseUrl: string | null
