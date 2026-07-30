@@ -13,10 +13,13 @@
 - `settings.protocolBridge: { enabled, presetId, upstream: {...} }`，存一份上游配置。
 - UI 用一个预设下拉（deepseek / anthropic / custom），`applyPreset` **覆盖式**写入唯一的 `upstream`——切预设即丢旧配置。
 - 凭证存在 `userData/bridge-credentials.json`（0600）的**固定 key** `codex-bridge` 下，单槽位。
+- 模型列表**只能自动拉取**——部分厂商（如智谱编程套餐）不提供模型列表接口，桥拉不到就只剩兜底模型名。
 
 ### 目标
 
-像 cc-switch 那样：保存多个上游配置（provider），同时只能有一个被启用（current）。切换到另一个配置时**热切换**生效，不丢数据、不重启桥服务。
+1. 像 cc-switch 那样：保存多个上游配置（provider），同时只能有一个被启用（current）。切换到另一个配置时**热切换**生效，不丢数据、不重启桥服务。
+2. 支持**手动录入模型列表**：对不提供模型列表接口的厂商，用户手填一份模型清单，桥据此填充 codex 下拉框、并把它作为 `knownModelIds` 供 `resolveModel` 判断（认识就透传、不认识用兜底名）。
+3. 新增**智谱编程套餐**预设模板（base_url `https://open.bigmodel.cn/api/anthropic`，默认手动模型列表模式）。
 
 ### 关键约束
 
@@ -43,7 +46,7 @@
 const bridgeProviderSchema = z.object({
   id: z.string(),                                    // UUID v4，稳定主键
   name: z.string().default(''),                      // 用户可改名，如「我的 DeepSeek」
-  /** 来源预设 id（deepseek/anthropic/custom），仅 UI 回显用 */
+  /** 来源预设 id（deepseek/anthropic/zhipu/custom），仅 UI 回显用 */
   presetId: z.string().default('custom'),
   createdAt: z.number().int().default(0),            // 排序用（升序），0 表示未知
   // —— 以下是原 BridgeUpstreamConfig 的全部字段，原样搬过来 ——
@@ -54,6 +57,16 @@ const bridgeProviderSchema = z.object({
   credentialSource: z.enum(['env', 'stored']).default('stored'),
   credentialEnvVar: z.string().default(''),
   capabilities: upstreamCapabilitiesSchema.default({}),
+  // —— 新增：模型列表来源 ——
+  /**
+   * 模型列表的获取方式。
+   * auto：从上游 modelsUrl 拉取（现有行为）；
+   * manual：用用户手填的 manualModels，不请求上游。
+   * 部分厂商（智谱编程套餐等）不提供列表接口，只能 manual。
+   */
+  modelListMode: z.enum(['auto', 'manual']).default('auto'),
+  /** modelListMode === 'manual' 时生效；手动录入的模型 id 列表 */
+  manualModels: z.array(z.string()).default([]),
 })
 
 const protocolBridgeSchema = z.object({
@@ -72,7 +85,30 @@ const protocolBridgeSchema = z.object({
 
 ### 1.3 类型层（`src/shared/protocol/bridge-config.ts`）
 
-新增 `BridgeProvider` 接口，等于 id/name/presetId/createdAt + 原 `BridgeUpstreamConfig`：
+**先扩 `BridgeUpstreamConfig`**（新增模型列表来源两个字段）：
+
+```ts
+export type BridgeModelListMode = 'auto' | 'manual'
+
+export interface BridgeUpstreamConfig {
+  protocol: BridgeUpstreamProtocol
+  baseUrl: string
+  modelsUrl: string
+  model: string | null
+  credentialSource: BridgeCredentialSource
+  credentialEnvVar: string
+  capabilities: UpstreamCapabilities
+  // —— 新增 ——
+  /** 模型列表获取方式；auto=拉取上游接口，manual=用手填列表 */
+  modelListMode: BridgeModelListMode
+  /** modelListMode === 'manual' 时的手填模型 id 列表 */
+  manualModels: string[]
+}
+```
+
+> **向后兼容注意**：这两个新字段加在 `BridgeUpstreamConfig` 上会影响 `BridgeUpstreamPreset.config` 的形状（它 `Omit<..., 'credentialSource' | 'credentialEnvVar'>`，但没 Omit 新字段）。所以 `BRIDGE_UPSTREAM_PRESETS` 里每个预设的 `config` **都要补上 `modelListMode` 和 `manualModels`**——否则 TS 报错。已有的 deepseek/anthropic/custom 三个预设补 `modelListMode: 'auto'`、`manualModels: []`（见 1.5 完整 config 示例）。
+
+再新增 `BridgeProvider` 接口，等于 id/name/presetId/createdAt + 原 `BridgeUpstreamConfig`：
 
 ```ts
 export interface BridgeProvider extends BridgeUpstreamConfig {
@@ -93,7 +129,7 @@ export interface BridgeSettings {
 }
 ```
 
-`BRIDGE_UPSTREAM_PRESETS` **保留不变**——它现在是「新建配置时的模板」。新增工厂函数：
+`BRIDGE_UPSTREAM_PRESETS` **保留并新增智谱预设**（见 1.5）——它现在是「新建配置时的模板」。新增工厂函数：
 
 ```ts
 /** 从预设创建一个新的 provider（带新生成的 id） */
@@ -107,7 +143,7 @@ export function createProviderFromPreset(
     name: preset.label,          // 默认名用预设名，用户可改
     presetId: preset.id,
     createdAt: Date.now(),
-    ...preset.config,            // protocol/baseUrl/modelsUrl/model/credentialEnvVar/capabilities
+    ...preset.config,            // 含 protocol/baseUrl/modelsUrl/model/credentialEnvVar/capabilities/modelListMode/manualModels
     credentialSource,            // 补上 preset.config 里被 Omit 掉的唯一字段
   }
 }
@@ -116,8 +152,6 @@ export function createProviderFromPreset(
 类型自洽：`preset.config` 是 `Omit<BridgeUpstreamConfig, 'credentialSource' | 'credentialEnvVar'> & { credentialEnvVar: string }`，展开后已有 `credentialEnvVar`，再补 `credentialSource`，加上前面四个元数据字段（id/name/presetId/createdAt），对象恰好满足 `BridgeProvider`。**不需要**再单独写 `credentialEnvVar:`——它已在 `...preset.config` 里，重复写是无害但多余的。
 
 > **关键实现细节**：`createProviderFromPreset` 在 shared 层生成 UUID，**不能** `import { randomUUID } from 'node:crypto'`（shared 禁 `node:*`）。必须用**全局 `crypto.randomUUID()`**——Web Crypto API 在 renderer 和 main（Node 19+ 全局）都可用，跨层安全。
-
-预设的 `config` 字段类型是 `Omit<BridgeUpstreamConfig, 'credentialSource' | 'credentialEnvVar'> & { credentialEnvVar: string }`，展开后补上 `credentialSource` 即可得到完整的 `BridgeProvider`。
 
 ### 1.4 BridgeStatus（给 UI 显示的运行时状态）
 
@@ -136,7 +170,61 @@ export interface BridgeStatus {
 }
 ```
 
+### 1.5 智谱编程套餐预设（`BRIDGE_UPSTREAM_PRESETS` 新增）
+
+查证结论（来源：智谱官方文档 docs.bigmodel.cn + 社区配置实例）：
+
+| 项 | 取值 | 依据 |
+|---|---|---|
+| base_url | `https://open.bigmodel.cn/api/anthropic` | 用户给定 + 官方 Claude Code 接入指南 |
+| 协议 | `anthropic.messages` | 官方 Anthropic 兼容端点 |
+| **模型列表模式** | **`manual`** | 套餐**不提供模型列表接口**，只能手填 |
+| 手填模型 | `['GLM-5.2', 'GLM-5-Turbo', 'GLM-4.7']` | 官方 overview 列出；用户可增删 |
+| 兜底模型 | `'GLM-5.2'` | 列表里第一个、能力最新的 |
+| modelsUrl | `''`（留空） | 无列表接口，manual 模式下不用 |
+| 凭证环境变量名 | `ZHIPUAI_API_KEY` | 语义化命名；官方 Claude Code 直连用 `ANTHROPIC_AUTH_TOKEN`，但桥里用更明确的厂商名，避免和 Anthropic 官方 `ANTHROPIC_API_KEY` 混淆 |
+| supportsImages | `false` | 编程套餐的通用模型不一定支持视觉（仅 GLM-4.6V 支持）；保守默认关，用户视情况开 |
+| dropSamplingWhenThinking | `true` | 文档未提及 extended thinking，按保守默认 |
+| defaultMaxOutputTokens | `8192` | 文档未明确，沿用默认 |
+
+```ts
+{
+  id: 'zhipu',
+  label: '智谱编程套餐',
+  description:
+    '智谱 GLM 的 Anthropic 兼容端点（编程套餐）。套餐不提供模型列表接口，模型需手填；图片/思考支持视具体模型而定。',
+  docsUrl: 'https://docs.bigmodel.cn/cn/coding-plan/overview',
+  config: {
+    protocol: 'anthropic.messages',
+    baseUrl: 'https://open.bigmodel.cn/api/anthropic',
+    modelsUrl: '',                              // 无列表接口
+    model: 'GLM-5.2',                           // 兜底
+    credentialEnvVar: 'ZHIPUAI_API_KEY',
+    capabilities: {
+      supportsImages: false,
+      dropSamplingWhenThinking: true,
+      defaultMaxOutputTokens: 8192,
+      toolNameMaxLength: 64,
+    },
+    modelListMode: 'manual',                    // 关键：不拉取，用手填列表
+    manualModels: ['GLM-5.2', 'GLM-5-Turbo', 'GLM-4.7'],
+  },
+},
+```
+
+### 1.6 现有三个预设补字段
+
+deepseek / anthropic / custom 的 `config` 各补两行（它们都支持自动拉取，所以是 auto 模式）：
+
+```ts
+modelListMode: 'auto',
+manualModels: [],
+```
+
+> 注意：`custom` 预设虽然 baseUrl 留空，但仍是 `auto` 模式——用户填了 baseUrl + modelsUrl 后桥会去拉。`manual` 模式是 provider 级别的选择，预设只给默认值，用户可在编辑区切换。
+
 ---
+
 
 ## 第 2 部分：凭证存储改造
 
@@ -291,7 +379,7 @@ async applySettings(settings: BridgeSettings): Promise<void> {
 }
 ```
 
-`upstreamModelIdentityChanged` 比较函数**签名不变**——它接收两个 `BridgeUpstreamConfig`，`BridgeProvider extends BridgeUpstreamConfig`，可以直接传进去（结构子类型化）。
+`upstreamModelIdentityChanged` 比较函数**签名不变**——它接收两个 `BridgeUpstreamConfig`，`BridgeProvider extends BridgeUpstreamConfig`，可以直接传进去（结构子类型化）。但**函数体要扩**：现在多了 `modelListMode`/`manualModels`——手动列表的内容变了也该失效缓存。所以比较逻辑要**加上 `modelListMode` 和 `manualModels` 的比较**（后者按内容而非引用比，用 join 或逐项比）。原有的 baseUrl/modelsUrl/credentialSource/credentialEnvVar 比较保留。
 
 ### 3.3 `resolveUpstream` / `resolveCredential` / `status`：全走 `currentProvider()`
 
@@ -302,6 +390,42 @@ async applySettings(settings: BridgeSettings): Promise<void> {
 - `status()`：新增 `currentProviderId` 字段回传；`upstreamProtocol` / `upstreamBaseUrl` 从 `currentProvider()` 取。
 
 `codexSpawnArgs()` / `codexSpawnEnv()` **完全不用改**——它们只看 `this.settings?.enabled` 和 `this.server`，不碰 upstream。
+
+### 3.3a `listUpstreamModels`：auto / manual 分叉（核心新增）
+
+这是手动模型列表的主战场。现在 `listUpstreamModels` 只会走网络拉取。改造后按当前 provider 的 `modelListMode` 分叉：
+
+```ts
+async listUpstreamModels(): Promise<BridgeModelInfo[]> {
+  if (this.modelsPromise) return this.modelsPromise   // 缓存命中（auto 模式才有意义）
+
+  const provider = this.currentProvider()
+  if (!provider) return []
+
+  // —— manual 模式：直接用手填列表，不联网 ——
+  if (provider.modelListMode === 'manual') {
+    const models = provider.manualModels
+      .filter((id) => id.trim())
+      .map((id) => ({ id: id.trim(), displayName: id.trim() }))
+    // 手动列表也要喂给 knownModelIds——resolveModel 要据此判断透传还是兜底
+    this.knownModelIds = new Set(models.map((m) => m.id))
+    return models
+  }
+
+  // —— auto 模式：现有网络拉取逻辑（走 modelsUrl / baseUrl 推断）——
+  if (!provider.baseUrl.trim()) return []
+  const apiKey = this.resolveCredential()
+  if (!apiKey) return []
+  this.modelsPromise = (async () => { /* 现有 fetchUpstreamModels 逻辑 */ })()
+  return this.modelsPromise
+}
+```
+
+关键点：
+1. **manual 不进 `modelsPromise` 缓存**——手填列表是同步的、随时可变（用户改了 manualModels 立即生效），缓存它反而会让「改了手填列表但没刷新」显示旧值。每次调用都重新读 `provider.manualModels`。
+2. **manual 也设 `knownModelIds`**——这是关键。`resolveModel`（bridge.ts:61）的逻辑是「认识就透传、不认识用兜底名」。如果 manual 模式不设 `knownModelIds`，codex 选了用户手填的 `GLM-5.2` 会被当成不认识、用兜底名顶掉（虽然兜底名也是 GLM-5.2，但那是巧合）。设上之后，手填列表里的模型名一律透传，行为正确。
+3. **auto 模式的 `knownModelIds` 不变**——仍在 `fetchUpstreamModels` 成功后设（manager.ts 现有逻辑）。
+4. `invalidateModels()` 清缓存时，manual 模式下次调用会重读 `provider.manualModels`，所以切到 manual provider 也能正确刷新。
 
 ### 3.4 增删改 provider 的生效路径：走 settings.update，不经独立 IPC
 
@@ -382,12 +506,14 @@ if (nowEnabled !== wasEnabled && ctx.backendManager.getCurrentId() === 'codex') 
 │   ┌─────────────────────────────────┐
 │   │ ◉ 我的 DeepSeek      [当前] ✎ 🗑 │  ← 选中态(当前激活)+编辑+删除
 │   │ ○ Anthropic 官方        ✎ 🗑    │  ← 未激活:点 radio 切换为当前
-│   │ ○ 测试账号             ✎ 🗑      │
+│   │ ○ 智谱编程套餐         ✎ 🗑      │
 │   └─────────────────────────────────┘
-│   [+ 新建配置 ▾]  ← 下拉:DeepSeek / Anthropic / 自定义(三个预设模板)
+│   [+ 新建配置 ▾]  ← 下拉:DeepSeek / Anthropic / 智谱 / 自定义(四个预设模板)
 │
 └─ [选中 provider 的编辑区]              ← 原「平铺表单」整体下移到这里
-    名称 / baseUrl / 兜底模型名 / modelsUrl
+    名称 / baseUrl / 兜底模型名
+    模型列表来源 [auto ▾] ──┬─ auto:  modelsUrl 输入 + [拉取上游模型列表] 按钮
+                            └─ manual: 手填模型清单(每行一个 / tag 输入)
     凭证(按 providerId 存) / 测试连通 / 能力
 ```
 
@@ -437,6 +563,19 @@ if (nowEnabled !== wasEnabled && ctx.backendManager.getCurrentId() === 'codex') 
 | **新增** `addProvider(presetId)` | `createProviderFromPreset` → 加入 providers → 设为 current+editing |
 | **新增** `deleteProvider(id)` | 清 key → 从 providers 删 → 修正 current → patch |
 | **新增** `selectEditing(id)` | `editingProviderId = id` |
+| **新增** `setModelListMode(mode)` | `patchProvider(editingId, { modelListMode: mode })`；切到 manual 后 UI 切换为手填区，auto 则切回 modelsUrl+拉取按钮 |
+| **新增** `addManualModel(id)` / `removeManualModel(id)` | `patchProvider(editingId, { manualModels: [...] })` 维护手填列表 |
+
+### 4.6a 模型列表来源控件（UI 细节）
+
+编辑区里「兜底模型名」下方放一个**模型列表来源**选择器（auto / manual 二选一，按钮组样式，和现有 credentialSource 一致）：
+
+- **auto 模式**（DeepSeek/Anthropic/custom 默认）：显示 `modelsUrl` 输入框 + 「拉取上游模型列表」按钮（现有行为）。拉到的模型显示为 chips，点一下设为兜底值。
+- **manual 模式**（智谱默认）：显示一个**手填模型清单**输入区。实现方式：一个文本输入框，回车/逗号分隔追加一个 model tag；每个 tag 可删。底层就是维护 `provider.manualModels: string[]`。
+
+切到 manual 时，UI 不再显示「拉取上游模型列表」按钮（无意义——桥不会联网）。手填列表的 chips 同样可点设为兜底值（`patchProvider(editingId, { model })`）。
+
+> **兜底模型名 vs 手填列表的关系**：手填列表决定「codex 下拉框显示哪些 + resolveModel 认识哪些」，兜底模型名是「codex 发来的模型名不在列表里时用谁顶」。两者独立。manual 模式下用户通常会把兜底设成手填列表里的某一个。
 
 ### 4.7 边界细节
 
@@ -455,10 +594,11 @@ if (nowEnabled !== wasEnabled && ctx.backendManager.getCurrentId() === 'codex') 
 
 | # | 文件 | 覆盖点 | 层 |
 |---|---|---|---|
-| 1 | `tests/shared/bridge-provider.test.ts` | `createProviderFromPreset` 各预设 → 字段正确填充（尤其 credentialEnvVar）、生成唯一 id、BridgeProvider 满足类型 | shared |
+| 1 | `tests/shared/bridge-provider.test.ts` | `createProviderFromPreset` 各预设 → 字段正确填充（尤其 credentialEnvVar、modelListMode、manualModels）、生成唯一 id、BridgeProvider 满足类型；**智谱预设 modelListMode=manual** | shared |
 | 2 | `tests/shared/settings-schema-bridge.test.ts` | 新 schema 解析：空对象走 default（enabled=false/providers={}）、provider 记录解析、**旧 `upstream` 字段被静默剥掉不报错** | shared |
 | 3 | `tests/backend/bridge-manager-multi-provider.test.ts` | `applySettings` 切 currentProviderId → `currentProvider()` 正确返回；`resolveUpstream`/`resolveCredential` 按 provider.id 查；模型缓存在 current 身份变化时失效、纯改能力不失效 | backend |
 | 4 | 同上 | `currentProvider()` 返回 null（enabled 但 currentProviderId='' 或指向不存在的 provider）→ `resolveUpstream` 返回 null | backend |
+| 4a | 同上 | **manual 模式**：`listUpstreamModels` 返回 `manualModels` 且设 `knownModelIds`；切到 auto provider 后 `knownModelIds` 来自网络拉取；手填列表变化不进缓存、立即生效 | backend |
 | 5 | `tests/backend/bridge-credentials-multi.test.ts` | 多 provider 凭证：不同 id 独立存取、删一个不影响其他、`clearStoredCredential` 精准清 | backend |
 | 6 | `tests/ipc/settings-bridge-reconnect.test.ts` | `updateSettings`：开关翻转（codex 在线）→ reconnect；**纯切 provider（enabled 不变）→ 不 reconnect** | ipc |
 
@@ -470,7 +610,10 @@ UI 层（`ProtocolBridgeSection.vue`）仓库无组件测试先例（无 `*.vue.
 2. 再「新建 Anthropic」→ 列表两项 → 切换 radio 到 Anthropic → codex 不重连但模型列表刷新。
 3. 删除当前激活的 DeepSeek → currentProviderId 自动落到 Anthropic → 凭证文件里 DeepSeek 的 key 被清（检查 `bridge-credentials.json`）。
 4. 关桥 → 列表仍可见，能编辑 → 开桥 → 仍指向关桥前的 currentProviderId。
-5. `pnpm typecheck` + `pnpm lint` 全过（尤其跨层 import：shared 不能引入 main）。
+5. **「新建智谱编程套餐」** → 编辑区出现 baseUrl=`https://open.bigmodel.cn/api/anthropic`、**模型列表来源默认 manual**、手填列表含 GLM-5.2/GLM-5-Turbo/GLM-4.7 → 填 key → codex 下拉框显示这三个模型（**全程不联网拉模型**）。
+6. 在智谱配置上手填新增一个模型 `glm-4.6v` → codex 下拉框立即出现它（验证 manual 不进缓存、即时生效）。
+7. 把某个 provider 从 auto 切到 manual → modelsUrl/拉取按钮消失、手填区出现；切回 → 恢复。
+8. `pnpm typecheck` + `pnpm lint` 全过（尤其跨层 import：shared 不能引入 main）。
 
 ### 5.4 风险点（设计已覆盖）
 
@@ -481,6 +624,9 @@ UI 层（`ProtocolBridgeSection.vue`）仓库无组件测试先例（无 `*.vue.
 | 编辑=切换的误设计 | 拆 `editingProviderId` 与 `currentProviderId`（第 4.3） |
 | 老 settings.json 残留 `upstream` | 非 strict schema 静默剥除（第 1.2） |
 | shared 误引入 main | `createProviderFromPreset` 用全局 `crypto.randomUUID()`，不 `import 'node:crypto'`（第 1.3） |
+| manual 模式不设 knownModelIds 导致兜底名误顶 | `listUpstreamModels` manual 分支显式设 `knownModelIds`（第 3.3a） |
+| 手填列表改了但 UI 显示旧值 | manual 不进 modelsPromise 缓存，每次重读 manualModels（第 3.3a） |
+| 智谱环境变量名和官方 Claude Code 的 ANTHROPIC_AUTH_TOKEN 不一致 | 有意为之：桥内用厂商语义名 ZHIPUAI_API_KEY，避免和 Anthropic 官方混淆（第 1.5） |
 
 ---
 
@@ -488,17 +634,17 @@ UI 层（`ProtocolBridgeSection.vue`）仓库无组件测试先例（无 `*.vue.
 
 | 层 | 文件 | 改动 |
 |---|---|---|
-| shared | `src/shared/settings-schema.ts` | `protocolBridgeSchema` 改为 providers+currentProviderId；新增 `bridgeProviderSchema` |
-| shared | `src/shared/protocol/bridge-config.ts` | 新增 `BridgeProvider`、`BridgeSettings` 改形、新增 `createProviderFromPreset`；`BridgeStatus` 加 currentProviderId |
+| shared | `src/shared/settings-schema.ts` | `protocolBridgeSchema` 改为 providers+currentProviderId；新增 `bridgeProviderSchema`（含 modelListMode/manualModels） |
+| shared | `src/shared/protocol/bridge-config.ts` | `BridgeUpstreamConfig` 加 modelListMode/manualModels；新增 `BridgeProvider`、`BridgeSettings` 改形、新增 `createProviderFromPreset`；`BridgeStatus` 加 currentProviderId；**`BRIDGE_UPSTREAM_PRESETS` 新增智谱预设 + 三个旧预设补字段** |
 | shared | `src/shared/ipc/backend.ts` | `setBridgeCredential` / `testBridgeUpstream` 加 providerId；新增 `bridgeCredentialReady` 契约 |
-| main | `src/main/protocol/manager.ts` | 删 `BRIDGE_CREDENTIAL_ID`；`currentProvider()`；`applySettings`/`resolveUpstream`/`resolveCredential`/`status` 走 currentProvider |
+| main | `src/main/protocol/manager.ts` | 删 `BRIDGE_CREDENTIAL_ID`；`currentProvider()`；`applySettings`/`resolveUpstream`/`resolveCredential`/`status` 走 currentProvider；**`listUpstreamModels` auto/manual 分叉**；`upstreamModelIdentityChanged` 加 modelListMode/manualModels 比较 |
 | main | `src/main/ipc/domains/backend/handlers.ts` | `setBridgeCredential`/`testBridgeUpstream` 用 providerId；新增 `bridgeCredentialReady` handler |
 | main | `src/main/ipc/domains/backend/index.ts` | 注册 `bridgeCredentialReady` |
 | main | `src/main/ipc/domains/settings/handlers.ts` | 重连条件精确化：只 enabled 翻转才重连 |
 | preload | `src/preload/api.ts` | 暴露 `bridgeCredentialReady`；更新 setBridgeCredential/testBridgeUpstream 签名 |
-| renderer | `src/renderer/src/components/settings/ProtocolBridgeSection.vue` | 列表+编辑区两层 UI；editing/current 拆分；新交互函数 |
+| renderer | `src/renderer/src/components/settings/ProtocolBridgeSection.vue` | 列表+编辑区两层 UI；editing/current 拆分；模型列表来源 auto/manual 控件 + 手填区；新交互函数 |
 | test | `tests/shared/bridge-provider.test.ts` | 新增 |
 | test | `tests/shared/settings-schema-bridge.test.ts` | 新增 |
-| test | `tests/backend/bridge-manager-multi-provider.test.ts` | 新增 |
+| test | `tests/backend/bridge-manager-multi-provider.test.ts` | 新增（含 manual 模式 case） |
 | test | `tests/backend/bridge-credentials-multi.test.ts` | 新增 |
 | test | `tests/ipc/settings-bridge-reconnect.test.ts` | 新增 |
