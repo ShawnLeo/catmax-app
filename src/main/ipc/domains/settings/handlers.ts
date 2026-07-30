@@ -31,6 +31,8 @@ export const updateSettings = async (args: {
 }): Promise<AppSettings> => {
   // 桥开关翻转要重连 codex——它的 -c 参数依赖桥的端口/token，
   // 已 spawn 的进程读不到新值。必须在 update 前快照旧值才能 diff。
+  // 注意：纯切 provider（currentProviderId 变、enabled 不变）不需要重连——
+  // codexSpawnArgs 返回不变（端口/token 没变），桥的 resolveUpstream 每次请求重读。
   const wasBridgeEnabled = ctx.settingsStore.load().protocolBridge.enabled
   const updated = ctx.settingsStore.update(args.patch)
   // settings 变了——重新 apply 到 BackendManager，让代理/binaryPath 等立即生效。
