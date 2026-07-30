@@ -163,7 +163,7 @@ export const BRIDGE_UPSTREAM_PRESETS: readonly BridgeUpstreamPreset[] = [
       baseUrl: 'https://open.bigmodel.cn/api/anthropic',
       // 套餐不提供列表接口，manual 模式用手填列表
       modelsUrl: '',
-      model: 'GLM-5.2',
+      model: 'glm-5.2',
       // 用厂商语义名，避免和 Anthropic 官方的 ANTHROPIC_API_KEY 混淆
       credentialEnvVar: 'ZHIPUAI_API_KEY',
       capabilities: {
@@ -175,7 +175,7 @@ export const BRIDGE_UPSTREAM_PRESETS: readonly BridgeUpstreamPreset[] = [
         toolNameMaxLength: 64,
       },
       modelListMode: 'manual',
-      manualModels: ['GLM-5.2', 'GLM-5-Turbo', 'GLM-4.7'],
+      manualModels: ['glm-5.2', 'glm-5-turbo', 'glm-4.7'],
     },
   },
   {

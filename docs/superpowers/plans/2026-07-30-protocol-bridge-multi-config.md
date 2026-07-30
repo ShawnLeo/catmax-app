@@ -163,7 +163,7 @@ git commit -m "refactor(bridge): 扩展 BridgeUpstreamConfig 模型列表字段�
       baseUrl: 'https://open.bigmodel.cn/api/anthropic',
       // 套餐不提供列表接口，manual 模式用手填列表
       modelsUrl: '',
-      model: 'GLM-5.2',
+      model: 'glm-5.2',
       // 用厂商语义名，避免和 Anthropic 官方的 ANTHROPIC_API_KEY 混淆
       credentialEnvVar: 'ZHIPUAI_API_KEY',
       capabilities: {
@@ -175,7 +175,7 @@ git commit -m "refactor(bridge): 扩展 BridgeUpstreamConfig 模型列表字段�
         toolNameMaxLength: 64,
       },
       modelListMode: 'manual',
-      manualModels: ['GLM-5.2', 'GLM-5-Turbo', 'GLM-4.7'],
+      manualModels: ['glm-5.2', 'glm-5-turbo', 'glm-4.7'],
     },
   },
 ```
@@ -266,9 +266,9 @@ describe('createProviderFromPreset', () => {
   test('智谱预设有 modelListMode=manual 且预填模型', () => {
     const provider = createProviderFromPreset('zhipu')
     expect(provider.modelListMode).toBe('manual')
-    expect(provider.manualModels).toEqual(['GLM-5.2', 'GLM-5-Turbo', 'GLM-4.7'])
+    expect(provider.manualModels).toEqual(['glm-5.2', 'glm-5-turbo', 'glm-4.7'])
     expect(provider.baseUrl).toBe('https://open.bigmodel.cn/api/anthropic')
-    expect(provider.model).toBe('GLM-5.2')
+    expect(provider.model).toBe('glm-5.2')
     expect(provider.credentialEnvVar).toBe('ZHIPUAI_API_KEY')
   })
 
@@ -1952,7 +1952,7 @@ Run: `pnpm dev`
 2. 新建 Anthropic → 切换 radio → codex 不重连但模型列表刷新。
 3. 删除当前 DeepSeek → currentProviderId 落到 Anthropic → 凭证文件里 DeepSeek key 被清。
 4. 关桥 → 列表仍可见能编辑 → 开桥 → 仍指向前一个 currentProviderId。
-5. 新建智谱编程套餐 → baseUrl 正确、模型来源默认 manual、手填含 GLM-5.2/GLM-5-Turbo/GLM-4.7 → codex 下拉框显示这三个（不联网）。
+5. 新建智谱编程套餐 → baseUrl 正确、模型来源默认 manual、手填含 glm-5.2/glm-5-turbo/glm-4.7 → codex 下拉框显示这三个（不联网）。
 6. 智谱配置上手填新增 glm-4.6v → 下拉框立即出现。
 7. auto↔manual 切换 UI 正确响应。
 

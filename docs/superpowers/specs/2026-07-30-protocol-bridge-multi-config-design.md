@@ -179,8 +179,8 @@ export interface BridgeStatus {
 | base_url | `https://open.bigmodel.cn/api/anthropic` | 用户给定 + 官方 Claude Code 接入指南 |
 | 协议 | `anthropic.messages` | 官方 Anthropic 兼容端点 |
 | **模型列表模式** | **`manual`** | 套餐**不提供模型列表接口**，只能手填 |
-| 手填模型 | `['GLM-5.2', 'GLM-5-Turbo', 'GLM-4.7']` | 官方 overview 列出；用户可增删 |
-| 兜底模型 | `'GLM-5.2'` | 列表里第一个、能力最新的 |
+| 手填模型 | `['glm-5.2', 'glm-5-turbo', 'glm-4.7']` | 官方 overview 列出；用户可增删 |
+| 兜底模型 | `'glm-5.2'` | 列表里第一个、能力最新的 |
 | modelsUrl | `''`（留空） | 无列表接口，manual 模式下不用 |
 | 凭证环境变量名 | `ZHIPUAI_API_KEY` | 语义化命名；官方 Claude Code 直连用 `ANTHROPIC_AUTH_TOKEN`，但桥里用更明确的厂商名，避免和 Anthropic 官方 `ANTHROPIC_API_KEY` 混淆 |
 | supportsImages | `false` | 编程套餐的通用模型不一定支持视觉（仅 GLM-4.6V 支持）；保守默认关，用户视情况开 |
@@ -198,7 +198,7 @@ export interface BridgeStatus {
     protocol: 'anthropic.messages',
     baseUrl: 'https://open.bigmodel.cn/api/anthropic',
     modelsUrl: '',                              // 无列表接口
-    model: 'GLM-5.2',                           // 兜底
+    model: 'glm-5.2',                           // 兜底
     credentialEnvVar: 'ZHIPUAI_API_KEY',
     capabilities: {
       supportsImages: false,
@@ -207,7 +207,7 @@ export interface BridgeStatus {
       toolNameMaxLength: 64,
     },
     modelListMode: 'manual',                    // 关键：不拉取，用手填列表
-    manualModels: ['GLM-5.2', 'GLM-5-Turbo', 'GLM-4.7'],
+    manualModels: ['glm-5.2', 'glm-5-turbo', 'glm-4.7'],
   },
 },
 ```
@@ -423,7 +423,7 @@ async listUpstreamModels(): Promise<BridgeModelInfo[]> {
 
 关键点：
 1. **manual 不进 `modelsPromise` 缓存**——手填列表是同步的、随时可变（用户改了 manualModels 立即生效），缓存它反而会让「改了手填列表但没刷新」显示旧值。每次调用都重新读 `provider.manualModels`。
-2. **manual 也设 `knownModelIds`**——这是关键。`resolveModel`（bridge.ts:61）的逻辑是「认识就透传、不认识用兜底名」。如果 manual 模式不设 `knownModelIds`，codex 选了用户手填的 `GLM-5.2` 会被当成不认识、用兜底名顶掉（虽然兜底名也是 GLM-5.2，但那是巧合）。设上之后，手填列表里的模型名一律透传，行为正确。
+2. **manual 也设 `knownModelIds`**——这是关键。`resolveModel`（bridge.ts:61）的逻辑是「认识就透传、不认识用兜底名」。如果 manual 模式不设 `knownModelIds`，codex 选了用户手填的 `glm-5.2` 会被当成不认识、用兜底名顶掉（虽然兜底名也是 glm-5.2，但那是巧合）。设上之后，手填列表里的模型名一律透传，行为正确。
 3. **auto 模式的 `knownModelIds` 不变**——仍在 `fetchUpstreamModels` 成功后设（manager.ts 现有逻辑）。
 4. `invalidateModels()` 清缓存时，manual 模式下次调用会重读 `provider.manualModels`，所以切到 manual provider 也能正确刷新。
 
@@ -610,7 +610,7 @@ UI 层（`ProtocolBridgeSection.vue`）仓库无组件测试先例（无 `*.vue.
 2. 再「新建 Anthropic」→ 列表两项 → 切换 radio 到 Anthropic → codex 不重连但模型列表刷新。
 3. 删除当前激活的 DeepSeek → currentProviderId 自动落到 Anthropic → 凭证文件里 DeepSeek 的 key 被清（检查 `bridge-credentials.json`）。
 4. 关桥 → 列表仍可见，能编辑 → 开桥 → 仍指向关桥前的 currentProviderId。
-5. **「新建智谱编程套餐」** → 编辑区出现 baseUrl=`https://open.bigmodel.cn/api/anthropic`、**模型列表来源默认 manual**、手填列表含 GLM-5.2/GLM-5-Turbo/GLM-4.7 → 填 key → codex 下拉框显示这三个模型（**全程不联网拉模型**）。
+5. **「新建智谱编程套餐」** → 编辑区出现 baseUrl=`https://open.bigmodel.cn/api/anthropic`、**模型列表来源默认 manual**、手填列表含 glm-5.2/glm-5-turbo/glm-4.7 → 填 key → codex 下拉框显示这三个模型（**全程不联网拉模型**）。
 6. 在智谱配置上手填新增一个模型 `glm-4.6v` → codex 下拉框立即出现它（验证 manual 不进缓存、即时生效）。
 7. 把某个 provider 从 auto 切到 manual → modelsUrl/拉取按钮消失、手填区出现；切回 → 恢复。
 8. `pnpm typecheck` + `pnpm lint` 全过（尤其跨层 import：shared 不能引入 main）。

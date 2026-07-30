@@ -29,9 +29,9 @@ describe('createProviderFromPreset', () => {
   test('智谱预设有 modelListMode=manual 且预填模型', () => {
     const provider = createProviderFromPreset('zhipu')
     expect(provider.modelListMode).toBe('manual')
-    expect(provider.manualModels).toEqual(['GLM-5.2', 'GLM-5-Turbo', 'GLM-4.7'])
+    expect(provider.manualModels).toEqual(['glm-5.2', 'glm-5-turbo', 'glm-4.7'])
     expect(provider.baseUrl).toBe('https://open.bigmodel.cn/api/anthropic')
-    expect(provider.model).toBe('GLM-5.2')
+    expect(provider.model).toBe('glm-5.2')
     expect(provider.credentialEnvVar).toBe('ZHIPUAI_API_KEY')
   })
 
