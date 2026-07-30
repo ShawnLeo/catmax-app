@@ -43,7 +43,14 @@ export const updateSettings = async (args: {
     updated.protocolBridge.enabled !== wasBridgeEnabled &&
     ctx.backendManager.getCurrentId() === 'codex'
   ) {
-    await ctx.backendManager.reconnectBackend('codex')
+    // 重连失败不能让 settings.update 整个 reject——设置此刻**已经落盘了**，
+    // 抛出去只会让 UI 报一个"保存失败"的假错，而且开关状态和实际存储对不上。
+    // codex 重连失败也不致命：下一轮 turn 的 ensureInitialized() 会重新 spawn。
+    try {
+      await ctx.backendManager.reconnectBackend('codex')
+    } catch (e) {
+      log.warn('bridge toggle: codex reconnect failed, will respawn on next turn:', e)
+    }
   }
   return updated
 }

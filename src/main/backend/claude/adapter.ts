@@ -49,6 +49,7 @@ import {
 } from '@shared/backend/types'
 import { app } from 'electron'
 
+import { claudeOverrideSettingsPath } from '../../service/backend-config-files'
 import { logger } from '../../service/logger'
 
 import { createAskUserServer } from './ask-user-server'
@@ -334,6 +335,7 @@ export class ClaudeAdapter implements AgentBackend {
     }
     if (args.model) options.model = args.model
     if (args.effort) options.effort = args.effort === 'none' ? 'low' : args.effort
+    this.applyOverrideSettings(options)
     const binaryPath = this.resolveSdkBinaryPath()
     if (binaryPath !== undefined) options.pathToClaudeCodeExecutable = binaryPath
 
@@ -567,6 +569,8 @@ export class ClaudeAdapter implements AgentBackend {
     // 必须先展开 process.env 再覆盖 extraEnv，否则子进程会丢失 PATH / HOME / SHELL 等
     // 基础变量 → claude 跑任何 Bash 命令都会 "command not found"（实测会话里 PATH= 为空）。
     options.env = { ...process.env, ...this.extraEnv }
+    // catmax 覆盖配置（存在才注入；缺省的 key 由 SDK 回落到用户本地 settings）
+    this.applyOverrideSettings(options)
     // binary 路径：packaged 模式指向 unpacked 真实路径；dev 让 SDK 自行 resolve
     const binaryPath = this.resolveSdkBinaryPath()
     if (binaryPath !== undefined) {
@@ -1018,6 +1022,31 @@ export class ClaudeAdapter implements AgentBackend {
       return
     }
     ctx.askUser.respondQuestion(args.requestId, args.answer)
+  }
+
+  // ============ catmax 覆盖配置注入 ============
+
+  /**
+   * 把 catmax 自己的覆盖配置（userData/backend-settings/claude-settings.json）
+   * 交给 SDK 的 `Options.settings`。
+   *
+   * ⚠️ 这里**故意不设 `settingSources`**。省略时 SDK 按 CLI 默认加载 user/project/local 三层，
+   * 覆盖层落在优先级更高的 'flag' 层（managed > flag > user > project > local），于是
+   * "覆盖文件里没写的 key 自动回落用户本地配置"是 SDK 自己保证的语义，catmax 不做任何合并。
+   * 传 `[]` 会顺带把项目 CLAUDE.md 一起关掉（SDK 文档：必须含 'project' 才加载 CLAUDE.md），
+   * 所以不能拿它来做隔离。
+   *
+   * 文件不存在时不设这个字段——"没有覆盖配置"必须等价于"完全走用户本地配置"，
+   * 而给 SDK 传一个不存在的路径会直接报错。
+   *
+   * warmup 也要调这个，否则预热请求和正式 turn 的有效配置（model/env）不一致，
+   * prompt-cache 共享前缀就白搭了。
+   */
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  private applyOverrideSettings(options: Record<string, any>): void {
+    const path = claudeOverrideSettingsPath()
+    if (path === null) return
+    options.settings = path
   }
 
   // ============ binary 路径解析（ASAR 打包支持） ============

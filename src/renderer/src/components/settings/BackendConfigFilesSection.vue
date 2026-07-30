@@ -1,12 +1,17 @@
 <template>
-  <!-- Backend Config Files: 直接编辑后端自己的本地配置文件（不是 catmax 的 settings.json）。 -->
+  <!--
+    Backend Config Files: 两类文件共用一个编辑器，靠 file.location 区分（不是 catmax 的 settings.json）：
+    - backend-home    → 原地改用户的 ~/.claude、~/.codex，命令行也一起生效
+    - catmax-userdata → catmax 自己的覆盖层，只影响 catmax 内的会话
+    这两种都能设 model/env/permissions，所以「影响范围」必须在 tab 和编辑器上方都标出来。
+  -->
   <section class="flex flex-col gap-3">
     <header>
-      <h2 class="text-lg font-semibold text-foreground">后端本地配置文件</h2>
+      <h2 class="text-lg font-semibold text-foreground">后端配置文件</h2>
       <p class="text-sm text-muted-foreground">
-        直接编辑后端自己的配置文件。catmax 只是编辑器——不保存副本、不保存其中的密钥。
         保存前会校验语法，并把旧内容备份到 catmax 数据目录（保留最近 10 份）。
         下方显示的是上面选中的「默认后端」的配置文件——切换默认后端会显示该后端的文件。
+        注意区分每个 tab 的影响范围：改后端自己的文件会连命令行一起生效，改 catmax 覆盖配置只影响本应用。
       </p>
     </header>
 
@@ -27,6 +32,13 @@
       >
         <BackendIcon :backend="file.backendId" class="w-4 h-4" />
         <span>{{ file.label }}</span>
+        <!-- 影响范围徽标：只有 catmax 私有的那份需要标，后端本地文件是默认认知 -->
+        <span
+          v-if="file.location === 'catmax-userdata'"
+          class="text-[10px] leading-none px-1.5 py-0.5 rounded bg-muted text-muted-foreground"
+        >
+          仅本应用
+        </span>
         <LockIcon v-if="file.sensitive" class="w-3 h-3 opacity-60" />
         <span v-if="!file.exists" class="text-xs opacity-60">未创建</span>
         <span v-else-if="isDirty(file.id)" class="text-xs text-amber-600 dark:text-amber-400">
@@ -62,19 +74,42 @@
         </button>
       </div>
 
+      <!-- 影响范围横幅：两类文件字段重叠，必须让用户先看清自己在改哪一份 -->
+      <div
+        :class="[
+          'text-xs px-3 py-2 rounded-md border',
+          activeFile.location === 'catmax-userdata'
+            ? 'border-sidebar-border bg-muted/30 text-muted-foreground'
+            : 'border-amber-500/30 bg-amber-500/5 text-amber-700 dark:text-amber-400',
+        ]"
+      >
+        <template v-if="activeFile.location === 'catmax-userdata'">
+          <strong class="font-medium text-foreground">只影响 catmax。</strong>
+          这份文件由 catmax 拥有，保存不会写入用户的后端配置目录。
+        </template>
+        <template v-else>
+          <strong class="font-medium">会影响命令行。</strong>
+          这是后端自己的真配置文件，保存后你在终端直接跑 {{ props.backendId }} 也会读到。
+        </template>
+      </div>
+
       <p class="text-xs text-muted-foreground">{{ activeFile.description }}</p>
 
-      <!-- 敏感文件门禁：auth.json 含明文密钥，默认不渲染内容，点开才读 -->
+      <!-- 敏感文件门禁：含明文密钥（codex auth.json / catmax 覆盖配置的 env 块），默认不渲染内容，点开才读 -->
       <div
         v-if="activeFile.sensitive && !revealed"
         class="flex flex-col items-start gap-2 p-4 rounded-md border border-dashed border-sidebar-border"
       >
         <div class="flex items-center gap-2 text-sm text-foreground">
           <LockIcon class="w-4 h-4" />
-          这个文件里是明文凭证
+          这个文件可能含明文凭证
         </div>
         <p class="text-xs text-muted-foreground">
-          点开才会读取并显示内容。改坏会导致 codex 需要重新登录（<code>codex login</code>）。
+          点开才会读取并显示内容。写盘时强制 0600 权限。
+          <template v-if="activeFile.id === 'codex.auth'">
+            改坏会导致 codex 需要重新登录（<code>codex login</code>）。
+          </template>
+          <template v-else> env 块里常放 ANTHROPIC_AUTH_TOKEN 之类的 API key。 </template>
         </p>
         <Button variant="outline" size="sm" @click="revealSensitive">
           <EyeIcon class="w-3.5 h-3.5" />
@@ -149,8 +184,18 @@
             <li v-else-if="props.backendId === 'claude'">
               claude 每个 turn 由 SDK 新起进程，下一个 turn 就会读到新配置
             </li>
+            <li v-if="activeFile.location === 'catmax-userdata'">
+              这一层里<strong class="font-medium">没写的 key 会回落到本地配置</strong
+              >——删掉一个 key 就等于把这项交还给 {{ props.backendId }} 自己的文件
+            </li>
+            <li v-if="activeFile.id === 'claude.catmaxSettings'">
+              例外：<code>permissions</code> 的 allow/deny 数组是和本地配置<strong
+                class="font-medium"
+                >取并集</strong
+              >，这一层只能加权限、减不了
+            </li>
             <li>
-              这里改的是后端自己的全局配置，和上面「默认运行时配置」（catmax 自己的兜底值）互不覆盖
+              这里改的是后端的配置文件，和上面「默认运行时配置」（catmax 自己的兜底值）互不覆盖
             </li>
           </ul>
         </div>
