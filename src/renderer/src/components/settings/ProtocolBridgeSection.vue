@@ -10,23 +10,30 @@
           端点，对上游说上游的协议。
         </p>
       </div>
-      <button
-        type="button"
-        role="switch"
-        :aria-checked="enabled"
-        :class="[
-          'shrink-0 mt-1 relative w-10 h-6 rounded-full transition-colors cursor-pointer',
-          enabled ? 'bg-primary' : 'bg-muted',
-        ]"
-        @click="toggleEnabled"
-      >
-        <span
+      <div class="mt-1 flex shrink-0 items-center gap-2">
+        <span :class="['text-xs font-medium', enabled ? 'text-success' : 'text-muted-foreground']">
+          {{ enabled ? '已开启' : '已关闭' }}
+        </span>
+        <button
+          type="button"
+          role="switch"
+          :aria-checked="enabled"
+          aria-label="启用协议转换桥"
           :class="[
-            'absolute top-1 w-4 h-4 rounded-full bg-background transition-all',
-            enabled ? 'left-5' : 'left-1',
+            'relative w-11 h-6 rounded-full border-2 shadow-sm transition-colors cursor-pointer',
+            'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background',
+            enabled ? 'border-success bg-success' : 'border-foreground/60 bg-muted',
           ]"
-        />
-      </button>
+          @click="toggleEnabled"
+        >
+          <span
+            :class="[
+              'absolute top-0.5 left-0.5 w-4 h-4 rounded-full shadow-md transition-transform',
+              enabled ? 'translate-x-5 bg-primary-foreground' : 'bg-foreground',
+            ]"
+          />
+        </button>
+      </div>
     </header>
 
     <template v-if="enabled">
