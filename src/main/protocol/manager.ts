@@ -22,7 +22,11 @@ import {
   type BridgeUpstreamConfig,
 } from '@shared/protocol/bridge-config'
 
-import { getStoredCredential } from '../service/bridge-credentials'
+import {
+  clearStoredCredential,
+  getStoredCredential,
+  setStoredCredential,
+} from '../service/bridge-credentials'
 import { logger } from '../service/logger'
 
 import type { BridgeUpstreamTarget } from './bridge'
@@ -30,6 +34,13 @@ import { BridgeServer } from './server'
 import { fetchUpstreamModels } from './upstream-models'
 
 const log = logger.domain('bridge-manager')
+
+/**
+ * 多配置改造前，所有上游凭证都存在这个固定 key 下（见 bridge-credentials.ts）。
+ * 改造后凭证按 provider.id（UUID）隔离，旧 key 变成孤儿。
+ * applySettings 会在首次加载时把它迁移到当前 provider 名下（见 migrateLegacyCredential）。
+ */
+const LEGACY_BRIDGE_CREDENTIAL_ID = 'codex-bridge'
 
 export class BridgeManager {
   private settings: BridgeSettings | null = null
@@ -46,11 +57,33 @@ export class BridgeManager {
     return s.providers[id] ?? null
   }
 
+  /**
+   * 一次性迁移：多配置改造前凭证存在固定的 'codex-bridge' key 下，改造后按 provider
+   * UUID 隔离。旧用户升级后那个 key 会变成孤儿——当前 provider 查不到 key 就拉不到
+   * 模型列表。这里在 settings 应用时把旧 key 搬到当前 provider 名下并清掉旧 key。
+   *
+   * 只迁 stored 来源的凭证（env 来源不落盘，没有文件要迁）。
+   * 幂等：当前 provider 已有自己的 key 就不迁；旧 key 不存在也不迁。
+   */
+  private migrateLegacyCredential(): void {
+    const provider = this.currentProvider()
+    // 只迁 stored 来源；env 来源的值不在凭证文件里
+    if (!provider || provider.credentialSource !== 'stored') return
+    // 当前 provider 已有凭证就不动——用户可能已经在新 UI 重新保存过
+    if (getStoredCredential(provider.id)) return
+    const legacy = getStoredCredential(LEGACY_BRIDGE_CREDENTIAL_ID)
+    if (!legacy) return
+    setStoredCredential(provider.id, legacy)
+    clearStoredCredential(LEGACY_BRIDGE_CREDENTIAL_ID)
+    log.info('已迁移旧 codex-bridge 凭证到当前 provider', provider.id)
+  }
+
   /** settings 变化时调用：按 enabled 起停服务 */
   async applySettings(settings: BridgeSettings): Promise<void> {
     const wasEnabled = this.settings?.enabled ?? false
     const prevCurrent = this.currentProvider() // 切换前的当前 provider 快照
     this.settings = settings
+    this.migrateLegacyCredential()
     const newCurrent = this.currentProvider()
 
     // 当前 provider 的「身份」变了（地址/列表/凭证来源/模型列表模式/手填列表）就丢模型缓存。
