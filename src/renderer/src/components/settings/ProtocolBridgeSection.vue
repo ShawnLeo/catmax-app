@@ -61,27 +61,19 @@
               ? 'border-foreground bg-muted/40'
               : 'border-sidebar-border hover:bg-muted/20',
           ]"
-          @click="selectEditing(p.id)"
+          @click="selectProvider(p.id)"
         >
           <input
             type="radio"
             :checked="p.id === bridge.currentProviderId"
-            class="cursor-pointer"
-            @click.stop="switchProvider(p.id)"
+            class="pointer-events-none"
+            aria-label="当前启用"
           />
           <span class="flex-1 truncate">{{ p.name || p.baseUrl || '(未命名)' }}</span>
           <span v-if="p.id === bridge.currentProviderId" class="text-xs text-success">当前</span>
           <span v-if="p.modelListMode === 'manual'" class="text-xs text-muted-foreground"
             >手动</span
           >
-          <button
-            type="button"
-            class="text-xs text-muted-foreground hover:text-foreground px-1"
-            title="编辑"
-            @click.stop="selectEditing(p.id)"
-          >
-            ✎
-          </button>
           <button
             type="button"
             class="text-xs text-muted-foreground hover:text-destructive px-1"
@@ -474,8 +466,13 @@ async function patchProvider(providerId: string, patch: Partial<BridgeProvider>)
 }
 
 // —— 列表操作 ——
-async function switchProvider(id: string): Promise<void> {
+/**
+ * 点列表行：切换为当前启用的 provider + 打开编辑区。
+ * 切换 currentProviderId 触发热切换（桥每次请求重读），并刷新模型列表。
+ */
+async function selectProvider(id: string): Promise<void> {
   await patchBridge({ currentProviderId: id })
+  selectEditing(id)
   await refreshModels()
 }
 
