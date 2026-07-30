@@ -128,6 +128,12 @@ export class BridgeManager {
     if (!this.settings?.enabled || !baseUrl) return []
     const provider = BRIDGE_CODEX_PROVIDER_ID
     return [
+      // 桥接管 model_provider 后，上游是 DeepSeek/Anthropic 等，不再是 ChatGPT。
+      // codex 0.145+ 的 `apps` feature 会内置一个 codex_apps MCP，它连 ChatGPT 远程
+      // 服务——用户没 codex login 时它启动超时 30s 才失败，期间阻塞 turn 实际执行
+      // （实测：首个 token 延迟从 1s 飙到 30s+）。桥场景下它毫无用处，直接禁用。
+      '--disable',
+      'apps',
       '-c',
       `model_provider="${provider}"`,
       '-c',

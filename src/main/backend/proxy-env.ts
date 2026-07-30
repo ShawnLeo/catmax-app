@@ -27,9 +27,21 @@ export function normalizeProxyUrl(url: string): string {
  * 把 HttpProxy settings 转成 env 键值对。
  * - enabled = false 或 url 为空时返回空对象（不修改环境）
  * - 否则同时设大小写两套变量（不同工具读不同的）
+ *
+ * `options.ensureLocalhostBypassed`：当子进程要访问本机服务（如 Protocol Bridge
+ * 跑在 127.0.0.1）时必须传 true——保证 127.0.0.1/localhost 出现在 NO_PROXY 里。
+ * 原因：codex (reqwest) 的 `<local>` 只匹配无点主机名，不匹配 `127.0.0.1`，
+ * 不显式排除的话本机请求会被代理拦截（实测返回 502 Bad Gateway）。
  */
-export function proxySettingsToEnv(proxy: HttpProxy | null | undefined): Record<string, string> {
+export function proxySettingsToEnv(
+  proxy: HttpProxy | null | undefined,
+  options: { ensureLocalhostBypassed?: boolean } = {},
+): Record<string, string> {
   if (!proxy || !proxy.enabled || !proxy.url) {
+    // 即使没配代理，桥场景下也要保证本机不走代理——继承的进程环境可能带代理。
+    if (options.ensureLocalhostBypassed) {
+      return { NO_PROXY: '127.0.0.1,localhost,::1', no_proxy: '127.0.0.1,localhost,::1' }
+    }
     return {}
   }
 
@@ -45,13 +57,27 @@ export function proxySettingsToEnv(proxy: HttpProxy | null | undefined): Record<
     all_proxy: url,
   }
 
+  // 合并 NO_PROXY：用户 bypass + （桥场景下）强制本机地址
+  const bypassParts: string[] = []
   if (proxy.bypass) {
-    // NO_PROXY 是逗号分隔域名列表，用户 settings 里也按这个格式存
     const bypass = proxy.bypass.trim()
-    if (bypass) {
-      env.NO_PROXY = bypass
-      env.no_proxy = bypass
+    if (bypass)
+      bypassParts.push(
+        ...bypass
+          .split(',')
+          .map((s) => s.trim())
+          .filter(Boolean),
+      )
+  }
+  if (options.ensureLocalhostBypassed) {
+    for (const host of ['127.0.0.1', 'localhost', '::1']) {
+      if (!bypassParts.some((p) => p === host)) bypassParts.push(host)
     }
+  }
+  if (bypassParts.length > 0) {
+    const noProxy = bypassParts.join(',')
+    env.NO_PROXY = noProxy
+    env.no_proxy = noProxy
   }
 
   return env

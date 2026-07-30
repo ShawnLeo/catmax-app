@@ -237,6 +237,38 @@ export class PerTurnCoordinator {
     await Promise.allSettled([...interrupts, ...finishes])
   }
 
+  /**
+   * 中断并结算某个 backend 的所有活跃 turn（dispose 全局的细化版本）。
+   *
+   * 用于重连某后端进程前清空它的 in-flight turn——否则被杀进程的 turn 会卡在
+   * running 状态直到 60s 适配器 idle 超时 / 30min 协调器看门狗，且占用 lane
+   * 阻塞重连后新 turn 执行。模式与 dispose() 一致，只多了 backend 过滤。
+   */
+  async interruptBackend(backend: BackendId): Promise<void> {
+    const entries: TurnEntry[] = []
+    for (const lane of this.lanes.values()) {
+      if (lane.active && lane.active.request.backend === backend) entries.push(lane.active)
+      for (const entry of lane.queue) {
+        if (entry.request.backend === backend) entries.push(entry)
+      }
+    }
+
+    const interrupts: Promise<void>[] = []
+    const finishes: Promise<void>[] = []
+    for (const entry of entries) {
+      if (entry.settled) continue
+      if (entry.record.status === 'running' || entry.record.status === 'cancelling') {
+        const backendTurnId = entry.record.backendTurnId
+        if (backendTurnId) {
+          interrupts.push(entry.request.interrupt(backendTurnId).catch(this.onError))
+        }
+      }
+      this.publishSyntheticCompletion(entry, 'interrupted')
+      finishes.push(this.finish(entry))
+    }
+    await Promise.allSettled([...interrupts, ...finishes])
+  }
+
   private startNext(laneKey: string): void {
     const lane = this.lanes.get(laneKey)
     if (!lane || lane.active) return

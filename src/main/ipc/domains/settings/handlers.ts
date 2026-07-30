@@ -29,13 +29,22 @@ export const getSettings = async (): Promise<AppSettings> => {
 export const updateSettings = async (args: {
   patch: Partial<AppSettings>
 }): Promise<AppSettings> => {
+  // 桥开关翻转要重连 codex——它的 -c 参数依赖桥的端口/token，
+  // 已 spawn 的进程读不到新值。必须在 update 前快照旧值才能 diff。
+  const wasBridgeEnabled = ctx.settingsStore.load().protocolBridge.enabled
   const updated = ctx.settingsStore.update(args.patch)
   // settings 变了——重新 apply 到 BackendManager，让代理/binaryPath 等立即生效。
-  // 特别注意：codex 的 app-server 是 long-running 进程，已经 spawn 出去的进程
-  // 不会读到新 env。applySettings 会更新 adapter 内部状态，但下次 spawn 才生效。
-  // 对 codex 来说，用户改代理后需要重新切一次 backend（dispose + 重新 initialize）
-  // 才能用新代理。这里不自动 dispose——由用户在 UI 上重连。
+  // applyBridgeThenBackend 先起桥、再把桥的 spawn 参数写进 codex adapter（setExtraArgs），
+  // 所以必须先于 reconnectBackend——否则重 spawn 时 extraArgs 还是旧的。
   await applyBridgeThenBackend(updated)
+  // 桥开关翻转（开↔关）改变了 codexSpawnArgs 的返回（空数组 ↔ 有 -c），
+  // 当前后端是 codex 时必须重 spawn 才能让 codex 指向/脱离本机桥。
+  if (
+    updated.protocolBridge.enabled !== wasBridgeEnabled &&
+    ctx.backendManager.getCurrentId() === 'codex'
+  ) {
+    await ctx.backendManager.reconnectBackend('codex')
+  }
   return updated
 }
 

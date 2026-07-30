@@ -185,7 +185,14 @@ export const getBridgeStatus = async (): Promise<BridgeStatus> => {
  */
 export const setBridgeCredential = async (args: { secret: string }): Promise<BridgeStatus> => {
   setStoredCredential(BRIDGE_CREDENTIAL_ID, args.secret.trim())
-  return bridgeManager.status()
+  const status = bridgeManager.status()
+  // 常见场景：codex 早于桥 spawn（启动时桥关着），没拿到 `-c model_provider` 参数。
+  // 保存 key 是用户完成桥配置的时刻——桥此时若已在跑，借机让 codex 重 spawn 带上 -c。
+  // 不 await：凭证保存立即返回 status，重连在后台进行；重连期间的新 turn 会排队等握手完成。
+  if (status.running && ctx.backendManager.getCurrentId() === 'codex') {
+    void ctx.backendManager.reconnectBackend('codex')
+  }
+  return status
 }
 
 /**

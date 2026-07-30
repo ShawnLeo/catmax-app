@@ -175,6 +175,24 @@ describe('BridgeServer 端到端', () => {
     expect(response.status).toBe(200)
   })
 
+  test('/v1/models 返回上游模型（codex 期望的 {models:[...]} 格式，非 data）', async () => {
+    // codex 0.145+ 的 models manager 会 GET <base_url>/models 刷新模型列表。
+    // 它期望字段是 `models`（实测返回 {data:[...]} 会报 missing field `models`）。
+    const response = await fetch(`${bridge!.baseUrl}/models`, {
+      headers: { authorization: `Bearer ${bridge!.authToken}` },
+    })
+    expect(response.status).toBe(200)
+    const body = (await response.json()) as { models: Array<{ slug: string }> }
+    expect(body.models).toBeInstanceOf(Array)
+    expect(body.models.length).toBeGreaterThan(0)
+    expect(body.models[0]!.slug).toBeDefined()
+  })
+
+  test('/v1/models 没 token → 401', async () => {
+    const response = await fetch(`${bridge!.baseUrl}/models`)
+    expect(response.status).toBe(401)
+  })
+
   test('请求侧：Responses → Anthropic 转换正确', async () => {
     await callBridge(bridge!, RESPONSES_REQUEST)
 

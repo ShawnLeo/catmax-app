@@ -34,8 +34,12 @@ export function registerBuiltinBackendPlugins(): void {
         }
         // Protocol Bridge: 桥开着时把 codex 的 model_provider 用 `-c` 覆盖到本机桥上，
         // 并注入桥的 token。桥关着时两者都是空，codex 完全按用户自己的 config.toml 走。
+        // 桥跑在 127.0.0.1，代理必须放行本机——否则 codex 经代理访问桥会 502。
+        const bridgeActive = bridgeManager.status().running
         adapter.setExtraEnv({
-          ...proxySettingsToEnv(settings.httpProxy),
+          ...proxySettingsToEnv(settings.httpProxy, {
+            ensureLocalhostBypassed: bridgeActive,
+          }),
           ...bridgeManager.codexSpawnEnv(),
         })
         adapter.setExtraArgs(bridgeManager.codexSpawnArgs())

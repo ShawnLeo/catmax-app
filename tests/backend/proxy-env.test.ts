@@ -55,6 +55,42 @@ describe('proxySettingsToEnv', () => {
     const proxy: HttpProxy = { enabled: true, url: 'socks5://127.0.0.1:1080', bypass: null }
     expect(proxySettingsToEnv(proxy).ALL_PROXY).toBe('socks5://127.0.0.1:1080')
   })
+
+  test('ensureLocalhostBypassed → NO_PROXY 强制含 127.0.0.1/localhost/::1', () => {
+    // Protocol Bridge 跑在 127.0.0.1，codex 经代理访问它会 502——必须放行本机。
+    // 用户的 bypass 只有 <local>，reqwest 不认，所以得显式补全。
+    const proxy: HttpProxy = {
+      enabled: true,
+      url: 'http://127.0.0.1:7897',
+      bypass: '*.crashlytics.com,<local>',
+    }
+    const env = proxySettingsToEnv(proxy, { ensureLocalhostBypassed: true })
+    expect(env.NO_PROXY).toContain('127.0.0.1')
+    expect(env.NO_PROXY).toContain('localhost')
+    expect(env.NO_PROXY).toContain('::1')
+    // 用户原有的 bypass 不丢
+    expect(env.NO_PROXY).toContain('*.crashlytics.com')
+  })
+
+  test('ensureLocalhostBypassed 且用户 bypass 已含 127.0.0.1 → 不重复', () => {
+    const proxy: HttpProxy = {
+      enabled: true,
+      url: 'http://127.0.0.1:7897',
+      bypass: '127.0.0.1,localhost',
+    }
+    const env = proxySettingsToEnv(proxy, { ensureLocalhostBypassed: true })
+    const count = (env.NO_PROXY!.match(/127\.0\.0\.1/g) ?? []).length
+    expect(count).toBe(1)
+    expect(env.NO_PROXY).toContain('::1')
+  })
+
+  test('ensureLocalhostBypassed 且代理禁用 → 仍设 NO_PROXY 放行本机', () => {
+    // 继承的进程环境可能带代理，即便用户没在 catmax 里配——桥场景下兜底放行。
+    const proxy: HttpProxy = { enabled: false, url: 'http://127.0.0.1:7897', bypass: null }
+    const env = proxySettingsToEnv(proxy, { ensureLocalhostBypassed: true })
+    expect(env.NO_PROXY).toBe('127.0.0.1,localhost,::1')
+    expect(env.HTTP_PROXY).toBeUndefined()
+  })
 })
 
 describe('parseSystemProxy (macOS scutil)', () => {

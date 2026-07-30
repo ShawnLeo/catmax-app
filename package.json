@@ -100,6 +100,16 @@
       "better-sqlite3",
       "electron",
       "node-pty"
-    ]
+    ],
+    "supportedArchitectures": {
+      "os": [
+        "darwin",
+        "win32"
+      ],
+      "cpu": [
+        "x64",
+        "arm64"
+      ]
+    }
   }
 }

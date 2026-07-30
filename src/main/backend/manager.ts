@@ -165,6 +165,29 @@ export class BackendManager {
     ctx.broadcast('backend:statusChanged', { status })
   }
 
+  /**
+   * 重连指定后端：先结算它的活跃 turn，再 dispose（杀进程）+ 重新 initialize。
+   *
+   * 用于「后端进程已 spawn，但后续配置变化需要重新 spawn 才能生效」的场景——
+   * 最典型的是 Protocol Bridge：codex 早于桥 spawn 时没拿到 `-c model_provider`
+   * 参数，用户后来开启桥后必须重 spawn codex 才能让它指向本机桥。
+   *
+   * 顺序很重要：先 interruptBackend 清空活跃 turn（释放 lane，避免重连后的新 turn
+   * 被死 entry 阻塞），再 dispose 杀进程，最后 initialize 用更新后的 extraArgs 重 spawn。
+   * applySettings 必须在此调用之前执行过——它负责把新参数写进 adapter 字段。
+   */
+  async reconnectBackend(id: BackendId): Promise<void> {
+    const adapter = this.adapters.get(id)
+    if (!adapter) {
+      log.warn('reconnectBackend: unknown backend', id)
+      return
+    }
+    await this.turnCoordinator.interruptBackend(id)
+    await adapter.dispose()
+    await adapter.initialize()
+    log.info('reconnected backend', id)
+  }
+
   /** 列出所有后端的 status */
   async listStatuses(): Promise<BackendStatus[]> {
     return Promise.all(
