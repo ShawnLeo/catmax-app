@@ -268,6 +268,7 @@
 import { Button } from '@renderer/components/ui/button'
 import { DropdownMenu, type DropdownOption } from '@renderer/components/ui/dropdown-menu'
 import { Input } from '@renderer/components/ui/input'
+import { useBackendStore } from '@renderer/stores/backend'
 import { useSettingsStore } from '@renderer/stores/settings'
 import type { ModelOption } from '@shared/backend/types'
 import {
@@ -282,6 +283,7 @@ import { computed, onMounted, ref } from 'vue'
 type Upstream = ProtocolBridgeSettings['upstream']
 
 const settings = useSettingsStore()
+const backendStore = useBackendStore()
 
 const status = ref<BridgeStatus | null>(null)
 const secretDraft = ref('')
@@ -336,6 +338,10 @@ async function patchCapabilities(patch: Partial<Upstream['capabilities']>): Prom
 
 async function toggleEnabled(): Promise<void> {
   await patchBridge({ enabled: !enabled.value })
+  // 开关翻转会整批换掉 codex 的可用模型（开=上游模型，关=codex 自己的 GPT 模型），
+  // 两个方向都要重拉。patchBridge → settings.update 内部已 await 完 codex 重连，
+  // 所以这里拉到的一定是新进程报的列表，不会拿到旧上游的残留。
+  await refreshModels()
 }
 
 /** 切预设时把该预设的地址/模型/能力整套灌进去，凭证来源保持用户当前选择 */
@@ -362,18 +368,29 @@ async function refreshStatus(): Promise<void> {
 }
 
 /**
- * 拉上游模型列表。走的就是 codex 模型下拉框那条路径（桥开着时 listModelsFor 返回的
- * 就是上游模型），所以这里看到什么，聊天界面就会看到什么。
+ * 重拉 codex 的模型列表。走的就是 codex 模型下拉框那条路径（桥开着时 listModelsFor
+ * 返回的是上游模型，关掉则回落 codex 自己的 model/list），所以这里看到什么，
+ * 聊天界面就会看到什么。
+ *
+ * 桥关掉时也要能跑——关桥后模型列表从上游模型换回 GPT 模型，不重拉的话下拉框会一直
+ * 停在上一个上游的模型上。所以这里**不做 enabled 判断**；不希望触发 spawn 的场合
+ * （onMounted）由调用点自己 guard。
+ *
+ * 走 store 的 refreshModelsFor 而不是直接 window.api：main 侧清缓存只是一半，
+ * 渲染层 modelsByBackend（「默认模型」下拉框的数据源）也得同步换掉。
  */
 async function refreshModels(): Promise<void> {
-  if (!enabled.value) return
   loadingModels.value = true
   modelsError.value = null
   try {
     // 清缓存后重拉，否则改完地址/密钥点刷新还是旧结果。
     // 用 ...For 版本：当前 backend 未必是 codex。
-    upstreamModels.value = await window.api.backend.refreshModelsFor({ id: 'codex' })
-    if (upstreamModels.value.length === 0) modelsError.value = '没有拉到模型，检查地址和 API key'
+    await backendStore.refreshModelsFor('codex')
+    upstreamModels.value = backendStore.modelsByBackend.codex ?? []
+    // 关桥后拉不到模型是 codex 自己没登录之类的问题，不该报"检查地址和 API key"
+    if (upstreamModels.value.length === 0 && enabled.value) {
+      modelsError.value = '没有拉到模型，检查地址和 API key'
+    }
   } catch (e) {
     upstreamModels.value = []
     modelsError.value = e instanceof Error ? e.message : String(e)

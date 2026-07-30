@@ -95,16 +95,18 @@
 
     <div class="h-px bg-sidebar-border my-1" />
 
+    <!-- Protocol Bridge: 只对 codex 有意义——claude 后端自己就说 Anthropic 协议，不需要转换。
+         排在配置文件之前是有意的：开桥后 codex 走桥的 token、不再读 auth.json，
+         下面那一节会据此把 auth.json 的 tab 藏掉。先让用户定"走不走桥"，再看"改哪个文件"。 -->
+    <template v-if="defaultBackend === 'codex'">
+      <ProtocolBridgeSection />
+      <div class="h-px bg-sidebar-border my-1" />
+    </template>
+
     <!-- Backend Config Files: 后端自己的配置文件（~/.codex/config.toml 等），
          和上面 catmax 自己的「默认运行时配置」是两套东西，所以单独成节；
          但同样跟着「默认后端」走，只显示当前默认后端的文件。 -->
     <BackendConfigFilesSection :backend-id="defaultBackend" />
-
-    <!-- Protocol Bridge: 只对 codex 有意义——claude 后端自己就说 Anthropic 协议，不需要转换 -->
-    <template v-if="defaultBackend === 'codex'">
-      <div class="h-px bg-sidebar-border my-1" />
-      <ProtocolBridgeSection />
-    </template>
 
     <div class="h-px bg-sidebar-border my-1" />
 

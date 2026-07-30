@@ -10,8 +10,8 @@
       <h2 class="text-lg font-semibold text-foreground">后端配置文件</h2>
       <p class="text-sm text-muted-foreground">
         保存前会校验语法，并把旧内容备份到 catmax 数据目录（保留最近 10 份）。
-        下方显示的是上面选中的「默认后端」的配置文件——切换默认后端会显示该后端的文件。
-        注意区分每个 tab 的影响范围：改后端自己的文件会连命令行一起生效，改 catmax 覆盖配置只影响本应用。
+        下方显示的是上面选中的「默认后端」的配置文件——切换默认后端会显示该后端的文件。 注意区分每个
+        tab 的影响范围：改后端自己的文件会连命令行一起生效，改 catmax 覆盖配置只影响本应用。
       </p>
     </header>
 
@@ -50,6 +50,16 @@
     <!-- 白名单里没有这个后端的文件（比如后续新加的后端还没登记） -->
     <p v-else class="text-xs text-muted-foreground px-3 py-2 bg-muted/30 rounded-md">
       catmax 还没有登记 {{ props.backendId }} 的本地配置文件。
+    </p>
+
+    <!-- tab 凭空少一个会让人以为是 bug，说清楚是桥藏的、怎么恢复 -->
+    <p
+      v-if="hiddenByBridge.length > 0 && files.length > 0"
+      class="text-xs text-muted-foreground px-3 py-2 bg-muted/30 rounded-md"
+    >
+      协议桥已开启，codex 走桥的临时 token、不再读
+      <code>auth.json</code>，所以这个 tab 暂时隐藏。上游的 API key
+      在上面的「协议桥」里配置；关闭协议桥后这个 tab 会恢复（草稿不会丢）。
     </p>
 
     <template v-if="activeFile">
@@ -185,8 +195,8 @@
               claude 每个 turn 由 SDK 新起进程，下一个 turn 就会读到新配置
             </li>
             <li v-if="activeFile.location === 'catmax-userdata'">
-              这一层里<strong class="font-medium">没写的 key 会回落到本地配置</strong
-              >——删掉一个 key 就等于把这项交还给 {{ props.backendId }} 自己的文件
+              这一层里<strong class="font-medium">没写的 key 会回落到本地配置</strong>——删掉一个 key
+              就等于把这项交还给 {{ props.backendId }} 自己的文件
             </li>
             <li v-if="activeFile.id === 'claude.catmaxSettings'">
               例外：<code>permissions</code> 的 allow/deny 数组是和本地配置<strong
@@ -214,6 +224,7 @@
 <script setup lang="ts">
 import BackendIcon from '@renderer/components/icons/BackendIcon.vue'
 import { Button } from '@renderer/components/ui/button'
+import { useSettingsStore } from '@renderer/stores/settings'
 import type {
   BackendConfigFileContent,
   BackendConfigFileInfo,
@@ -243,8 +254,24 @@ interface FileDraft {
 // 和上面的「默认运行时配置」保持同一个心智模型。
 const props = defineProps<{ backendId: BackendId }>()
 
+const settings = useSettingsStore()
+
+/**
+ * 开桥后 codex 不再需要自己的凭证：桥给它的是 per-boot 的 CATMAX_BRIDGE_TOKEN
+ * （model_providers.<id>.env_key），上游真 key 由桥持有。auth.json 此时既不被读也不被写，
+ * 摆在这里只会让用户以为"改了它就能换上游"。所以开桥期间把这个 tab 藏掉，关桥恢复。
+ *
+ * 只藏不删：草稿按文件 id 存在 drafts 里，关桥回来还在（tab 上的 ● 会提示未保存）。
+ */
+const bridgeEnabled = computed(() => settings.settings?.protocolBridge?.enabled === true)
+const hiddenByBridge = computed<string[]>(() => (bridgeEnabled.value ? ['codex.auth'] : []))
+
 const allFiles = ref<BackendConfigFileInfo[]>([])
-const files = computed(() => allFiles.value.filter((f) => f.backendId === props.backendId))
+const files = computed(() =>
+  allFiles.value.filter(
+    (f) => f.backendId === props.backendId && !hiddenByBridge.value.includes(f.id),
+  ),
+)
 const activeId = ref<string | null>(null)
 const drafts = ref<Record<string, FileDraft>>({})
 /** 敏感文件被显式点开过的 id 集合——切走再回来仍需重新确认 */
@@ -466,6 +493,10 @@ watch(
   () => props.backendId,
   () => void syncActiveFile(),
 )
+
+// 桥开关翻转会让 auth.json 的 tab 出现/消失。用户正停在被藏掉的那个 tab 上时
+// 必须主动换走——否则 activeFile 变 null，编辑器整块消失且没有任何解释。
+watch(hiddenByBridge, () => void syncActiveFile())
 
 onMounted(async () => {
   await refreshList()

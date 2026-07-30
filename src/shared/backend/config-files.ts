@@ -24,10 +24,7 @@ export type BackendConfigFormat = 'toml' | 'json'
 
 /** 稳定 id：IPC 上唯一的"我要读写哪个文件"的表达方式 */
 export type BackendConfigFileId =
-  | 'codex.config'
-  | 'codex.auth'
-  | 'claude.settings'
-  | 'claude.catmaxSettings'
+  'codex.config' | 'codex.auth' | 'claude.settings' | 'claude.catmaxSettings'
 
 /**
  * 文件住在哪 —— 同时决定路径解析和影响范围，UI 必须把这个区分显示出来：

@@ -152,7 +152,9 @@ describe('claude.catmaxSettings（catmax 覆盖层）', () => {
       content: '{}\n',
       expectedMtimeMs: null,
     })
-    expect(claudeOverrideSettingsPath()).toBe(join(catmaxBackendConfigDir(), 'claude-settings.json'))
+    expect(claudeOverrideSettingsPath()).toBe(
+      join(catmaxBackendConfigDir(), 'claude-settings.json'),
+    )
   })
 
   test('和 claude.settings 是两个互不干扰的文件', () => {

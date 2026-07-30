@@ -67,6 +67,26 @@ export const useBackendStore = defineStore('backend', () => {
     models.value = await window.api.backend.refreshModels()
   }
 
+  /**
+   * 强制刷新**指定** backend 的模型列表，并同步进 modelsByBackend
+   * （设置页「默认模型」下拉框读的就是它）。
+   *
+   * 和 refreshModels() 的区别：那个只管"当前 backend"，而协议桥开关翻转时
+   * 当前 backend 未必是 codex，可 codex 的模型列表已经整批换了个上游——
+   * 桥开着是上游模型、关掉是 codex 自己的 GPT 模型。只清 main 侧缓存不够，
+   * 渲染层这份也得跟着换，否则下拉框一直显示上一个上游的模型。
+   */
+  async function refreshModelsFor(id: BackendId): Promise<void> {
+    try {
+      modelsByBackend.value[id] = await window.api.backend.refreshModelsFor({ id })
+    } catch (e) {
+      console.warn(`[backend] refreshModelsFor(${id}) failed:`, e)
+      modelsByBackend.value[id] = []
+    }
+    // 顺带把"当前 backend"那份也刷上，省得同一个列表两处不一致
+    if (currentId.value === id) models.value = modelsByBackend.value[id] ?? []
+  }
+
   // ============ Backend Install ============
 
   /** 按 backend 记的安装进度。null = 从没装过 / 已经消掉。 */
@@ -151,6 +171,7 @@ export const useBackendStore = defineStore('backend', () => {
     loadModelsFor,
     loadAllBackendModels,
     refreshModels,
+    refreshModelsFor,
     installProgress,
     ensureInstallSubscription,
     isInstalling,
