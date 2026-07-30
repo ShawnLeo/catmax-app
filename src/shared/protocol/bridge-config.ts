@@ -210,6 +210,7 @@ export function createProviderFromPreset(
   presetId: string,
   credentialSource: BridgeCredentialSource = 'stored',
 ): BridgeProvider {
+  // 'custom' 必然存在于预设表，! 断言安全
   const preset = bridgeUpstreamPreset(presetId) ?? bridgeUpstreamPreset('custom')!
   return {
     id: crypto.randomUUID(),
