@@ -2,7 +2,7 @@ import { existsSync, mkdirSync } from 'node:fs'
 import { dirname } from 'node:path'
 
 import { ctx } from '@main/context'
-import { bridgeManager, BRIDGE_CREDENTIAL_ID } from '@main/protocol/manager'
+import { bridgeManager } from '@main/protocol/manager'
 import { getCodec } from '@main/protocol/registry'
 import {
   listBackendConfigFiles as listConfigFiles,
@@ -15,7 +15,7 @@ import {
   cancelBackendInstall as cancelInstall,
   installBackend as runBackendInstall,
 } from '@main/service/backend-installer'
-import { setStoredCredential } from '@main/service/bridge-credentials'
+import { getStoredCredential, setStoredCredential } from '@main/service/bridge-credentials'
 import { logger } from '@main/service/logger'
 import { getBackendConfigFileDescriptor } from '@shared/backend/config-files'
 import type { BackendInstallResult } from '@shared/backend/install'
@@ -187,45 +187,49 @@ export const getBridgeStatus = async (): Promise<BridgeStatus> => {
  * 密钥只往一个方向走：renderer → 主进程 → userData 下 0600 的文件。
  * 反方向永远只回 status（含 credentialReady 布尔），密钥本身不回传。
  */
-export const setBridgeCredential = async (args: { secret: string }): Promise<BridgeStatus> => {
-  setStoredCredential(BRIDGE_CREDENTIAL_ID, args.secret.trim())
-  // 换了 key 就可能是换了账号/服务商，之前拉到的模型列表不再可信
+export const setBridgeCredential = async (args: {
+  providerId: string
+  secret: string
+}): Promise<BridgeStatus> => {
+  setStoredCredential(args.providerId, args.secret.trim())
   bridgeManager.invalidateModels()
   const status = bridgeManager.status()
   // 常见场景：codex 早于桥 spawn（启动时桥关着），没拿到 `-c model_provider` 参数。
   // 保存 key 是用户完成桥配置的时刻——桥此时若已在跑，借机让 codex 重 spawn 带上 -c。
-  // 不 await：凭证保存立即返回 status，重连在后台进行；重连期间的新 turn 会排队等握手完成。
   if (status.running && ctx.backendManager.getCurrentId() === 'codex') {
     void ctx.backendManager.reconnectBackend('codex')
   }
   return status
 }
 
-/**
- * 用当前配置打一次上游做连通性检查。
- *
- * 故意发一个最小请求（1 token）而不是空请求——空请求很多网关直接 400，
- * 分不清是"配置错"还是"网关挑剔"。
- */
-export const testBridgeUpstream = async (): Promise<{ ok: boolean; message: string }> => {
+export const testBridgeUpstream = async (args: {
+  providerId: string
+}): Promise<{ ok: boolean; message: string }> => {
   const settings = ctx.settingsStore.load().protocolBridge
-  const upstream = settings.upstream
-  if (!upstream.baseUrl.trim()) return { ok: false, message: '还没填上游地址' }
-  if (!bridgeManager.credentialReady()) {
+  const provider = settings.providers[args.providerId]
+  if (!provider) return { ok: false, message: '配置不存在' }
+  if (!provider.baseUrl.trim()) return { ok: false, message: '还没填上游地址' }
+
+  // 取该 provider 的凭证做自检（env 读环境变量，stored 读 0600 文件）
+  let apiKey: string | null = null
+  if (provider.credentialSource === 'env') {
+    const name = provider.credentialEnvVar.trim()
+    apiKey = name ? (process.env[name]?.trim() || null) : null
+  } else {
+    apiKey = getStoredCredential(args.providerId)
+  }
+  if (!apiKey) {
     return {
       ok: false,
       message:
-        upstream.credentialSource === 'env'
-          ? `环境变量 ${upstream.credentialEnvVar || '(未填)'} 是空的`
+        provider.credentialSource === 'env'
+          ? `环境变量 ${provider.credentialEnvVar || '(未填)'} 是空的`
           : '还没保存 API key',
     }
   }
 
-  const codec = getCodec(upstream.protocol)
-  const apiKey = bridgeManager.probeCredential()
-  if (!apiKey) return { ok: false, message: '凭证读取失败' }
-
-  const base = upstream.baseUrl.trim().replace(/\/+$/, '')
+  const codec = getCodec(provider.protocol)
+  const base = provider.baseUrl.trim().replace(/\/+$/, '')
   const path = codec.upstreamPath()
   const url = base + (/\/v\d+$/.test(base) ? path.replace(/^\/v\d+/, '') : path)
 
@@ -234,7 +238,7 @@ export const testBridgeUpstream = async (): Promise<{ ok: boolean; message: stri
       method: 'POST',
       headers: { 'content-type': 'application/json', ...codec.authHeaders(apiKey) },
       body: JSON.stringify({
-        model: upstream.model?.trim() || 'claude-sonnet-4-20250514',
+        model: provider.model?.trim() || 'claude-sonnet-4-20250514',
         max_tokens: 1,
         messages: [{ role: 'user', content: 'hi' }],
       }),
@@ -247,4 +251,17 @@ export const testBridgeUpstream = async (): Promise<{ ok: boolean; message: stri
     const message = error instanceof Error ? error.message : String(error)
     return { ok: false, message: `请求失败：${message}` }
   }
+}
+
+export const bridgeCredentialReady = async (args: {
+  providerId: string
+}): Promise<boolean> => {
+  const settings = ctx.settingsStore.load().protocolBridge
+  const provider = settings.providers[args.providerId]
+  if (!provider) return false
+  if (provider.credentialSource === 'env') {
+    const name = provider.credentialEnvVar.trim()
+    return name ? !!process.env[name]?.trim() : false
+  }
+  return getStoredCredential(args.providerId) !== null
 }

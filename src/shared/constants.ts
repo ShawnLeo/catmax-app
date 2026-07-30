@@ -66,6 +66,7 @@ export const IPC = {
   BACKEND_BRIDGE_STATUS: 'backend.bridgeStatus',
   BACKEND_SET_BRIDGE_CREDENTIAL: 'backend.setBridgeCredential',
   BACKEND_TEST_BRIDGE_UPSTREAM: 'backend.testBridgeUpstream',
+  BACKEND_BRIDGE_CREDENTIAL_READY: 'backend.bridgeCredentialReady',
   // session
   SESSION_LIST: 'session.list',
   SESSION_CREATE: 'session.create',

@@ -106,9 +106,17 @@ export type BackendHandlers = {
    * 保存 / 清除上游密钥（传空串即清除）。
    * 写到 userData 下 0600 的单独文件，不进 settings.json。
    */
-  'backend.setBridgeCredential': (args: { secret: string }) => Promise<BridgeStatus>
-  /** 用当前配置打一次上游，验证 base_url / key / 模型名是否可用 */
-  'backend.testBridgeUpstream': () => Promise<{ ok: boolean; message: string }>
+  'backend.setBridgeCredential': (args: {
+    providerId: string
+    secret: string
+  }) => Promise<BridgeStatus>
+  /** 用指定 provider 的配置打一次上游，验证 base_url / key / 模型名是否可用 */
+  'backend.testBridgeUpstream': (args: { providerId: string }) => Promise<{
+    ok: boolean
+    message: string
+  }>
+  /** 查询指定 provider 的凭证是否已就绪（只回布尔，不回传密钥） */
+  'backend.bridgeCredentialReady': (args: { providerId: string }) => Promise<boolean>
 }
 
 /** 主→渲染推送事件类型 */

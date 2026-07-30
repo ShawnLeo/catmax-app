@@ -104,6 +104,9 @@ export const api = {
     testBridgeUpstream: requestMain<BackendHandlers, 'backend.testBridgeUpstream'>(
       IPC.BACKEND_TEST_BRIDGE_UPSTREAM,
     ),
+    bridgeCredentialReady: requestMain<BackendHandlers, 'backend.bridgeCredentialReady'>(
+      IPC.BACKEND_BRIDGE_CREDENTIAL_READY,
+    ),
     /** 订阅 turnEvent 推送 */
     onTurnEvent: (cb: (payload: BackendPushEvents['backend:turnEvent']) => void) =>
       subscribeToMainEvent<BackendPushEvents, 'backend:turnEvent'>(PUSH.BACKEND_TURN_EVENT, cb),

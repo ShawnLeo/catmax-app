@@ -4,6 +4,7 @@ import { handleRendererRequest } from '../../typed'
 
 import {
   cancelBackendInstall,
+  bridgeCredentialReady,
   getCurrentBackend,
   installBackend,
   interruptTurn,
@@ -106,6 +107,10 @@ export function registerBackendHandlers(): void {
   handleRendererRequest<BackendHandlers, 'backend.testBridgeUpstream'>(
     'backend.testBridgeUpstream',
     testBridgeUpstream,
+  )
+  handleRendererRequest<BackendHandlers, 'backend.bridgeCredentialReady'>(
+    'backend.bridgeCredentialReady',
+    bridgeCredentialReady,
   )
 }
 
