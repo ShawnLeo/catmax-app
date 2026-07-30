@@ -317,6 +317,17 @@ export class CodexAdapter implements AgentBackend {
         const rawText = chunk.toString('utf-8').trim()
         // eslint-disable-next-line no-control-regex
         const text = rawText.replace(/\x1B\[[0-9;]*m/g, '')
+        // 协议桥故意不实现 GET /v1/models（见 protocol/server.ts 的设计注释 + 设计文档 §3.8）：
+        // 模型列表由 catmax 直接从上游拉（upstream-models.ts），桥对 /v1/models 一律 404。
+        // codex 的 models manager 仍会周期性来探测 base_url，撞上桥的 404 后在 stderr 打
+        // ERROR。这条日志不影响 turn、也不影响下拉框，属于已知噪音——直接静默，别吓到用户。
+        if (
+          text.includes('codex_models_manager') &&
+          text.includes('failed to refresh available models') &&
+          text.includes('桥不处理该路径')
+        ) {
+          return
+        }
         log.warn('codex stderr:', text)
         // 监测致命的 API 错误（OpenAI 返回 400 等），立刻中断当前 turn——
         // 不然用户会等到 60s idle 超时才知道问题。

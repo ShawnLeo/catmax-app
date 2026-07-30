@@ -11,6 +11,9 @@ dist/
 coverage/
 .vite/
 *.tsbuildinfo
+# 本地图标/资源备份（如 icon 修复时的 .icon-backup-* 临时副本）
+build/.icon-backup-*/
+resources/.icon-backup-*/
 # IDE
 .vscode/*
 !.vscode/extensions.json

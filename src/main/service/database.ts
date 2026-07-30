@@ -68,8 +68,14 @@ export class DatabaseService {
   // ===== Workspace =====
 
   listWorkspaces(): WorkspaceRecord[] {
+    // Stable tiebreaker on hidden `rowid`: last_opened_at has millisecond
+    // resolution, so two workspaces touched/added within the same ms would
+    // otherwise come back in unspecified order. rowid is unique per row and
+    // monotonic by insertion, so DESC means "most recently inserted wins"
+    // among ties — matching the intuition that a just-added workspace ranks
+    // above an older one touched in the same millisecond.
     const rows = this.db
-      .prepare('SELECT * FROM workspaces ORDER BY last_opened_at DESC')
+      .prepare('SELECT * FROM workspaces ORDER BY last_opened_at DESC, rowid DESC')
       .all() as WorkspaceRow[]
     return rows.map(rowToRecord)
   }
