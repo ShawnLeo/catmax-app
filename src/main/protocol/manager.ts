@@ -16,6 +16,7 @@ import {
   BRIDGE_CODEX_PROVIDER_ID,
   BRIDGE_TOKEN_ENV_VAR,
   type BridgeModelInfo,
+  type BridgeProvider,
   type BridgeSettings,
   type BridgeStatus,
   type BridgeUpstreamConfig,
@@ -30,23 +31,33 @@ import { fetchUpstreamModels } from './upstream-models'
 
 const log = logger.domain('bridge-manager')
 
-/** 凭证存储里的 key 名 */
-export const BRIDGE_CREDENTIAL_ID = 'codex-bridge'
-
 export class BridgeManager {
   private settings: BridgeSettings | null = null
   private readonly server = new BridgeServer({
     resolveUpstream: () => this.resolveUpstream(),
   })
 
+  /** 当前激活的 provider；未选/不存在时返回 null */
+  private currentProvider(): BridgeProvider | null {
+    const s = this.settings
+    if (!s) return null
+    const id = s.currentProviderId
+    if (!id) return null
+    return s.providers[id] ?? null
+  }
+
   /** settings 变化时调用：按 enabled 起停服务 */
   async applySettings(settings: BridgeSettings): Promise<void> {
     const wasEnabled = this.settings?.enabled ?? false
-    const previous = this.settings?.upstream ?? null
+    const prevCurrent = this.currentProvider() // 切换前的当前 provider 快照
     this.settings = settings
+    const newCurrent = this.currentProvider()
 
-    // 上游换了（地址/列表地址/凭证来源变化）就丢掉模型缓存，避免下拉框显示上一个上游的模型
-    if (previous && upstreamModelIdentityChanged(previous, settings.upstream)) {
+    // 当前 provider 的「身份」变了（地址/列表/凭证来源/模型列表模式/手填列表）就丢模型缓存
+    if (
+      (prevCurrent && newCurrent && upstreamModelIdentityChanged(prevCurrent, newCurrent)) ||
+      (!prevCurrent && newCurrent)
+    ) {
       this.invalidateModels()
     }
 
@@ -72,10 +83,8 @@ export class BridgeManager {
    * 每次请求都重新解析——用户改了设置不用重启桥。
    */
   private resolveUpstream(): BridgeUpstreamTarget | null {
-    const settings = this.settings
-    if (!settings?.enabled) return null
-
-    const upstream = settings.upstream
+    const upstream = this.currentProvider()
+    if (!this.settings?.enabled || !upstream) return null
     if (!upstream.baseUrl.trim()) return null
 
     const apiKey = this.resolveCredential()
@@ -86,8 +95,6 @@ export class BridgeManager {
       baseUrl: upstream.baseUrl.trim(),
       apiKey,
       model: upstream.model?.trim() ? upstream.model.trim() : null,
-      // 上一次成功拉到的模型列表——桥用它判断 codex 发来的模型名是不是上游真有的。
-      // 还没拉过就是 null，此时一律用兜底模型名（见 bridge.ts 的 resolveModel）。
       knownModelIds: this.knownModelIds,
       capabilities: upstream.capabilities,
     }
@@ -104,13 +111,25 @@ export class BridgeManager {
   private knownModelIds: ReadonlySet<string> | null = null
 
   async listUpstreamModels(): Promise<BridgeModelInfo[]> {
-    if (this.modelsPromise) return this.modelsPromise
+    // manual 模式不进缓存：手填列表随时可变，每次重读保证即时生效
+    const provider = this.currentProvider()
+    if (!provider) return []
 
-    const settings = this.settings
-    if (!settings?.enabled) return []
-    const { baseUrl, modelsUrl } = settings.upstream
+    if (provider.modelListMode === 'manual') {
+      const models = provider.manualModels
+        .map((id) => id.trim())
+        .filter((id) => id)
+        .map((id) => ({ id, displayName: id }))
+      // 手填列表也要喂给 knownModelIds——resolveModel 据此判断透传还是兜底
+      this.knownModelIds = new Set(models.map((m) => m.id))
+      return models
+    }
+
+    // auto 模式：缓存命中优先
+    if (this.modelsPromise) return this.modelsPromise
+    if (!this.settings?.enabled) return []
+    const { baseUrl, modelsUrl } = provider
     const apiKey = this.resolveCredential()
-    // 没凭证时安静返回空——调用方会回退到 codex 自己的模型列表
     if (!apiKey) return []
 
     this.modelsPromise = (async () => {
@@ -134,15 +153,15 @@ export class BridgeManager {
   }
 
   private resolveCredential(): string | null {
-    const upstream = this.settings?.upstream
-    if (!upstream) return null
-    if (upstream.credentialSource === 'env') {
-      const name = upstream.credentialEnvVar.trim()
+    const provider = this.currentProvider()
+    if (!provider) return null
+    if (provider.credentialSource === 'env') {
+      const name = provider.credentialEnvVar.trim()
       if (!name) return null
       const value = process.env[name]?.trim()
       return value ? value : null
     }
-    return getStoredCredential(BRIDGE_CREDENTIAL_ID)
+    return getStoredCredential(provider.id)
   }
 
   /** 凭证是否就绪——只回 boolean，密钥本身不出这个类 */
@@ -159,13 +178,14 @@ export class BridgeManager {
   }
 
   status(): BridgeStatus {
-    const upstream = this.settings?.upstream ?? null
+    const provider = this.currentProvider()
     return {
       running: this.server.running,
       port: this.server.listenPort,
       baseUrl: this.server.baseUrl,
-      upstreamProtocol: upstream?.protocol ?? null,
-      upstreamBaseUrl: upstream?.baseUrl ?? null,
+      currentProviderId: provider?.id ?? null,
+      upstreamProtocol: provider?.protocol ?? null,
+      upstreamBaseUrl: provider?.baseUrl ?? null,
       credentialReady: this.credentialReady(),
       lastError: this.server.error,
     }
@@ -209,13 +229,19 @@ export class BridgeManager {
   }
 }
 
-/** 影响「模型列表是哪个上游的」的字段变了没有——只比较这几个，改能力开关不该丢缓存 */
+/**
+ * 影响「模型列表是哪个上游的」的字段变了没有。
+ * 改能力开关（supportsImages 等）不该丢缓存；但地址/列表/凭证来源/模型列表模式/手填列表变了要丢。
+ */
 function upstreamModelIdentityChanged(a: BridgeUpstreamConfig, b: BridgeUpstreamConfig): boolean {
   return (
     a.modelsUrl !== b.modelsUrl ||
     a.baseUrl !== b.baseUrl ||
     a.credentialSource !== b.credentialSource ||
-    a.credentialEnvVar !== b.credentialEnvVar
+    a.credentialEnvVar !== b.credentialEnvVar ||
+    a.modelListMode !== b.modelListMode ||
+    // manualModels 按内容比（引用不同但内容相同不该失效）
+    a.manualModels.join('\n') !== b.manualModels.join('\n')
   )
 }
 
