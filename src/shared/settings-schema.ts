@@ -67,22 +67,28 @@ const upstreamCapabilitiesSchema = z.object({
   toolNameMaxLength: z.number().int().min(16).max(256).default(64),
 })
 
+const bridgeProviderSchema = z.object({
+  id: z.string(),
+  name: z.string().default(''),
+  presetId: z.string().default('custom'),
+  createdAt: z.number().int().default(0),
+  protocol: z.enum(['anthropic.messages']).default('anthropic.messages'),
+  baseUrl: z.string().default(''),
+  /** 模型列表端点完整 URL；常与 baseUrl 不同路径（见 bridge-config.ts） */
+  modelsUrl: z.string().default(''),
+  model: z.string().nullable().default(null),
+  credentialSource: z.enum(['env', 'stored']).default('stored'),
+  credentialEnvVar: z.string().default(''),
+  capabilities: upstreamCapabilitiesSchema.default({}),
+  modelListMode: z.enum(['auto', 'manual']).default('auto'),
+  manualModels: z.array(z.string()).default([]),
+})
+
 const protocolBridgeSchema = z.object({
   enabled: z.boolean().default(false),
-  /** 选中的内置预设 id，仅用于 UI 回显 */
-  presetId: z.string().default('deepseek'),
-  upstream: z
-    .object({
-      protocol: z.enum(['anthropic.messages']).default('anthropic.messages'),
-      baseUrl: z.string().default(''),
-      /** 模型列表端点完整 URL；常与 baseUrl 不同路径（见 bridge-config.ts） */
-      modelsUrl: z.string().default(''),
-      model: z.string().nullable().default(null),
-      credentialSource: z.enum(['env', 'stored']).default('stored'),
-      credentialEnvVar: z.string().default(''),
-      capabilities: upstreamCapabilitiesSchema.default({}),
-    })
-    .default({}),
+  /** 当前启用的 provider id；为空字符串表示未选任何配置 */
+  currentProviderId: z.string().default(''),
+  providers: z.record(z.string(), bridgeProviderSchema).default({}),
 })
 export type ProtocolBridgeSettings = z.infer<typeof protocolBridgeSchema>
 
