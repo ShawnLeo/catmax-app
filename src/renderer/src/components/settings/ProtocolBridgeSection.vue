@@ -101,8 +101,29 @@
     </div>
 
     <!-- 编辑区（选中 provider 时显示） -->
-    <template v-if="editingProvider">
-      <div class="h-px bg-sidebar-border" />
+    <!-- 编辑区：只有点编辑/新增后才显示，右上角可关闭收起 -->
+    <div
+      v-if="editingProvider"
+      class="flex flex-col gap-3 p-3 rounded-md border border-sidebar-border"
+    >
+      <!-- 卡片头：标题（当前/编辑中状态）+ 右上角关闭 -->
+      <div class="flex items-center gap-2">
+        <span class="text-sm font-medium truncate">
+          {{ editingProvider.name || editingProvider.baseUrl || '(未命名)' }}
+        </span>
+        <span v-if="editingProvider.id === bridge.currentProviderId" class="text-xs text-success">
+          当前启用
+        </span>
+        <button
+          type="button"
+          class="ml-auto text-muted-foreground hover:text-foreground text-lg leading-none px-1"
+          title="关闭编辑区"
+          aria-label="关闭编辑区"
+          @click="closeEditing"
+        >
+          ×
+        </button>
+      </div>
 
       <!-- 名称 -->
       <div class="flex flex-col gap-1.5">
@@ -368,7 +389,7 @@
           </div>
         </div>
       </details>
-    </template>
+    </div>
   </section>
 </template>
 
@@ -386,7 +407,7 @@ import {
   type BridgeStatus,
 } from '@shared/protocol/bridge-config'
 import type { ProtocolBridgeSettings } from '@shared/settings-schema'
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 
 const settings = useSettingsStore()
 const backendStore = useBackendStore()
@@ -463,6 +484,13 @@ function selectEditing(id: string): void {
   secretDraft.value = ''
   testResult.value = null
   void refreshEditingCredentialReady()
+}
+
+/** 收起编辑区（不删除数据，只是隐藏表单） */
+function closeEditing(): void {
+  editingProviderId.value = null
+  secretDraft.value = ''
+  testResult.value = null
 }
 
 async function addProvider(presetId: string): Promise<void> {
@@ -586,15 +614,6 @@ async function toggleEnabled(): Promise<void> {
   await patchBridge({ enabled: !enabled.value })
   await refreshModels()
 }
-
-// 当前激活 provider 变化时，编辑区默认跟随显示它（首次加载/无编辑选中时）
-watch(
-  currentProvider,
-  (cur) => {
-    if (cur && !editingProviderId.value) editingProviderId.value = cur.id
-  },
-  { immediate: true },
-)
 
 onMounted(async () => {
   await refreshStatus()
