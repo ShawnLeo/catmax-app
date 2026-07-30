@@ -99,7 +99,7 @@
             :class="[
               'px-2 py-0.5 rounded border text-xs transition-colors cursor-pointer',
               upstream.model === model.id
-                ? 'border-primary bg-primary/5 text-foreground'
+                ? 'border-foreground bg-foreground text-background shadow-sm'
                 : 'border-sidebar-border text-muted-foreground hover:text-foreground',
             ]"
             @click="patchUpstream({ model: model.id })"
@@ -140,7 +140,7 @@
             :class="[
               'px-3 py-1.5 rounded-md border text-xs transition-colors cursor-pointer',
               upstream.credentialSource === option.value
-                ? 'border-primary bg-primary/5 text-foreground'
+                ? 'border-foreground bg-foreground text-background shadow-sm'
                 : 'border-sidebar-border text-muted-foreground hover:text-foreground',
             ]"
             @click="patchUpstream({ credentialSource: option.value })"
