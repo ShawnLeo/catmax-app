@@ -5,9 +5,9 @@
       <div>
         <h2 class="text-lg font-semibold text-foreground">协议转换桥</h2>
         <p class="text-sm text-muted-foreground">
-          codex 从 0.96 起只支持 Responses 协议（<code>wire_api = "chat"</code> 已被移除）。 开启后
-          catmax 在本机起一个只听 127.0.0.1 的转换服务，对 codex 装成 Responses
-          端点，对上游说上游的协议。
+          codex 从 0.96 起只支持 Responses 协议。开启后 catmax 在本机起一个只听 127.0.0.1
+          的转换服务，对 codex 装成 Responses
+          端点，对上游说上游的协议。可保存多个上游配置，同时只启用一个。
         </p>
       </div>
       <div class="mt-1 flex shrink-0 items-center gap-2">
@@ -36,98 +36,211 @@
       </div>
     </header>
 
-    <template v-if="enabled">
-      <!-- 运行状态 -->
-      <div class="flex items-center gap-2 text-xs px-3 py-2 rounded-md bg-muted/30">
-        <span
-          :class="['w-1.5 h-1.5 rounded-full', status?.running ? 'bg-success' : 'bg-destructive']"
-        />
-        <span class="text-muted-foreground">
-          {{ status?.running ? `桥已监听 ${status.baseUrl}` : '桥未运行' }}
-        </span>
-        <span v-if="status?.lastError" class="text-destructive ml-auto">
-          {{ status.lastError }}
-        </span>
-      </div>
+    <!-- 运行状态（仅 enabled 显示） -->
+    <div v-if="enabled" class="flex items-center gap-2 text-xs px-3 py-2 rounded-md bg-muted/30">
+      <span
+        :class="['w-1.5 h-1.5 rounded-full', status?.running ? 'bg-success' : 'bg-destructive']"
+      />
+      <span class="text-muted-foreground">
+        {{ status?.running ? `桥已监听 ${status.baseUrl}` : '桥未运行' }}
+      </span>
+      <span v-if="!currentProvider" class="text-destructive">未选择上游配置</span>
+      <span v-if="status?.lastError" class="text-destructive ml-auto">{{ status.lastError }}</span>
+    </div>
 
-      <!-- 上游预设 -->
+    <!-- Provider 列表（始终可见） -->
+    <div class="flex flex-col gap-1.5">
+      <label class="text-xs text-muted-foreground">上游配置</label>
+      <div class="flex flex-col gap-1">
+        <div
+          v-for="p in providerList"
+          :key="p.id"
+          :class="[
+            'flex items-center gap-2 px-3 py-2 rounded-md border text-sm cursor-pointer transition-colors',
+            p.id === bridge.currentProviderId
+              ? 'border-foreground bg-muted/40'
+              : 'border-sidebar-border hover:bg-muted/20',
+          ]"
+          @click="selectEditing(p.id)"
+        >
+          <input
+            type="radio"
+            :checked="p.id === bridge.currentProviderId"
+            class="cursor-pointer"
+            @click.stop="switchProvider(p.id)"
+          />
+          <span class="flex-1 truncate">{{ p.name || p.baseUrl || '(未命名)' }}</span>
+          <span v-if="p.id === bridge.currentProviderId" class="text-xs text-success">当前</span>
+          <span v-if="p.modelListMode === 'manual'" class="text-xs text-muted-foreground"
+            >手动</span
+          >
+          <button
+            type="button"
+            class="text-xs text-muted-foreground hover:text-foreground px-1"
+            title="编辑"
+            @click.stop="selectEditing(p.id)"
+          >
+            ✎
+          </button>
+          <button
+            type="button"
+            class="text-xs text-muted-foreground hover:text-destructive px-1"
+            title="删除"
+            @click.stop="deleteProvider(p.id)"
+          >
+            🗑
+          </button>
+        </div>
+      </div>
+      <DropdownMenu
+        :model-value="''"
+        :options="presetOptions"
+        placeholder="+ 新建配置"
+        @update:model-value="(v) => addProvider(String(v))"
+      />
+    </div>
+
+    <!-- 编辑区（选中 provider 时显示） -->
+    <template v-if="editingProvider">
+      <div class="h-px bg-sidebar-border" />
+
+      <!-- 名称 -->
       <div class="flex flex-col gap-1.5">
-        <label class="text-xs text-muted-foreground">上游</label>
-        <DropdownMenu
-          :model-value="presetId"
-          :options="presetOptions"
-          @update:model-value="(v) => applyPreset(String(v))"
+        <label class="text-xs text-muted-foreground">名称</label>
+        <Input
+          :model-value="editingProvider.name"
+          placeholder="我的 DeepSeek"
+          @update:model-value="
+            (v: string | number) => patchProvider(editingProvider!.id, { name: String(v) })
+          "
         />
-        <p v-if="activePreset" class="text-xs text-muted-foreground">
-          {{ activePreset.description }}
-        </p>
       </div>
 
       <!-- 上游地址 -->
       <div class="flex flex-col gap-1.5">
         <label class="text-xs text-muted-foreground">上游地址（base URL）</label>
         <Input
-          :model-value="upstream.baseUrl"
+          :model-value="editingProvider.baseUrl"
           placeholder="https://api.deepseek.com/anthropic"
-          @update:model-value="(v: string | number) => patchUpstream({ baseUrl: String(v) })"
+          @update:model-value="
+            (v: string | number) => patchProvider(editingProvider!.id, { baseUrl: String(v) })
+          "
         />
       </div>
 
-      <!-- 兜底模型名。真正的模型列表来自上游，见下方 chips -->
+      <!-- 兜底模型名 -->
       <div class="flex flex-col gap-1.5">
-        <div class="flex items-center justify-between gap-2">
-          <label class="text-xs text-muted-foreground">兜底模型名</label>
-          <Button variant="ghost" size="sm" :disabled="loadingModels" @click="refreshModels">
-            {{ loadingModels ? '拉取中…' : '拉取上游模型列表' }}
-          </Button>
-        </div>
+        <label class="text-xs text-muted-foreground">兜底模型名</label>
         <Input
-          :model-value="upstream.model ?? ''"
+          :model-value="editingProvider.model ?? ''"
           placeholder="deepseek-v4-pro"
-          @update:model-value="(v: string | number) => patchUpstream({ model: String(v) || null })"
+          @update:model-value="
+            (v: string | number) => patchProvider(editingProvider!.id, { model: String(v) || null })
+          "
         />
-        <p class="text-xs text-muted-foreground">
-          codex 的模型下拉框在桥开启后会显示<b>上游的真实模型</b>；这里填的是兜底值—— codex
-          发来的模型名不在上游列表里时（比如它内置的 <code>gpt-*</code>）用它顶上。
-        </p>
-        <!-- 拉到的上游模型：点一下即设为兜底值 -->
-        <div v-if="upstreamModels.length > 0" class="flex flex-wrap gap-1.5">
+        <p class="text-xs text-muted-foreground">codex 发来的模型名不在上游列表里时用它顶上。</p>
+      </div>
+
+      <!-- 模型列表来源 -->
+      <div class="flex flex-col gap-2">
+        <label class="text-xs text-muted-foreground">模型列表来源</label>
+        <div class="flex gap-2">
           <button
-            v-for="model in upstreamModels"
-            :key="model.id"
+            v-for="option in modelListModes"
+            :key="option.value"
             type="button"
             :class="[
-              'px-2 py-0.5 rounded border text-xs transition-colors cursor-pointer',
-              upstream.model === model.id
+              'px-3 py-1.5 rounded-md border text-xs transition-colors cursor-pointer',
+              editingProvider.modelListMode === option.value
                 ? 'border-foreground bg-foreground text-background shadow-sm'
                 : 'border-sidebar-border text-muted-foreground hover:text-foreground',
             ]"
-            @click="patchUpstream({ model: model.id })"
+            @click="patchProvider(editingProvider!.id, { modelListMode: option.value })"
           >
-            {{ model.id }}
+            {{ option.label }}
           </button>
         </div>
-        <p v-else-if="modelsError" class="text-xs text-destructive">{{ modelsError }}</p>
-      </div>
 
-      <!-- 模型列表地址：常和对话端点不在同一路径下，所以单独一个字段 -->
-      <details class="text-xs">
-        <summary class="cursor-pointer text-muted-foreground hover:text-foreground">
-          模型列表地址（留空自动推断）
-        </summary>
-        <div class="mt-2 pl-3 border-l border-sidebar-border flex flex-col gap-1.5">
-          <Input
-            :model-value="upstream.modelsUrl"
-            placeholder="https://api.deepseek.com/models"
-            @update:model-value="(v: string | number) => patchUpstream({ modelsUrl: String(v) })"
-          />
-          <p class="text-muted-foreground">
-            留空时按上游地址的域名试
-            <code>/v1/models</code> 和 <code>/models</code>。DeepSeek 的对话端点在
-            <code>/anthropic</code> 下，但模型列表只在根路径上，所以两者不能共用一个地址。
+        <!-- auto: modelsUrl + 拉取按钮 -->
+        <template v-if="editingProvider.modelListMode === 'auto'">
+          <details class="text-xs">
+            <summary class="cursor-pointer text-muted-foreground hover:text-foreground">
+              模型列表地址（留空自动推断）
+            </summary>
+            <div class="mt-2 pl-3 border-l border-sidebar-border flex flex-col gap-1.5">
+              <Input
+                :model-value="editingProvider.modelsUrl"
+                placeholder="https://api.deepseek.com/models"
+                @update:model-value="
+                  (v: string | number) =>
+                    patchProvider(editingProvider!.id, { modelsUrl: String(v) })
+                "
+              />
+            </div>
+          </details>
+          <div class="flex items-center gap-2">
+            <Button variant="ghost" size="sm" :disabled="loadingModels" @click="refreshModels">
+              {{ loadingModels ? '拉取中…' : '拉取上游模型列表' }}
+            </Button>
+          </div>
+          <div v-if="upstreamModels.length > 0" class="flex flex-wrap gap-1.5">
+            <button
+              v-for="model in upstreamModels"
+              :key="model.id"
+              type="button"
+              :class="[
+                'px-2 py-0.5 rounded border text-xs transition-colors cursor-pointer',
+                editingProvider.model === model.id
+                  ? 'border-foreground bg-foreground text-background shadow-sm'
+                  : 'border-sidebar-border text-muted-foreground hover:text-foreground',
+              ]"
+              @click="patchProvider(editingProvider!.id, { model: model.id })"
+            >
+              {{ model.id }}
+            </button>
+          </div>
+          <p v-else-if="modelsError" class="text-xs text-destructive">{{ modelsError }}</p>
+        </template>
+
+        <!-- manual: 手填列表 -->
+        <template v-else>
+          <div class="flex items-center gap-2">
+            <Input
+              v-model="manualModelDraft"
+              placeholder="输入模型名，回车添加"
+              class="flex-1"
+              @keydown.enter.prevent="addManualModel"
+            />
+            <Button
+              variant="outline"
+              size="sm"
+              :disabled="!manualModelDraft.trim()"
+              @click="addManualModel"
+            >
+              添加
+            </Button>
+          </div>
+          <div v-if="editingProvider.manualModels.length > 0" class="flex flex-wrap gap-1.5">
+            <button
+              v-for="id in editingProvider.manualModels"
+              :key="id"
+              type="button"
+              :class="[
+                'px-2 py-0.5 rounded border text-xs transition-colors cursor-pointer',
+                editingProvider.model === id
+                  ? 'border-foreground bg-foreground text-background shadow-sm'
+                  : 'border-sidebar-border text-muted-foreground hover:text-foreground',
+              ]"
+              @click="patchProvider(editingProvider!.id, { model: id })"
+            >
+              {{ id }} <span class="ml-1 opacity-60" @click.stop="removeManualModel(id)">×</span>
+            </button>
+          </div>
+          <p class="text-xs text-muted-foreground">
+            手动录入的模型会显示在 codex 下拉框里，codex 选用时原样透传给上游。
           </p>
-        </div>
-      </details>
+        </template>
+      </div>
 
       <!-- 凭证 -->
       <div class="flex flex-col gap-2">
@@ -139,39 +252,35 @@
             type="button"
             :class="[
               'px-3 py-1.5 rounded-md border text-xs transition-colors cursor-pointer',
-              upstream.credentialSource === option.value
+              editingProvider.credentialSource === option.value
                 ? 'border-foreground bg-foreground text-background shadow-sm'
                 : 'border-sidebar-border text-muted-foreground hover:text-foreground',
             ]"
-            @click="patchUpstream({ credentialSource: option.value })"
+            @click="patchProvider(editingProvider!.id, { credentialSource: option.value })"
           >
             {{ option.label }}
           </button>
         </div>
-
-        <!-- 环境变量来源：catmax 一个字节都不落盘 -->
-        <template v-if="upstream.credentialSource === 'env'">
+        <template v-if="editingProvider.credentialSource === 'env'">
           <Input
-            :model-value="upstream.credentialEnvVar"
+            :model-value="editingProvider.credentialEnvVar"
             placeholder="DEEPSEEK_API_KEY"
             @update:model-value="
-              (v: string | number) => patchUpstream({ credentialEnvVar: String(v) })
+              (v: string | number) =>
+                patchProvider(editingProvider!.id, { credentialEnvVar: String(v) })
             "
           />
           <p class="text-xs text-muted-foreground">
-            catmax 只记住变量名，值在每次请求时从进程环境读取——不落盘。 注意从 Dock/启动台启动的 app
-            读不到 shell 里 export 的变量。
+            catmax 只记住变量名，值在每次请求时从进程环境读取——不落盘。
           </p>
         </template>
-
-        <!-- 直接保存：唯一会落盘密钥的地方，如实说明 -->
         <template v-else>
           <div class="flex items-center gap-2">
             <Input
               v-model="secretDraft"
               type="password"
               :placeholder="
-                status?.credentialReady ? '已保存（重新输入可覆盖）' : '粘贴上游 API key'
+                editingCredentialReady ? '已保存（重新输入可覆盖）' : '粘贴上游 API key'
               "
               class="flex-1"
             />
@@ -181,15 +290,14 @@
             <Button
               variant="outline"
               size="sm"
-              :disabled="!status?.credentialReady"
+              :disabled="!editingCredentialReady"
               @click="clearSecret"
             >
               清除
             </Button>
           </div>
           <p class="text-xs text-muted-foreground">
-            存在 catmax 数据目录下权限 0600 的单独文件里（<b>不进 settings.json</b>），
-            界面上永远不会再回显。这是 catmax 里唯一落盘密钥的地方。
+            存在 catmax 数据目录下权限 0600 的单独文件里（不进 settings.json），界面不会再回显。
           </p>
         </template>
       </div>
@@ -207,7 +315,7 @@
         </span>
       </div>
 
-      <!-- 上游能力：影响转换时的降级策略 -->
+      <!-- 上游能力 -->
       <details class="text-xs">
         <summary class="cursor-pointer text-muted-foreground hover:text-foreground">
           上游能力（影响转换时的降级策略）
@@ -216,51 +324,37 @@
           <label class="flex items-center gap-2 cursor-pointer">
             <input
               type="checkbox"
-              :checked="upstream.capabilities.supportsImages"
-              @change="patchCapabilities({ supportsImages: checked($event) })"
+              :checked="editingProvider.capabilities.supportsImages"
+              @change="
+                patchProvider(editingProvider!.id, {
+                  capabilities: {
+                    ...editingProvider!.capabilities,
+                    supportsImages: checked($event),
+                  },
+                })
+              "
             />
             <span>支持图片输入</span>
-            <span class="text-muted-foreground">
-              关闭时，工具结果里的截图会被替换成占位文字（否则上游直接 400）
-            </span>
           </label>
-          <!--
-            这里曾有一个「尊重 thinking budget」勾选框，但它不控制任何行为，已删除：
-            thinking 开启时 budget_tokens 是 Anthropic 协议的必填项，桥必须发，上游
-            理不理会由上游决定。哪家上游忽略它属于事实陈述，写在预设文案里（见上方
-            activePreset.description），不做成开关免得暗示它能改变行为。
-          -->
-          <p class="text-muted-foreground">
-            思考强度档位由桥翻译成 <code>thinking.budget_tokens</code> 发给上游；部分上游（如
-            DeepSeek）文档明确忽略该字段，此时换档位不会改变上游的思考行为。
-          </p>
           <div class="flex items-center gap-2">
             <span>max_tokens 兜底值</span>
             <Input
-              :model-value="upstream.capabilities.defaultMaxOutputTokens"
+              :model-value="editingProvider.capabilities.defaultMaxOutputTokens"
               type="number"
               class="w-28"
               @update:model-value="
                 (v: string | number) =>
-                  patchCapabilities({ defaultMaxOutputTokens: Number(v) || 8192 })
+                  patchProvider(editingProvider!.id, {
+                    capabilities: {
+                      ...editingProvider!.capabilities,
+                      defaultMaxOutputTokens: Number(v) || 8192,
+                    },
+                  })
               "
             />
-            <span class="text-muted-foreground">Anthropic 要求必填，codex 不一定发</span>
           </div>
         </div>
       </details>
-
-      <div class="text-xs text-muted-foreground px-3 py-2 bg-muted/30 rounded-md space-y-1">
-        <p>💡 关于生效方式：</p>
-        <ul class="list-disc ml-5 space-y-0.5">
-          <li>
-            catmax <b>不改你的 <code>~/.codex/config.toml</code></b
-            >，而是在 spawn 时用 <code>-c</code> 覆盖 <code>model_provider</code>，关掉桥即完全恢复
-          </li>
-          <li>codex 拿到的只是桥的一次性 token，<b>上游真 key 从不进 codex 的环境或配置</b></li>
-          <li>codex 是 long-running 进程——改完要切走 codex 再切回来才会重新 spawn 生效</li>
-        </ul>
-      </div>
     </template>
   </section>
 </template>
@@ -274,14 +368,12 @@ import { useSettingsStore } from '@renderer/stores/settings'
 import type { ModelOption } from '@shared/backend/types'
 import {
   BRIDGE_UPSTREAM_PRESETS,
-  bridgeUpstreamPreset,
-  DEFAULT_BRIDGE_UPSTREAM,
+  createProviderFromPreset,
+  type BridgeProvider,
   type BridgeStatus,
 } from '@shared/protocol/bridge-config'
 import type { ProtocolBridgeSettings } from '@shared/settings-schema'
-import { computed, onMounted, ref } from 'vue'
-
-type Upstream = ProtocolBridgeSettings['upstream']
+import { computed, onMounted, ref, watch } from 'vue'
 
 const settings = useSettingsStore()
 const backendStore = useBackendStore()
@@ -293,102 +385,119 @@ const testResult = ref<{ ok: boolean; message: string } | null>(null)
 const upstreamModels = ref<ModelOption[]>([])
 const loadingModels = ref(false)
 const modelsError = ref<string | null>(null)
+/** 当前在编辑区显示哪个 provider（和 currentProviderId 独立） */
+const editingProviderId = ref<string | null>(null)
+/** 编辑中 provider 的凭证是否已就绪（编辑非当前 provider 时用） */
+const editingCredentialReady = ref(false)
 
-// 设置还没加载出来时的占位。直接复用 DEFAULT_BRIDGE_UPSTREAM——手抄一份的话，
-// 抄出来的能力值会和预设悄悄漂移（曾经这里写着 supportsImages: true 却标着 DeepSeek，
-// 而 DeepSeek 实际不支持图片）。
 const bridge = computed<ProtocolBridgeSettings>(
   () =>
-    settings.settings?.protocolBridge ?? {
-      enabled: false,
-      presetId: 'custom',
-      upstream: { ...DEFAULT_BRIDGE_UPSTREAM },
-    },
+    settings.settings?.protocolBridge ?? { enabled: false, currentProviderId: '', providers: {} },
 )
-
 const enabled = computed(() => bridge.value.enabled)
-const upstream = computed(() => bridge.value.upstream)
-const presetId = computed(() => bridge.value.presetId)
-const activePreset = computed(() => bridgeUpstreamPreset(presetId.value) ?? null)
+/** 按 createdAt 升序的 provider 列表 */
+const providerList = computed<BridgeProvider[]>(() =>
+  Object.values(bridge.value.providers).sort((a, b) => a.createdAt - b.createdAt),
+)
+const currentProvider = computed<BridgeProvider | null>(
+  () => bridge.value.providers[bridge.value.currentProviderId] ?? null,
+)
+const editingProvider = computed<BridgeProvider | null>(() =>
+  editingProviderId.value ? (bridge.value.providers[editingProviderId.value] ?? null) : null,
+)
 
 const presetOptions = computed<DropdownOption<string>[]>(() =>
   BRIDGE_UPSTREAM_PRESETS.map((preset) => ({ value: preset.id, label: preset.label })),
 )
 
-const credentialSources: Array<{ value: Upstream['credentialSource']; label: string }> = [
+const credentialSources: Array<{ value: BridgeProvider['credentialSource']; label: string }> = [
   { value: 'stored', label: '直接保存在 catmax' },
   { value: 'env', label: '读环境变量' },
+]
+
+const modelListModes: Array<{ value: BridgeProvider['modelListMode']; label: string }> = [
+  { value: 'auto', label: '自动获取' },
+  { value: 'manual', label: '手动录入' },
 ]
 
 function checked(event: Event): boolean {
   return (event.target as HTMLInputElement).checked
 }
 
+// —— settings patch 主路 ——
 async function patchBridge(patch: Partial<ProtocolBridgeSettings>): Promise<void> {
   await settings.update({ protocolBridge: { ...bridge.value, ...patch } })
   await refreshStatus()
 }
 
-async function patchUpstream(patch: Partial<Upstream>): Promise<void> {
-  await patchBridge({ upstream: { ...upstream.value, ...patch } })
-}
-
-async function patchCapabilities(patch: Partial<Upstream['capabilities']>): Promise<void> {
-  await patchUpstream({ capabilities: { ...upstream.value.capabilities, ...patch } })
-}
-
-async function toggleEnabled(): Promise<void> {
-  await patchBridge({ enabled: !enabled.value })
-  // 开关翻转会整批换掉 codex 的可用模型（开=上游模型，关=codex 自己的 GPT 模型），
-  // 两个方向都要重拉。patchBridge → settings.update 内部已 await 完 codex 重连，
-  // 所以这里拉到的一定是新进程报的列表，不会拿到旧上游的残留。
-  await refreshModels()
-}
-
-/** 切预设时把该预设的地址/模型/能力整套灌进去，凭证来源保持用户当前选择 */
-async function applyPreset(id: string): Promise<void> {
-  const preset = bridgeUpstreamPreset(id)
-  if (!preset) return
+/** 改某个 provider 的字段，不动 currentProviderId */
+async function patchProvider(providerId: string, patch: Partial<BridgeProvider>): Promise<void> {
+  const p = bridge.value.providers[providerId]
+  if (!p) return
   await patchBridge({
-    presetId: id,
-    upstream: {
-      ...upstream.value,
-      protocol: preset.config.protocol,
-      baseUrl: preset.config.baseUrl,
-      modelsUrl: preset.config.modelsUrl,
-      model: preset.config.model,
-      credentialEnvVar: preset.config.credentialEnvVar,
-      capabilities: { ...preset.config.capabilities },
-    },
+    providers: { ...bridge.value.providers, [providerId]: { ...p, ...patch } },
   })
+}
+
+// —— 列表操作 ——
+async function switchProvider(id: string): Promise<void> {
+  await patchBridge({ currentProviderId: id })
   await refreshModels()
 }
 
+function selectEditing(id: string): void {
+  editingProviderId.value = id
+  secretDraft.value = ''
+  testResult.value = null
+  void refreshEditingCredentialReady()
+}
+
+async function addProvider(presetId: string): Promise<void> {
+  const provider = createProviderFromPreset(presetId)
+  await patchBridge({
+    providers: { ...bridge.value.providers, [provider.id]: provider },
+    currentProviderId: provider.id,
+  })
+  editingProviderId.value = provider.id
+  await refreshModels()
+}
+
+async function deleteProvider(id: string): Promise<void> {
+  // 先清该 provider 的凭证，再删数据
+  await window.api.backend.setBridgeCredential({ providerId: id, secret: '' })
+  const nextProviders = { ...bridge.value.providers }
+  delete nextProviders[id]
+  // 修正 currentProviderId：删的是当前就指向第一个（按 createdAt），否则不动
+  let nextCurrent = bridge.value.currentProviderId
+  if (nextCurrent === id) {
+    const remaining = Object.values(nextProviders).sort((a, b) => a.createdAt - b.createdAt)
+    nextCurrent = remaining[0]?.id ?? ''
+  }
+  await patchBridge({ providers: nextProviders, currentProviderId: nextCurrent })
+  if (editingProviderId.value === id) editingProviderId.value = nextCurrent || null
+}
+
+// —— 状态刷新 ——
 async function refreshStatus(): Promise<void> {
   status.value = await window.api.backend.bridgeStatus()
 }
 
-/**
- * 重拉 codex 的模型列表。走的就是 codex 模型下拉框那条路径（桥开着时 listModelsFor
- * 返回的是上游模型，关掉则回落 codex 自己的 model/list），所以这里看到什么，
- * 聊天界面就会看到什么。
- *
- * 桥关掉时也要能跑——关桥后模型列表从上游模型换回 GPT 模型，不重拉的话下拉框会一直
- * 停在上一个上游的模型上。所以这里**不做 enabled 判断**；不希望触发 spawn 的场合
- * （onMounted）由调用点自己 guard。
- *
- * 走 store 的 refreshModelsFor 而不是直接 window.api：main 侧清缓存只是一半，
- * 渲染层 modelsByBackend（「默认模型」下拉框的数据源）也得同步换掉。
- */
+async function refreshEditingCredentialReady(): Promise<void> {
+  if (!editingProviderId.value) {
+    editingCredentialReady.value = false
+    return
+  }
+  editingCredentialReady.value = await window.api.backend.bridgeCredentialReady({
+    providerId: editingProviderId.value,
+  })
+}
+
 async function refreshModels(): Promise<void> {
   loadingModels.value = true
   modelsError.value = null
   try {
-    // 清缓存后重拉，否则改完地址/密钥点刷新还是旧结果。
-    // 用 ...For 版本：当前 backend 未必是 codex。
     await backendStore.refreshModelsFor('codex')
     upstreamModels.value = backendStore.modelsByBackend.codex ?? []
-    // 关桥后拉不到模型是 codex 自己没登录之类的问题，不该报"检查地址和 API key"
     if (upstreamModels.value.length === 0 && enabled.value) {
       modelsError.value = '没有拉到模型，检查地址和 API key'
     }
@@ -400,25 +509,38 @@ async function refreshModels(): Promise<void> {
   }
 }
 
+// —— 凭证（按 editing provider）——
 async function saveSecret(): Promise<void> {
-  status.value = await window.api.backend.setBridgeCredential({ secret: secretDraft.value })
+  if (!editingProviderId.value) return
+  status.value = await window.api.backend.setBridgeCredential({
+    providerId: editingProviderId.value,
+    secret: secretDraft.value,
+  })
   secretDraft.value = ''
   testResult.value = null
-  // 有 key 了才拉得到模型列表，顺手刷一次
+  await refreshEditingCredentialReady()
   await refreshModels()
 }
 
 async function clearSecret(): Promise<void> {
-  status.value = await window.api.backend.setBridgeCredential({ secret: '' })
+  if (!editingProviderId.value) return
+  status.value = await window.api.backend.setBridgeCredential({
+    providerId: editingProviderId.value,
+    secret: '',
+  })
   secretDraft.value = ''
   testResult.value = null
+  await refreshEditingCredentialReady()
 }
 
 async function testUpstream(): Promise<void> {
+  if (!editingProviderId.value) return
   testing.value = true
   testResult.value = null
   try {
-    testResult.value = await window.api.backend.testBridgeUpstream()
+    testResult.value = await window.api.backend.testBridgeUpstream({
+      providerId: editingProviderId.value,
+    })
   } catch (e) {
     testResult.value = { ok: false, message: e instanceof Error ? e.message : String(e) }
   } finally {
@@ -426,9 +548,44 @@ async function testUpstream(): Promise<void> {
   }
 }
 
+// —— 手填模型维护 ——
+const manualModelDraft = ref('')
+async function addManualModel(): Promise<void> {
+  if (!editingProvider.value) return
+  const id = manualModelDraft.value.trim()
+  if (!id || editingProvider.value.manualModels.includes(id)) {
+    manualModelDraft.value = ''
+    return
+  }
+  await patchProvider(editingProvider.value.id, {
+    manualModels: [...editingProvider.value.manualModels, id],
+  })
+  manualModelDraft.value = ''
+}
+async function removeManualModel(id: string): Promise<void> {
+  if (!editingProvider.value) return
+  await patchProvider(editingProvider.value.id, {
+    manualModels: editingProvider.value.manualModels.filter((m) => m !== id),
+  })
+}
+
+async function toggleEnabled(): Promise<void> {
+  await patchBridge({ enabled: !enabled.value })
+  await refreshModels()
+}
+
+// 当前激活 provider 变化时，编辑区默认跟随显示它（首次加载/无编辑选中时）
+watch(
+  currentProvider,
+  (cur) => {
+    if (cur && !editingProviderId.value) editingProviderId.value = cur.id
+  },
+  { immediate: true },
+)
+
 onMounted(async () => {
   await refreshStatus()
-  // 桥开着时顺带把上游模型列表拉出来——不开就别去 spawn codex
   if (enabled.value) await refreshModels()
+  await refreshEditingCredentialReady()
 })
 </script>
