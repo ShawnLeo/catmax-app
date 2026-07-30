@@ -179,9 +179,22 @@
             </div>
           </details>
           <div class="flex items-center gap-2">
-            <Button variant="ghost" size="sm" :disabled="loadingModels" @click="refreshModels">
+            <Button
+              variant="ghost"
+              size="sm"
+              :disabled="loadingModels || (enabled && !editingCredentialReady)"
+              @click="refreshModels"
+            >
               {{ loadingModels ? '拉取中…' : '拉取上游模型列表' }}
             </Button>
+            <!-- 桥开着却没填 key：点了只会卡住（回退 codex），提前提示 -->
+            <span v-if="enabled && !editingCredentialReady" class="text-xs text-muted-foreground">
+              先填写 API key 才能拉取上游模型
+            </span>
+            <!-- 桥没开：拉的是 codex 自己的目录（合法），但提示用户想拉上游得先开桥 -->
+            <span v-else-if="!enabled" class="text-xs text-muted-foreground">
+              开启协议转换桥后拉取的是上游模型；当前拉取的是 codex 自带目录
+            </span>
           </div>
           <div v-if="upstreamModels.length > 0" class="flex flex-wrap gap-1.5">
             <button
