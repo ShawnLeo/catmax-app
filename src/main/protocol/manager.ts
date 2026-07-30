@@ -171,14 +171,6 @@ export class BridgeManager {
     return this.resolveCredential() !== null
   }
 
-  /**
-   * 取出凭证明文，**仅供主进程内的连通性自检使用**。
-   * 调用方必须保证结果不进 IPC、不进日志。
-   */
-  probeCredential(): string | null {
-    return this.resolveCredential()
-  }
-
   status(): BridgeStatus {
     const provider = this.currentProvider()
     return {
