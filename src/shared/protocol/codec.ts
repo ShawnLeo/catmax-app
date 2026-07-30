@@ -18,8 +18,16 @@ import type { IrRequest, IrStreamEvent, IrUsage, ProtocolId } from './ir'
 export interface UpstreamCapabilities {
   /** 不支持图片时，图片块降级成文字占位而不是原样发过去触发 400 */
   supportsImages: boolean
-  /** 上游忽略 thinking budget（DeepSeek 就是），据此决定要不要费劲算 budget */
-  respectsThinkingBudget: boolean
+  /**
+   * 这里刻意**没有** respectsThinkingBudget。
+   *
+   * 曾经有过这个开关，但它无法对应任何真实行为：`thinking.type=enabled` 时
+   * Anthropic 协议要求 `budget_tokens` 必填，所以无论上游是否理会这个值，桥都得发；
+   * 而上游是否理会它是上游的事，桥这边没有可分支的动作。真正不发 thinking 的情况
+   * 只有 effort='none'，那是 effortToThinkingBudget 无条件处理的，跟上游能力无关。
+   * 上游忽略 budget（DeepSeek 就是）属于要在 UI 里**告知**用户的事实（见
+   * bridge-config.ts 的预设文案），不是要在编码时分支的能力。
+   */
   /** 开启思考时是否必须去掉 temperature / top_p（Anthropic 系的硬约束） */
   dropSamplingWhenThinking: boolean
   /** 上游要求 max_tokens 必填时的兜底值 */
@@ -30,7 +38,6 @@ export interface UpstreamCapabilities {
 
 export const DEFAULT_UPSTREAM_CAPABILITIES: UpstreamCapabilities = {
   supportsImages: true,
-  respectsThinkingBudget: true,
   dropSamplingWhenThinking: true,
   defaultMaxOutputTokens: 8192,
   toolNameMaxLength: 64,

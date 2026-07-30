@@ -224,15 +224,16 @@
               关闭时，工具结果里的截图会被替换成占位文字（否则上游直接 400）
             </span>
           </label>
-          <label class="flex items-center gap-2 cursor-pointer">
-            <input
-              type="checkbox"
-              :checked="upstream.capabilities.respectsThinkingBudget"
-              @change="patchCapabilities({ respectsThinkingBudget: checked($event) })"
-            />
-            <span>尊重 thinking budget</span>
-            <span class="text-muted-foreground">关闭时思考强度档位实际不生效</span>
-          </label>
+          <!--
+            这里曾有一个「尊重 thinking budget」勾选框，但它不控制任何行为，已删除：
+            thinking 开启时 budget_tokens 是 Anthropic 协议的必填项，桥必须发，上游
+            理不理会由上游决定。哪家上游忽略它属于事实陈述，写在预设文案里（见上方
+            activePreset.description），不做成开关免得暗示它能改变行为。
+          -->
+          <p class="text-muted-foreground">
+            思考强度档位由桥翻译成 <code>thinking.budget_tokens</code> 发给上游；部分上游（如
+            DeepSeek）文档明确忽略该字段，此时换档位不会改变上游的思考行为。
+          </p>
           <div class="flex items-center gap-2">
             <span>max_tokens 兜底值</span>
             <Input

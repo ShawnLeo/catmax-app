@@ -55,9 +55,13 @@ export type BackendRuntimeDefaults = z.infer<typeof backendRuntimeDefaultsSchema
  * 只存变量名），要么在 userData 下单独的 0600 文件里（见 service/bridge-credentials.ts）。
  * settings.json 是 0644、会被备份同步、renderer 能整份读走，绝不能放密钥。
  */
+/**
+ * 注意：这里是普通 z.object（非 .strict()），未知键会被**静默剥掉**而不是报错。
+ * 这正是删字段的向后兼容保障——旧 settings.json 里残留的 `respectsThinkingBudget`
+ * （一个从未被任何 codec 读取的开关，已移除）不会让整份配置校验失败。
+ */
 const upstreamCapabilitiesSchema = z.object({
   supportsImages: z.boolean().default(true),
-  respectsThinkingBudget: z.boolean().default(true),
   dropSamplingWhenThinking: z.boolean().default(true),
   defaultMaxOutputTokens: z.number().int().min(256).max(200_000).default(8192),
   toolNameMaxLength: z.number().int().min(16).max(256).default(64),

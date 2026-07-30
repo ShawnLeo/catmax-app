@@ -94,8 +94,9 @@ export const BRIDGE_UPSTREAM_PRESETS: readonly BridgeUpstreamPreset[] = [
       capabilities: {
         // 官方兼容性表：Images / Documents 明确列为 Not Supported
         supportsImages: false,
-        // 官方兼容性表：Extended thinking「Supported (budget_tokens is ignored)」
-        respectsThinkingBudget: false,
+        // 注：官方兼容性表还写着 Extended thinking「Supported (budget_tokens is ignored)」。
+        // 这是要在 description 里告知用户的事实，不是能力开关——桥无论如何都得发
+        // budget_tokens（Anthropic 协议必填），上游理不理会不由桥决定。
         dropSamplingWhenThinking: true,
         defaultMaxOutputTokens: 8192,
         toolNameMaxLength: 64,

@@ -9,11 +9,15 @@ import type { IrRequest, IrStreamEvent } from '@shared/protocol/ir'
 import { describe, expect, test } from 'vitest'
 
 const CAPS: UpstreamCapabilities = { ...DEFAULT_UPSTREAM_CAPABILITIES }
-/** DeepSeek 的实际能力：不收图片、忽略 thinking budget */
+/**
+ * DeepSeek 的实际能力：不收图片。
+ *
+ * 它还忽略 thinking budget，但那不是能力开关——桥无论如何都要发 budget_tokens，
+ * 所以 caps 里没有对应字段（见 shared/protocol/codec.ts 的注释）。
+ */
 const DEEPSEEK_CAPS: UpstreamCapabilities = {
   ...DEFAULT_UPSTREAM_CAPABILITIES,
   supportsImages: false,
-  respectsThinkingBudget: false,
 }
 
 function baseRequest(overrides: Partial<IrRequest> = {}): IrRequest {

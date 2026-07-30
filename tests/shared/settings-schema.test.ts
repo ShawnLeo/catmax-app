@@ -115,4 +115,26 @@ describe('settings-schema', () => {
     expect(result.httpProxy.enabled).toBe(true)
     expect(result.httpProxy.url).toBeNull() // default
   })
+
+  // 向后兼容：respectsThinkingBudget 是已删除的上游能力开关（从未被任何 codec 读取）。
+  // 老 settings.json 里还带着它，解析必须成功并把它剥掉，而不是整份配置校验失败。
+  test('上游能力里残留的已删字段被剥掉而不报错', () => {
+    const parsed = appSettingsSchema.parse({
+      protocolBridge: {
+        enabled: true,
+        presetId: 'deepseek',
+        upstream: {
+          baseUrl: 'https://api.deepseek.com/anthropic',
+          capabilities: { supportsImages: false, respectsThinkingBudget: false },
+        },
+      },
+    })
+
+    const caps = parsed.protocolBridge.upstream.capabilities
+    expect(caps).not.toHaveProperty('respectsThinkingBudget')
+    // 同批次里合法的字段仍然正常生效
+    expect(caps.supportsImages).toBe(false)
+    expect(caps.dropSamplingWhenThinking).toBe(true) // default
+    expect(parsed.protocolBridge.upstream.baseUrl).toBe('https://api.deepseek.com/anthropic')
+  })
 })

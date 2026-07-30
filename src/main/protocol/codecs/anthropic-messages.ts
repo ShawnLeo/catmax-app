@@ -48,9 +48,12 @@ const ANTHROPIC_VERSION = '2023-06-01'
 /**
  * effort → thinking budget。
  *
- * 返回 null 表示不开思考。梯度参考 cc-switch 的实测取值；上游若声明忽略 budget
- * （DeepSeek 就是），这里算出来的值只是走个形式，但仍要发 `thinking.type=enabled`
- * 才能让上游开思考。
+ * 返回 null 表示不开思考（只有 effort='none' 会这样，与上游能力无关）。梯度参考
+ * cc-switch 的实测取值。
+ *
+ * 有些上游（DeepSeek）文档明确忽略 budget_tokens，但这里**不为此分支**：
+ * `thinking.type=enabled` 时 budget_tokens 是协议必填项，不发就 400，所以无论上游
+ * 理不理会都得算出一个值。「该上游忽略档位」是在设置页告知用户的事实，不是编码分支。
  */
 export function effortToThinkingBudget(effort: IrEffort | null): number | null {
   switch (effort) {
