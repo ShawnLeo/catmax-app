@@ -71,6 +71,8 @@ const protocolBridgeSchema = z.object({
     .object({
       protocol: z.enum(['anthropic.messages']).default('anthropic.messages'),
       baseUrl: z.string().default(''),
+      /** 模型列表端点完整 URL；常与 baseUrl 不同路径（见 bridge-config.ts） */
+      modelsUrl: z.string().default(''),
       model: z.string().nullable().default(null),
       credentialSource: z.enum(['env', 'stored']).default('stored'),
       credentialEnvVar: z.string().default(''),

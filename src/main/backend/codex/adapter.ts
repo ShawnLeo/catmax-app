@@ -93,6 +93,16 @@ export interface TurnEventSink {
   done(): Promise<void>
 }
 
+/**
+ * 外部模型列表来源（Protocol Bridge 用）。见 setModelListProvider 的说明。
+ * 抽成接口而不是直接引用 bridgeManager，是为了不让 codex adapter 依赖 protocol 层。
+ */
+export interface CodexModelListProvider {
+  /** 返回空数组表示「没有意见」，此时走 codex 自己的 model/list */
+  list(): Promise<ModelOption[]>
+  invalidate(): void
+}
+
 export interface CodexAdapterOptions {
   /** codex 可执行文件路径（默认从 PATH 找） */
   binaryPath?: string
@@ -234,6 +244,21 @@ export class CodexAdapter implements AgentBackend {
     this.extraArgs = args
   }
   private extraArgs: string[] = []
+
+  /**
+   * Protocol Bridge: 用外部模型列表顶掉 codex 自己的 `model/list`。
+   *
+   * codex 的 `model/list` 返回的是**编译进二进制的 ChatGPT 目录**，既不看
+   * `model_provider` 也不去请求 provider 的 /v1/models（实测把 provider 指向本机桥后，
+   * codex 全程没访问过桥的 /models，model/list 照样返回 gpt-*）。桥开着的时候这份列表
+   * 是错的——用户看到 gpt-5.6-sol，实际请求打到的是 DeepSeek。所以由桥提供真实列表。
+   *
+   * provider 返回空数组 = 「我没有意见」，照常走 codex 自己的 model/list。
+   */
+  setModelListProvider(provider: CodexModelListProvider | null): void {
+    this.modelListProvider = provider
+  }
+  private modelListProvider: CodexModelListProvider | null = null
 
   // ============ 生命周期 ============
 
@@ -397,6 +422,10 @@ export class CodexAdapter implements AgentBackend {
 
     this.cachedModelsPromise = (async () => {
       try {
+        // 桥接管模型列表时优先用它——顺带省掉一次 spawn：光是列模型不必起 app-server
+        const external = await this.modelListProvider?.list()
+        if (external && external.length > 0) return external
+
         await this.ensureInitialized()
         const result = await this.sendRequest('model/list', {})
         const parsed = modelListResultSchema.parse(result)
@@ -459,6 +488,8 @@ export class CodexAdapter implements AgentBackend {
     // 触发场景：切走 backend、改 codex binaryPath、UI 手动刷新按钮。
     // 不需要清掉已 spawn 的子进程——model/list 是无状态的查询。
     this.cachedModelsPromise = null
+    // 桥那边也有一层缓存，"刷新模型"要能真的重新打上游
+    this.modelListProvider?.invalidate()
   }
 
   // ============ 会话 ============

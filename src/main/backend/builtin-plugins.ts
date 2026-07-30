@@ -43,6 +43,29 @@ export function registerBuiltinBackendPlugins(): void {
           ...bridgeManager.codexSpawnEnv(),
         })
         adapter.setExtraArgs(bridgeManager.codexSpawnArgs())
+        // 桥开着时模型列表必须来自上游——codex 的 model/list 是写死的 ChatGPT 目录，
+        // 跟当前 model_provider 无关（详见 CodexAdapter.setModelListProvider）。
+        adapter.setModelListProvider(
+          settings.protocolBridge.enabled
+            ? {
+                list: async () => {
+                  const models = await bridgeManager.listUpstreamModels()
+                  if (models.length === 0) return []
+                  // 默认项优先用设置里的兜底模型；它不在上游列表里就退到第一个，
+                  // 保证总有恰好一个 isDefault（resolveDefaultModel 和 UI 都依赖这点）
+                  const fallback = settings.protocolBridge.upstream.model?.trim()
+                  const defaultId =
+                    fallback && models.some((m) => m.id === fallback) ? fallback : models[0]!.id
+                  return models.map((model) => ({
+                    id: model.id,
+                    displayName: model.displayName,
+                    ...(model.id === defaultId ? { isDefault: true } : {}),
+                  }))
+                },
+                invalidate: () => bridgeManager.invalidateModels(),
+              }
+            : null,
+        )
       },
     })
   }

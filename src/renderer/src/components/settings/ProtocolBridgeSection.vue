@@ -66,17 +66,61 @@
         />
       </div>
 
-      <!-- 模型名 -->
+      <!-- 兜底模型名。真正的模型列表来自上游，见下方 chips -->
       <div class="flex flex-col gap-1.5">
-        <label class="text-xs text-muted-foreground">
-          模型名（留空则透传 codex 请求里的模型名）
-        </label>
+        <div class="flex items-center justify-between gap-2">
+          <label class="text-xs text-muted-foreground">兜底模型名</label>
+          <Button variant="ghost" size="sm" :disabled="loadingModels" @click="refreshModels">
+            {{ loadingModels ? '拉取中…' : '拉取上游模型列表' }}
+          </Button>
+        </div>
         <Input
           :model-value="upstream.model ?? ''"
           placeholder="deepseek-v4-pro"
           @update:model-value="(v: string | number) => patchUpstream({ model: String(v) || null })"
         />
+        <p class="text-xs text-muted-foreground">
+          codex 的模型下拉框在桥开启后会显示<b>上游的真实模型</b>；这里填的是兜底值—— codex
+          发来的模型名不在上游列表里时（比如它内置的 <code>gpt-*</code>）用它顶上。
+        </p>
+        <!-- 拉到的上游模型：点一下即设为兜底值 -->
+        <div v-if="upstreamModels.length > 0" class="flex flex-wrap gap-1.5">
+          <button
+            v-for="model in upstreamModels"
+            :key="model.id"
+            type="button"
+            :class="[
+              'px-2 py-0.5 rounded border text-xs transition-colors cursor-pointer',
+              upstream.model === model.id
+                ? 'border-primary bg-primary/5 text-foreground'
+                : 'border-sidebar-border text-muted-foreground hover:text-foreground',
+            ]"
+            @click="patchUpstream({ model: model.id })"
+          >
+            {{ model.id }}
+          </button>
+        </div>
+        <p v-else-if="modelsError" class="text-xs text-destructive">{{ modelsError }}</p>
       </div>
+
+      <!-- 模型列表地址：常和对话端点不在同一路径下，所以单独一个字段 -->
+      <details class="text-xs">
+        <summary class="cursor-pointer text-muted-foreground hover:text-foreground">
+          模型列表地址（留空自动推断）
+        </summary>
+        <div class="mt-2 pl-3 border-l border-sidebar-border flex flex-col gap-1.5">
+          <Input
+            :model-value="upstream.modelsUrl"
+            placeholder="https://api.deepseek.com/models"
+            @update:model-value="(v: string | number) => patchUpstream({ modelsUrl: String(v) })"
+          />
+          <p class="text-muted-foreground">
+            留空时按上游地址的域名试
+            <code>/v1/models</code> 和 <code>/models</code>。DeepSeek 的对话端点在
+            <code>/anthropic</code> 下，但模型列表只在根路径上，所以两者不能共用一个地址。
+          </p>
+        </div>
+      </details>
 
       <!-- 凭证 -->
       <div class="flex flex-col gap-2">
@@ -218,9 +262,11 @@ import { Button } from '@renderer/components/ui/button'
 import { DropdownMenu, type DropdownOption } from '@renderer/components/ui/dropdown-menu'
 import { Input } from '@renderer/components/ui/input'
 import { useSettingsStore } from '@renderer/stores/settings'
+import type { ModelOption } from '@shared/backend/types'
 import {
   BRIDGE_UPSTREAM_PRESETS,
   bridgeUpstreamPreset,
+  DEFAULT_BRIDGE_UPSTREAM,
   type BridgeStatus,
 } from '@shared/protocol/bridge-config'
 import type { ProtocolBridgeSettings } from '@shared/settings-schema'
@@ -234,26 +280,19 @@ const status = ref<BridgeStatus | null>(null)
 const secretDraft = ref('')
 const testing = ref(false)
 const testResult = ref<{ ok: boolean; message: string } | null>(null)
+const upstreamModels = ref<ModelOption[]>([])
+const loadingModels = ref(false)
+const modelsError = ref<string | null>(null)
 
+// 设置还没加载出来时的占位。直接复用 DEFAULT_BRIDGE_UPSTREAM——手抄一份的话，
+// 抄出来的能力值会和预设悄悄漂移（曾经这里写着 supportsImages: true 却标着 DeepSeek，
+// 而 DeepSeek 实际不支持图片）。
 const bridge = computed<ProtocolBridgeSettings>(
   () =>
     settings.settings?.protocolBridge ?? {
       enabled: false,
-      presetId: 'deepseek',
-      upstream: {
-        protocol: 'anthropic.messages',
-        baseUrl: '',
-        model: null,
-        credentialSource: 'stored',
-        credentialEnvVar: '',
-        capabilities: {
-          supportsImages: true,
-          respectsThinkingBudget: true,
-          dropSamplingWhenThinking: true,
-          defaultMaxOutputTokens: 8192,
-          toolNameMaxLength: 64,
-        },
-      },
+      presetId: 'custom',
+      upstream: { ...DEFAULT_BRIDGE_UPSTREAM },
     },
 )
 
@@ -302,21 +341,46 @@ async function applyPreset(id: string): Promise<void> {
       ...upstream.value,
       protocol: preset.config.protocol,
       baseUrl: preset.config.baseUrl,
+      modelsUrl: preset.config.modelsUrl,
       model: preset.config.model,
       credentialEnvVar: preset.config.credentialEnvVar,
       capabilities: { ...preset.config.capabilities },
     },
   })
+  await refreshModels()
 }
 
 async function refreshStatus(): Promise<void> {
   status.value = await window.api.backend.bridgeStatus()
 }
 
+/**
+ * 拉上游模型列表。走的就是 codex 模型下拉框那条路径（桥开着时 listModelsFor 返回的
+ * 就是上游模型），所以这里看到什么，聊天界面就会看到什么。
+ */
+async function refreshModels(): Promise<void> {
+  if (!enabled.value) return
+  loadingModels.value = true
+  modelsError.value = null
+  try {
+    // 清缓存后重拉，否则改完地址/密钥点刷新还是旧结果。
+    // 用 ...For 版本：当前 backend 未必是 codex。
+    upstreamModels.value = await window.api.backend.refreshModelsFor({ id: 'codex' })
+    if (upstreamModels.value.length === 0) modelsError.value = '没有拉到模型，检查地址和 API key'
+  } catch (e) {
+    upstreamModels.value = []
+    modelsError.value = e instanceof Error ? e.message : String(e)
+  } finally {
+    loadingModels.value = false
+  }
+}
+
 async function saveSecret(): Promise<void> {
   status.value = await window.api.backend.setBridgeCredential({ secret: secretDraft.value })
   secretDraft.value = ''
   testResult.value = null
+  // 有 key 了才拉得到模型列表，顺手刷一次
+  await refreshModels()
 }
 
 async function clearSecret(): Promise<void> {
@@ -337,5 +401,9 @@ async function testUpstream(): Promise<void> {
   }
 }
 
-onMounted(refreshStatus)
+onMounted(async () => {
+  await refreshStatus()
+  // 桥开着时顺带把上游模型列表拉出来——不开就别去 spawn codex
+  if (enabled.value) await refreshModels()
+})
 </script>

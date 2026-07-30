@@ -15,8 +15,10 @@
 import {
   BRIDGE_CODEX_PROVIDER_ID,
   BRIDGE_TOKEN_ENV_VAR,
+  type BridgeModelInfo,
   type BridgeSettings,
   type BridgeStatus,
+  type BridgeUpstreamConfig,
 } from '@shared/protocol/bridge-config'
 
 import { getStoredCredential } from '../service/bridge-credentials'
@@ -24,6 +26,7 @@ import { logger } from '../service/logger'
 
 import type { BridgeUpstreamTarget } from './bridge'
 import { BridgeServer } from './server'
+import { fetchUpstreamModels } from './upstream-models'
 
 const log = logger.domain('bridge-manager')
 
@@ -39,7 +42,13 @@ export class BridgeManager {
   /** settings 变化时调用：按 enabled 起停服务 */
   async applySettings(settings: BridgeSettings): Promise<void> {
     const wasEnabled = this.settings?.enabled ?? false
+    const previous = this.settings?.upstream ?? null
     this.settings = settings
+
+    // 上游换了（地址/列表地址/凭证来源变化）就丢掉模型缓存，避免下拉框显示上一个上游的模型
+    if (previous && upstreamModelIdentityChanged(previous, settings.upstream)) {
+      this.invalidateModels()
+    }
 
     if (settings.enabled && !wasEnabled) {
       try {
@@ -77,8 +86,51 @@ export class BridgeManager {
       baseUrl: upstream.baseUrl.trim(),
       apiKey,
       model: upstream.model?.trim() ? upstream.model.trim() : null,
+      // 上一次成功拉到的模型列表——桥用它判断 codex 发来的模型名是不是上游真有的。
+      // 还没拉过就是 null，此时一律用兜底模型名（见 bridge.ts 的 resolveModel）。
+      knownModelIds: this.knownModelIds,
       capabilities: upstream.capabilities,
     }
+  }
+
+  // ============ 上游模型列表 ============
+
+  /**
+   * 上游模型列表。缓存的是 Promise，并发调用共享同一次请求；失败时清缓存以便重试。
+   * 和 CodexAdapter.listModels 的缓存策略保持一致。
+   */
+  private modelsPromise: Promise<BridgeModelInfo[]> | null = null
+  /** 最后一次成功的结果，供 resolveUpstream 同步读取 */
+  private knownModelIds: ReadonlySet<string> | null = null
+
+  async listUpstreamModels(): Promise<BridgeModelInfo[]> {
+    if (this.modelsPromise) return this.modelsPromise
+
+    const settings = this.settings
+    if (!settings?.enabled) return []
+    const { baseUrl, modelsUrl } = settings.upstream
+    const apiKey = this.resolveCredential()
+    // 没凭证时安静返回空——调用方会回退到 codex 自己的模型列表
+    if (!apiKey) return []
+
+    this.modelsPromise = (async () => {
+      try {
+        const models = await fetchUpstreamModels({ modelsUrl, baseUrl, apiKey })
+        this.knownModelIds = new Set(models.map((m) => m.id))
+        return models
+      } catch (error) {
+        this.modelsPromise = null
+        log.warn('拉取上游模型列表失败', error instanceof Error ? error.message : String(error))
+        return []
+      }
+    })()
+    return this.modelsPromise
+  }
+
+  /** 清模型缓存；下次 listUpstreamModels 会重新拉 */
+  invalidateModels(): void {
+    this.modelsPromise = null
+    this.knownModelIds = null
   }
 
   private resolveCredential(): string | null {
@@ -155,6 +207,16 @@ export class BridgeManager {
     if (!this.settings?.enabled || !this.server.running) return {}
     return { [BRIDGE_TOKEN_ENV_VAR]: this.server.authToken }
   }
+}
+
+/** 影响「模型列表是哪个上游的」的字段变了没有——只比较这几个，改能力开关不该丢缓存 */
+function upstreamModelIdentityChanged(a: BridgeUpstreamConfig, b: BridgeUpstreamConfig): boolean {
+  return (
+    a.modelsUrl !== b.modelsUrl ||
+    a.baseUrl !== b.baseUrl ||
+    a.credentialSource !== b.credentialSource ||
+    a.credentialEnvVar !== b.credentialEnvVar
+  )
 }
 
 /**

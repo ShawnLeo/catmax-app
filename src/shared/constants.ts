@@ -44,6 +44,7 @@ export const IPC = {
   BACKEND_LIST_MODELS: 'backend.listModels',
   BACKEND_LIST_MODELS_FOR: 'backend.listModelsFor',
   BACKEND_REFRESH_MODELS: 'backend.refreshModels',
+  BACKEND_REFRESH_MODELS_FOR: 'backend.refreshModelsFor',
   BACKEND_WARMUP: 'backend.warmup',
   BACKEND_START_TURN: 'backend.startTurn',
   BACKEND_INTERRUPT_TURN: 'backend.interruptTurn',

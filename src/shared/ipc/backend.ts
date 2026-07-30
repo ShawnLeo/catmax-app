@@ -2,7 +2,6 @@
  * backend domain IPC 契约。
  * 函数签名即契约——main 实现，renderer 通过 window.api 调用。
  */
-import type { BridgeStatus } from '../protocol/bridge-config'
 import type {
   BackendConfigFileContent,
   BackendConfigFileInfo,
@@ -22,6 +21,7 @@ import type {
 } from '../backend/types'
 import type { BackendId } from '../constants'
 import type { TurnRunRecord } from '../domain'
+import type { BridgeStatus } from '../protocol/bridge-config'
 
 /**
  * renderer → BackendManager 的 turn 启动参数。
@@ -45,6 +45,11 @@ export type BackendHandlers = {
    */
   'backend.listModelsFor': (args: { id: BackendId }) => Promise<ModelOption[]>
   'backend.refreshModels': () => Promise<ModelOption[]>
+  /**
+   * 强制刷新指定 backend 的模型列表（清缓存后重拉），不依赖当前 backend。
+   * 协议桥那一节用它刷 codex 的列表——当前 backend 可能并不是 codex。
+   */
+  'backend.refreshModelsFor': (args: { id: BackendId }) => Promise<ModelOption[]>
   'backend.warmup': (args: { id: BackendId; config: WarmupBackendArgs }) => Promise<void>
   'backend.startTurn': (args: CoordinatedStartTurnArgs) => Promise<{ turnId: string }>
   'backend.interruptTurn': (args: { turnId: string }) => Promise<void>

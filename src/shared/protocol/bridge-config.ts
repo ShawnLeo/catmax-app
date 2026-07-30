@@ -27,7 +27,21 @@ export interface BridgeUpstreamConfig {
   protocol: BridgeUpstreamProtocol
   /** 上游根地址，不含具体路径。如 https://api.deepseek.com/anthropic */
   baseUrl: string
-  /** 发给上游的模型名。留空则透传 codex 请求里的模型名 */
+  /**
+   * 模型列表端点的**完整 URL**，留空表示上游没有可用的列表接口。
+   *
+   * 单独一个字段而不是从 baseUrl 推导，是因为二者经常不在同一路径下：
+   * DeepSeek 的列表在 OpenAI 风格的 https://api.deepseek.com/models，
+   * 而对话走的是 https://api.deepseek.com/anthropic（该路径下 /models 是 404）。
+   */
+  modelsUrl: string
+  /**
+   * 兜底模型名——codex 发来的模型名不在上游模型列表里时用它顶上。
+   *
+   * 留空则原样透传 codex 请求里的模型名。注意 codex 的 `model/list` 返回的是它
+   * 编译进二进制的 ChatGPT 目录（gpt-5.6-sol 等），跟上游毫无关系，所以这个兜底
+   * 在拉不到上游列表时是唯一能让请求不 400 的东西。
+   */
   model: string | null
   credentialSource: BridgeCredentialSource
   /** credentialSource === 'env' 时使用的环境变量名 */
@@ -39,6 +53,17 @@ export interface BridgeUpstreamConfig {
 export interface BridgeSettings {
   enabled: boolean
   upstream: BridgeUpstreamConfig
+}
+
+/**
+ * 从上游模型列表接口拉到的一个模型。
+ *
+ * 刻意不复用 backend 层的 ModelOption——协议层不该认识 backend 的类型，
+ * 由 backend 侧自己把这个最小结构映射过去。
+ */
+export interface BridgeModelInfo {
+  id: string
+  displayName: string
 }
 
 /** 内置上游预设——填好各家的 base_url 和已知怪癖，用户只要贴 key */
@@ -62,6 +87,8 @@ export const BRIDGE_UPSTREAM_PRESETS: readonly BridgeUpstreamPreset[] = [
     config: {
       protocol: 'anthropic.messages',
       baseUrl: 'https://api.deepseek.com/anthropic',
+      // 实测：/anthropic 路径下没有列表接口（404），列表只在 OpenAI 风格的根路径上
+      modelsUrl: 'https://api.deepseek.com/models',
       model: 'deepseek-v4-pro',
       credentialEnvVar: 'DEEPSEEK_API_KEY',
       capabilities: {
@@ -83,6 +110,7 @@ export const BRIDGE_UPSTREAM_PRESETS: readonly BridgeUpstreamPreset[] = [
     config: {
       protocol: 'anthropic.messages',
       baseUrl: 'https://api.anthropic.com',
+      modelsUrl: 'https://api.anthropic.com/v1/models',
       model: null,
       credentialEnvVar: 'ANTHROPIC_API_KEY',
       capabilities: { ...DEFAULT_UPSTREAM_CAPABILITIES },
@@ -96,6 +124,7 @@ export const BRIDGE_UPSTREAM_PRESETS: readonly BridgeUpstreamPreset[] = [
     config: {
       protocol: 'anthropic.messages',
       baseUrl: '',
+      modelsUrl: '',
       model: null,
       credentialEnvVar: '',
       capabilities: { ...DEFAULT_UPSTREAM_CAPABILITIES, supportsImages: false },
@@ -110,6 +139,7 @@ export function bridgeUpstreamPreset(id: string): BridgeUpstreamPreset | undefin
 export const DEFAULT_BRIDGE_UPSTREAM: BridgeUpstreamConfig = {
   protocol: 'anthropic.messages',
   baseUrl: '',
+  modelsUrl: '',
   model: null,
   credentialSource: 'stored',
   credentialEnvVar: '',

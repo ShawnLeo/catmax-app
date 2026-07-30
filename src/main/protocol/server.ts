@@ -27,6 +27,9 @@ const log = logger.domain('bridge-server')
 /** 请求体上限。Responses 请求会带完整对话历史，给得宽一点，但不能无上限。 */
 const MAX_REQUEST_BYTES = 32 * 1024 * 1024
 
+/** 上游还没配好时给 /models 的占位模型名 */
+const BRIDGE_PLACEHOLDER_MODEL_ID = 'catmax-bridge'
+
 export interface BridgeServerOptions {
   /** 每次请求时解析当前上游配置——设置改了不用重启服务 */
   resolveUpstream: () => BridgeUpstreamTarget | null
@@ -116,9 +119,12 @@ export class BridgeServer {
         return sendJson(res, 401, { error: { message: '桥的 token 不匹配' } })
       }
       const upstream = this.options.resolveUpstream()
-      // 没配上游时返回占位模型而非报错——codex 会回退到内置模型缓存
-      const modelId = upstream?.model ?? 'catmax-bridge'
-      return sendJson(res, 200, { models: [bridgeModelEntry(modelId)] })
+      // 已经拉到上游真实列表就全部回出去；否则退到配置里的兜底模型名。
+      // 没配上游时返回占位模型而非报错——codex 会回退到内置模型缓存。
+      const ids = upstream?.knownModelIds
+      const modelIds =
+        ids && ids.size > 0 ? [...ids] : [upstream?.model ?? BRIDGE_PLACEHOLDER_MODEL_ID]
+      return sendJson(res, 200, { models: modelIds.map(bridgeModelEntry) })
     }
 
     // codex 可能带或不带 /v1 前缀；compact 端点也走同一套转换

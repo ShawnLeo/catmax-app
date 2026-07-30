@@ -162,6 +162,19 @@ Responses 的 `function_call_output` 可以带图片；Chat 的 `role:"tool"` �
 
 **结论：转换器不能只有一套硬编码规则，必须有 per-provider 的能力/怪癖配置。** 这条要进架构。
 
+### 3.8 模型列表：codex 那份是写死的，桥管不着（实现后补充）
+
+上线后发现的问题：桥接通了、对话正常，但模型下拉框仍然是 `gpt-*`。
+
+排查结论——**codex 的 `model/list` JSON-RPC 返回的是编译进 codex 二进制的 ChatGPT 目录，与 `model_provider` 无关**。验证方式：用桥的全套 `-c` 参数拉起 codex 0.146 app-server，分别指向（a）一个不存在的端口、（b）一个真在跑且实现了 `/v1/models` 的服务，两次 `model/list` 都返回 `gpt-5.6-sol / terra / luna / gpt-5.5 / gpt-5.2`，且情形（b）里 codex 全程**没有请求过**桥的 `/models`。本机也不存在 `~/.codex/models_cache.json`，即这份列表没有任何磁盘来源。
+
+因此模型列表只能绕开 codex，由 catmax 自己从上游拉：
+
+- `CodexAdapter.setModelListProvider()`——桥开着时顶掉 `model/list`（顺带省一次 spawn：光列模型不必起 app-server）。抽成接口而非直接引用 `bridgeManager`，避免 backend 层依赖 protocol 层。
+- `src/main/protocol/upstream-models.ts`——拉取 + 容忍式解码。OpenAI 的 `{data:[{id}]}` 和 Anthropic 的 `{data:[{id,display_name}]}` 结构一致，一个解析器够用。
+- **列表端点不在 `baseUrl` 之下。** DeepSeek 对话在 `https://api.deepseek.com/anthropic`，列表却只在 `https://api.deepseek.com/models`（`/anthropic/models` 实测 404）。所以单列一个 `modelsUrl` 字段；留空时按 origin 依次试 `/v1/models` 和 `/models`，让没有该字段的旧配置不用手改也能work。认证头 Bearer 和 `x-api-key` 一起发——列表端点的协议风格未必和对话端点一致。
+- 连带修正：`bridge.ts` 原先**无条件**把模型名覆盖成配置里的 `upstream.model`，等于用户选什么都没用。改成「上游列表里有就透传，没有才用兜底名」，这样下拉框的选择真正生效，而 codex 自造的 `gpt-*` 仍会被顶掉，不会打到上游 400。
+
 ---
 
 ## 4. cc-switch 的实现结构

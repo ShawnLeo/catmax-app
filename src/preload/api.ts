@@ -57,6 +57,9 @@ export const api = {
     refreshModels: requestMain<BackendHandlers, 'backend.refreshModels'>(
       IPC.BACKEND_REFRESH_MODELS,
     ),
+    refreshModelsFor: requestMain<BackendHandlers, 'backend.refreshModelsFor'>(
+      IPC.BACKEND_REFRESH_MODELS_FOR,
+    ),
     warmup: requestMain<BackendHandlers, 'backend.warmup'>(IPC.BACKEND_WARMUP),
     startTurn: requestMain<BackendHandlers, 'backend.startTurn'>(IPC.BACKEND_START_TURN),
     interruptTurn: requestMain<BackendHandlers, 'backend.interruptTurn'>(

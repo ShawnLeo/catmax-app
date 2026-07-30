@@ -280,6 +280,19 @@ export class BackendManager {
     return adapter.listModels()
   }
 
+  /**
+   * 强制刷新**指定** backend 的模型列表，不依赖当前 backend。
+   * 设置页用：协议桥那一节要刷 codex 的列表，但当前 backend 可能是 claude。
+   */
+  async refreshModelsForBackend(id: BackendId): Promise<ModelOption[]> {
+    const adapter = this.adapters.get(id)
+    if (!adapter) {
+      throw new BackendError('not-initialized', `unknown backend: ${id}`)
+    }
+    adapter.invalidateModelsCache?.()
+    return adapter.listModels()
+  }
+
   /** 预热指定 backend，不依赖可能已切换的 currentBackendId。 */
   async warmupBackend(id: BackendId, args: WarmupBackendArgs): Promise<void> {
     const adapter = this.adapters.get(id)

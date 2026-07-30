@@ -113,6 +113,7 @@ afterEach(async () => {
 async function startBridge(
   target: FakeUpstream,
   model: string | null = null,
+  knownModelIds: ReadonlySet<string> | null = null,
 ): Promise<BridgeServer> {
   const server = new BridgeServer({
     resolveUpstream: () => ({
@@ -120,11 +121,22 @@ async function startBridge(
       baseUrl: target.url,
       apiKey: 'sk-upstream',
       model,
+      knownModelIds,
       capabilities: { ...DEFAULT_UPSTREAM_CAPABILITIES, supportsImages: false },
     }),
   })
   await server.start()
   return server
+}
+
+/** 换一套上游配置重开桥——先关掉 beforeEach 起的那个，别泄漏监听端口 */
+async function restartBridge(
+  target: FakeUpstream,
+  model: string | null,
+  knownModelIds: ReadonlySet<string> | null,
+): Promise<BridgeServer> {
+  await bridge?.stop()
+  return startBridge(target, model, knownModelIds)
 }
 
 async function callBridge(
@@ -212,6 +224,55 @@ describe('BridgeServer 端到端', () => {
     // 上游真 key 走 x-api-key，而不是 codex 发来的桥 token
     expect(upstream!.lastHeaders['x-api-key']).toBe('sk-upstream')
     expect(upstream!.lastHeaders['anthropic-version']).toBe('2023-06-01')
+  })
+
+  // 模型名选择：codex 的 model/list 是它编译进二进制的 ChatGPT 目录（gpt-*），
+  // 跟上游毫无关系。桥开着时 catmax 会把下拉框换成上游真实模型，但历史会话 /
+  // 拉不到列表的情况下 codex 仍会发 gpt-*，那种名字必须被兜底名顶掉。
+  describe('发给上游的模型名', () => {
+    test('还没拉到上游列表时，一律用兜底名', async () => {
+      bridge = await restartBridge(upstream!, 'deepseek-v4-pro', null)
+      await callBridge(bridge, { ...RESPONSES_REQUEST, model: 'gpt-5-codex' })
+      expect(upstream!.lastBody!.model).toBe('deepseek-v4-pro')
+    })
+
+    test('模型名在上游列表里 → 原样透传（用户在下拉框选的那个才真正生效）', async () => {
+      bridge = await restartBridge(
+        upstream!,
+        'deepseek-v4-pro',
+        new Set(['deepseek-v4-pro', 'deepseek-v4-flash']),
+      )
+      await callBridge(bridge, { ...RESPONSES_REQUEST, model: 'deepseek-v4-flash' })
+      expect(upstream!.lastBody!.model).toBe('deepseek-v4-flash')
+    })
+
+    test('模型名不在上游列表里 → 用兜底名，避免上游 400', async () => {
+      bridge = await restartBridge(upstream!, 'deepseek-v4-pro', new Set(['deepseek-v4-pro']))
+      await callBridge(bridge, { ...RESPONSES_REQUEST, model: 'gpt-5.6-sol' })
+      expect(upstream!.lastBody!.model).toBe('deepseek-v4-pro')
+    })
+
+    test('没配兜底名时透传，不擅自改写', async () => {
+      bridge = await restartBridge(upstream!, null, null)
+      await callBridge(bridge, { ...RESPONSES_REQUEST, model: 'claude-sonnet-4-5' })
+      expect(upstream!.lastBody!.model).toBe('claude-sonnet-4-5')
+    })
+
+    test('/v1/models 把上游真实列表整个回给 codex', async () => {
+      bridge = await restartBridge(
+        upstream!,
+        'deepseek-v4-pro',
+        new Set(['deepseek-v4-pro', 'deepseek-v4-flash']),
+      )
+      const response = await fetch(`${bridge.baseUrl}/models`, {
+        headers: { authorization: `Bearer ${bridge.authToken}` },
+      })
+      const body = (await response.json()) as { models: Array<{ slug: string }> }
+      expect(body.models.map((m) => m.slug).sort()).toEqual([
+        'deepseek-v4-flash',
+        'deepseek-v4-pro',
+      ])
+    })
   })
 
   test('上游真 key 绝不会等于桥的 token（凭证隔离）', async () => {

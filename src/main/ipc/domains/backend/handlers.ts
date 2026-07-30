@@ -56,6 +56,10 @@ export const refreshModels = async () => {
   return ctx.backendManager.refreshModels()
 }
 
+export const refreshModelsFor = async (args: { id: BackendId }) => {
+  return ctx.backendManager.refreshModelsForBackend(args.id)
+}
+
 export const warmupBackend = async (args: { id: BackendId; config: WarmupBackendArgs }) => {
   await ctx.backendManager.warmupBackend(args.id, args.config)
 }
@@ -185,6 +189,8 @@ export const getBridgeStatus = async (): Promise<BridgeStatus> => {
  */
 export const setBridgeCredential = async (args: { secret: string }): Promise<BridgeStatus> => {
   setStoredCredential(BRIDGE_CREDENTIAL_ID, args.secret.trim())
+  // 换了 key 就可能是换了账号/服务商，之前拉到的模型列表不再可信
+  bridgeManager.invalidateModels()
   const status = bridgeManager.status()
   // 常见场景：codex 早于桥 spawn（启动时桥关着），没拿到 `-c model_provider` 参数。
   // 保存 key 是用户完成桥配置的时刻——桥此时若已在跑，借机让 codex 重 spawn 带上 -c。

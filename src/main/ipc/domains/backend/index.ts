@@ -14,6 +14,7 @@ import {
   listTurnRuns,
   readBackendConfigFile,
   refreshModels,
+  refreshModelsFor,
   respondApproval,
   respondQuestion,
   getBridgeStatus,
@@ -41,6 +42,10 @@ export function registerBackendHandlers(): void {
   handleRendererRequest<BackendHandlers, 'backend.refreshModels'>(
     'backend.refreshModels',
     refreshModels,
+  )
+  handleRendererRequest<BackendHandlers, 'backend.refreshModelsFor'>(
+    'backend.refreshModelsFor',
+    refreshModelsFor,
   )
   handleRendererRequest<BackendHandlers, 'backend.warmup'>('backend.warmup', warmupBackend)
   handleRendererRequest<BackendHandlers, 'backend.startTurn'>('backend.startTurn', startTurn)

@@ -20,8 +20,10 @@ export interface BridgeUpstreamTarget {
   protocol: ProtocolId
   baseUrl: string
   apiKey: string
-  /** 覆盖请求里的模型名。null 表示透传客户端发来的模型名 */
+  /** 兜底模型名，客户端发来的模型名不被上游认识时用它。null 表示一律透传 */
   model: string | null
+  /** 上游确实存在的模型 id；null 表示还没拉到列表（此时一律用兜底名） */
+  knownModelIds?: ReadonlySet<string> | null
   capabilities: UpstreamCapabilities
 }
 
@@ -47,6 +49,22 @@ function joinUrl(baseUrl: string, path: string): string {
 }
 
 /**
+ * 决定最终发给上游的模型名。
+ *
+ * codex 会发两类模型名：一类是用户在 catmax 下拉框里选的（桥开着时这个列表来自上游，
+ * 是真实存在的模型），一类是 codex 自己编译进二进制的 ChatGPT 目录里的名字
+ * （gpt-5.6-sol 等，上游根本不认，原样发过去必然 400）。
+ *
+ * 所以：**认识就透传，不认识才用兜底名**。拉不到上游列表时（knownModelIds 为 null）
+ * 保守地一律用兜底名——那是旧版行为，至少能保证请求打得通。
+ */
+function resolveModel(requested: string, upstream: BridgeUpstreamTarget): string {
+  const known = upstream.knownModelIds
+  if (known && known.has(requested)) return requested
+  return upstream.model ?? requested
+}
+
+/**
  * 跑一整轮桥接。
  *
  * 返回的 stream 是惰性的：调用方 for-await 消费时才真正发起上游请求。
@@ -56,7 +74,7 @@ export async function runBridgeTurn(options: BridgeTurnOptions): Promise<BridgeT
   const upstreamCodec = getCodec(options.upstream.protocol)
 
   const ir = clientCodec.decodeRequest(options.requestBody)
-  if (options.upstream.model) ir.model = options.upstream.model
+  ir.model = resolveModel(ir.model, options.upstream)
 
   const upstreamBody = upstreamCodec.encodeRequest(ir, options.upstream.capabilities)
   const url = joinUrl(options.upstream.baseUrl, upstreamCodec.upstreamPath())
