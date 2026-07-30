@@ -51,9 +51,10 @@ export function registerBuiltinBackendPlugins(): void {
                 list: async () => {
                   const models = await bridgeManager.listUpstreamModels()
                   if (models.length === 0) return []
-                  // 默认项优先用设置里的兜底模型；它不在上游列表里就退到第一个，
-                  // 保证总有恰好一个 isDefault（resolveDefaultModel 和 UI 都依赖这点）
-                  const fallback = settings.protocolBridge.upstream.model?.trim()
+                  // 默认项优先用当前 provider 的兜底模型；不在上游列表就退到第一个
+                  const currentId = settings.protocolBridge.currentProviderId
+                  const provider = settings.protocolBridge.providers[currentId]
+                  const fallback = provider?.model?.trim()
                   const defaultId =
                     fallback && models.some((m) => m.id === fallback) ? fallback : models[0]!.id
                   return models.map((model) => ({
