@@ -214,7 +214,7 @@ export const testBridgeUpstream = async (args: {
   let apiKey: string | null = null
   if (provider.credentialSource === 'env') {
     const name = provider.credentialEnvVar.trim()
-    apiKey = name ? (process.env[name]?.trim() || null) : null
+    apiKey = name ? process.env[name]?.trim() || null : null
   } else {
     apiKey = getStoredCredential(args.providerId)
   }
@@ -253,9 +253,7 @@ export const testBridgeUpstream = async (args: {
   }
 }
 
-export const bridgeCredentialReady = async (args: {
-  providerId: string
-}): Promise<boolean> => {
+export const bridgeCredentialReady = async (args: { providerId: string }): Promise<boolean> => {
   const settings = ctx.settingsStore.load().protocolBridge
   const provider = settings.providers[args.providerId]
   if (!provider) return false
