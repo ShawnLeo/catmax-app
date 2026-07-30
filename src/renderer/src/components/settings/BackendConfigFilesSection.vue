@@ -32,10 +32,17 @@
       >
         <BackendIcon :backend="file.backendId" class="w-4 h-4" />
         <span>{{ file.label }}</span>
-        <!-- 影响范围徽标：只有 catmax 私有的那份需要标，后端本地文件是默认认知 -->
+        <!-- 影响范围徽标：只有 catmax 私有的那份需要标，后端本地文件是默认认知。
+             选中态的 tab 是反色的（bg-foreground/text-background），徽标必须跟着反，
+             否则 bg-muted 的浅色块糊在深色 tab 上，两个主题下都突兀。 -->
         <span
           v-if="file.location === 'catmax-userdata'"
-          class="text-[10px] leading-none px-1.5 py-0.5 rounded bg-muted text-muted-foreground"
+          :class="[
+            'text-[10px] leading-none px-1.5 py-0.5 rounded',
+            activeId === file.id
+              ? 'bg-background/20 text-background'
+              : 'bg-muted text-muted-foreground',
+          ]"
         >
           仅本应用
         </span>

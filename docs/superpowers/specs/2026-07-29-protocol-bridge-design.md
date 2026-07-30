@@ -173,6 +173,7 @@ Responses 的 `function_call_output` 可以带图片；Chat 的 `role:"tool"` �
 - `CodexAdapter.setModelListProvider()`——桥开着时顶掉 `model/list`（顺带省一次 spawn：光列模型不必起 app-server）。抽成接口而非直接引用 `bridgeManager`，避免 backend 层依赖 protocol 层。
 - `src/main/protocol/upstream-models.ts`——拉取 + 容忍式解码。OpenAI 的 `{data:[{id}]}` 和 Anthropic 的 `{data:[{id,display_name}]}` 结构一致，一个解析器够用。
 - **列表端点不在 `baseUrl` 之下。** DeepSeek 对话在 `https://api.deepseek.com/anthropic`，列表却只在 `https://api.deepseek.com/models`（`/anthropic/models` 实测 404）。所以单列一个 `modelsUrl` 字段；留空时按 origin 依次试 `/v1/models` 和 `/models`，让没有该字段的旧配置不用手改也能work。认证头 Bearer 和 `x-api-key` 一起发——列表端点的协议风格未必和对话端点一致。
+- **桥不实现 `GET /models`，一律 404。** 曾经为了让 codex 的 models manager 别刷屏，手工伪造过一份 codex 私有的 `models_cache.json`（34 个无文档字段）。这条路是错的：那份 schema 随 codex 版本漂移，0.146 就因其中一个字段取值报 ``unknown variant `disabled`, expected `text` or `text_and_image``，把整次刷新打成 ERROR。**伪造一个解不开的响应，比压根不提供这个端点更糟。** 而且 catmax 侧已经不需要 codex 的目录了（见上一条），404 是所有第三方 provider 的常规路径、codex 兜底得最充分。已实测：`/models` 返回 404 时 turn 正常完成。别再把伪造目录加回来。
 - 连带修正：`bridge.ts` 原先**无条件**把模型名覆盖成配置里的 `upstream.model`，等于用户选什么都没用。改成「上游列表里有就透传，没有才用兜底名」，这样下拉框的选择真正生效，而 codex 自造的 `gpt-*` 仍会被顶掉，不会打到上游 400。
 
 ---

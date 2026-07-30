@@ -187,22 +187,14 @@ describe('BridgeServer 端到端', () => {
     expect(response.status).toBe(200)
   })
 
-  test('/v1/models 返回上游模型（codex 期望的 {models:[...]} 格式，非 data）', async () => {
-    // codex 0.145+ 的 models manager 会 GET <base_url>/models 刷新模型列表。
-    // 它期望字段是 `models`（实测返回 {data:[...]} 会报 missing field `models`）。
+  test('/models 一律 404——不伪造 codex 的私有模型目录', async () => {
+    // 曾经这里手工拼过 codex 自己的 models_cache.json（34 字段私有 schema）。
+    // 那份 schema 随 codex 版本漂移，0.146 上直接解码失败并把整次刷新打成 ERROR；
+    // 伪造一个解不开的响应比不提供这个端点更糟。404 是所有第三方 provider 的常规路径。
     const response = await fetch(`${bridge!.baseUrl}/models`, {
       headers: { authorization: `Bearer ${bridge!.authToken}` },
     })
-    expect(response.status).toBe(200)
-    const body = (await response.json()) as { models: Array<{ slug: string }> }
-    expect(body.models).toBeInstanceOf(Array)
-    expect(body.models.length).toBeGreaterThan(0)
-    expect(body.models[0]!.slug).toBeDefined()
-  })
-
-  test('/v1/models 没 token → 401', async () => {
-    const response = await fetch(`${bridge!.baseUrl}/models`)
-    expect(response.status).toBe(401)
+    expect(response.status).toBe(404)
   })
 
   test('请求侧：Responses → Anthropic 转换正确', async () => {
@@ -256,22 +248,6 @@ describe('BridgeServer 端到端', () => {
       bridge = await restartBridge(upstream!, null, null)
       await callBridge(bridge, { ...RESPONSES_REQUEST, model: 'claude-sonnet-4-5' })
       expect(upstream!.lastBody!.model).toBe('claude-sonnet-4-5')
-    })
-
-    test('/v1/models 把上游真实列表整个回给 codex', async () => {
-      bridge = await restartBridge(
-        upstream!,
-        'deepseek-v4-pro',
-        new Set(['deepseek-v4-pro', 'deepseek-v4-flash']),
-      )
-      const response = await fetch(`${bridge.baseUrl}/models`, {
-        headers: { authorization: `Bearer ${bridge.authToken}` },
-      })
-      const body = (await response.json()) as { models: Array<{ slug: string }> }
-      expect(body.models.map((m) => m.slug).sort()).toEqual([
-        'deepseek-v4-flash',
-        'deepseek-v4-pro',
-      ])
     })
   })
 
