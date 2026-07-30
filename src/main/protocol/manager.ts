@@ -53,7 +53,9 @@ export class BridgeManager {
     this.settings = settings
     const newCurrent = this.currentProvider()
 
-    // 当前 provider 的「身份」变了（地址/列表/凭证来源/模型列表模式/手填列表）就丢模型缓存
+    // 当前 provider 的「身份」变了（地址/列表/凭证来源/模型列表模式/手填列表）就丢模型缓存。
+    // 注意：清空 currentProviderId（some → none）这里故意不失效——残留的 knownModelIds
+    // 无害，因为 resolveUpstream 在无 provider 时直接返回 null，根本走不到 resolveModel。
     if (
       (prevCurrent && newCurrent && upstreamModelIdentityChanged(prevCurrent, newCurrent)) ||
       (!prevCurrent && newCurrent)
