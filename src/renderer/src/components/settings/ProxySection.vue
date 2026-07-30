@@ -11,22 +11,32 @@
     <!-- 启用开关 -->
     <div class="flex items-center justify-between">
       <label class="text-sm font-medium">启用代理</label>
-      <button
-        :class="[
-          'relative w-11 h-6 rounded-full transition-colors',
-          proxy.enabled ? 'bg-primary' : 'bg-muted',
-        ]"
-        role="switch"
-        :aria-checked="proxy.enabled"
-        @click="toggleEnabled"
-      >
+      <div class="flex items-center gap-2">
         <span
+          :class="['text-xs font-medium', proxy.enabled ? 'text-success' : 'text-muted-foreground']"
+        >
+          {{ proxy.enabled ? '已开启' : '已关闭' }}
+        </span>
+        <button
           :class="[
-            'absolute top-0.5 left-0.5 w-5 h-5 rounded-full bg-background shadow transition-transform',
-            proxy.enabled ? 'translate-x-5' : '',
+            'relative w-11 h-6 rounded-full border-2 shadow-sm transition-colors cursor-pointer',
+            'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background',
+            proxy.enabled ? 'border-success bg-success' : 'border-foreground/60 bg-muted',
           ]"
-        />
-      </button>
+          type="button"
+          role="switch"
+          :aria-checked="proxy.enabled"
+          aria-label="启用代理"
+          @click="toggleEnabled"
+        >
+          <span
+            :class="[
+              'absolute top-0.5 left-0.5 w-4 h-4 rounded-full shadow-md transition-transform',
+              proxy.enabled ? 'translate-x-5 bg-primary-foreground' : 'bg-foreground',
+            ]"
+          />
+        </button>
+      </div>
     </div>
 
     <!-- 代理 URL -->
