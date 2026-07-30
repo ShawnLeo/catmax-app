@@ -35,7 +35,7 @@ const FILE_MODE = 0o600
 const DIR_MODE = 0o700
 
 interface CredentialFile {
-  /** key = 上游标识（目前固定 'codex-bridge'），value = 明文 key */
+  /** key = provider id（UUID），value = 明文 key */
   secrets: Record<string, string>
 }
 

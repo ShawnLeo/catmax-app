@@ -3,8 +3,8 @@ import type { BackendHandlers } from '@shared/ipc/backend'
 import { handleRendererRequest } from '../../typed'
 
 import {
-  cancelBackendInstall,
   bridgeCredentialReady,
+  cancelBackendInstall,
   getCurrentBackend,
   installBackend,
   interruptTurn,
