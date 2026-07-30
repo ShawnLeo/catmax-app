@@ -224,6 +224,17 @@ export class CodexAdapter implements AgentBackend {
   }
   private extraEnv: Record<string, string> = {}
 
+  /**
+   * Protocol Bridge: 注入额外的 `-c key=value` 启动参数；不影响已 spawn 的进程。
+   *
+   * 协议桥用这个把 codex 的 model_provider 指到本机桥上，而不是去改用户的
+   * ~/.codex/config.toml——传空数组就等于完全按用户自己的配置走。
+   */
+  setExtraArgs(args: string[]): void {
+    this.extraArgs = args
+  }
+  private extraArgs: string[] = []
+
   // ============ 生命周期 ============
 
   async initialize(): Promise<void> {
@@ -251,7 +262,9 @@ export class CodexAdapter implements AgentBackend {
       // 同时注入 extraEnv（HTTPS_PROXY 等代理环境变量）——由 BackendManager.applySettings 设置。
       this.proc = this.spawner.spawn({
         command: binary,
-        args: ['app-server'],
+        // extraArgs 是协议桥的 `-c` 覆盖，放在子命令后面（codex 的 -c 是全局参数，
+        // 位置无所谓，但排在后面便于日志里一眼看出哪些是 catmax 加的）
+        args: ['app-server', ...this.extraArgs],
         env: { ...this.extraEnv },
         ...(this.opts.cwd !== undefined ? { cwd: this.opts.cwd } : {}),
       })

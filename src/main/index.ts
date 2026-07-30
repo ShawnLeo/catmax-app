@@ -4,6 +4,7 @@ import fixPath from 'fix-path'
 
 import { ctx } from './context'
 import { registerAllHandlers } from './ipc/register'
+import { bridgeManager } from './protocol/manager'
 import { logger } from './service/logger'
 import { createMainWindow } from './window'
 
@@ -40,7 +41,15 @@ void app.whenReady().then(async () => {
   // 关键：必须在 createMainWindow() 之前——否则渲染层 onMounted 里的
   // backend.current() / session.reconcile() 会读到默认的 'codex'，
   // 触发 CodexAdapter.initialize() 的 30s 握手超时（Bug: claude 用户发消息卡死）。
-  ctx.backendManager.applySettings(ctx.settingsStore.load())
+  // Protocol Bridge: 先把桥起起来——codex 的启动参数要用桥的端口和 token，
+  // 桥没监听就拿到空值，codex 会按用户自己的 config.toml 走（等价于桥没开）。
+  const startupSettings = ctx.settingsStore.load()
+  try {
+    await bridgeManager.applySettings(startupSettings.protocolBridge)
+  } catch (e) {
+    log.warn('protocol bridge failed to start:', e)
+  }
+  ctx.backendManager.applySettings(startupSettings)
   log.info('database + settings ready')
 
   registerAllHandlers()
@@ -57,6 +66,7 @@ void app.whenReady().then(async () => {
 app.on('before-quit', async (event) => {
   event.preventDefault()
   await ctx.backendManager.dispose()
+  await bridgeManager.stop()
   ctx.ptyManager.killAll()
   app.exit(0)
 })

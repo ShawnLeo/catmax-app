@@ -2,6 +2,8 @@ import { existsSync, mkdirSync } from 'node:fs'
 import { dirname } from 'node:path'
 
 import { ctx } from '@main/context'
+import { bridgeManager, BRIDGE_CREDENTIAL_ID } from '@main/protocol/manager'
+import { getCodec } from '@main/protocol/registry'
 import {
   listBackendConfigFiles as listConfigFiles,
   readBackendConfigFile as readConfigFile,
@@ -13,6 +15,7 @@ import {
   cancelBackendInstall as cancelInstall,
   installBackend as runBackendInstall,
 } from '@main/service/backend-installer'
+import { setStoredCredential } from '@main/service/bridge-credentials'
 import { logger } from '@main/service/logger'
 import { getBackendConfigFileDescriptor } from '@shared/backend/config-files'
 import type { BackendInstallResult } from '@shared/backend/install'
@@ -24,6 +27,7 @@ import type {
 } from '@shared/backend/types'
 import { PUSH, type BackendId } from '@shared/constants'
 import type { CoordinatedStartTurnArgs } from '@shared/ipc/backend'
+import type { BridgeStatus } from '@shared/protocol/bridge-config'
 import { shell } from 'electron'
 
 const log = logger.domain('backend-handler')
@@ -163,4 +167,71 @@ export const revealBackendConfigFile = async (args: { id: string }) => {
   const dir = dirname(filePath)
   mkdirSync(dir, { recursive: true, mode: 0o700 })
   await shell.openPath(dir)
+}
+
+// ---------------------------------------------------------------------------
+// Protocol Bridge: 本机协议转换桥
+// ---------------------------------------------------------------------------
+
+export const getBridgeStatus = async (): Promise<BridgeStatus> => {
+  return bridgeManager.status()
+}
+
+/**
+ * 保存上游密钥。传空串即清除。
+ *
+ * 密钥只往一个方向走：renderer → 主进程 → userData 下 0600 的文件。
+ * 反方向永远只回 status（含 credentialReady 布尔），密钥本身不回传。
+ */
+export const setBridgeCredential = async (args: { secret: string }): Promise<BridgeStatus> => {
+  setStoredCredential(BRIDGE_CREDENTIAL_ID, args.secret.trim())
+  return bridgeManager.status()
+}
+
+/**
+ * 用当前配置打一次上游做连通性检查。
+ *
+ * 故意发一个最小请求（1 token）而不是空请求——空请求很多网关直接 400，
+ * 分不清是"配置错"还是"网关挑剔"。
+ */
+export const testBridgeUpstream = async (): Promise<{ ok: boolean; message: string }> => {
+  const settings = ctx.settingsStore.load().protocolBridge
+  const upstream = settings.upstream
+  if (!upstream.baseUrl.trim()) return { ok: false, message: '还没填上游地址' }
+  if (!bridgeManager.credentialReady()) {
+    return {
+      ok: false,
+      message:
+        upstream.credentialSource === 'env'
+          ? `环境变量 ${upstream.credentialEnvVar || '(未填)'} 是空的`
+          : '还没保存 API key',
+    }
+  }
+
+  const codec = getCodec(upstream.protocol)
+  const apiKey = bridgeManager.probeCredential()
+  if (!apiKey) return { ok: false, message: '凭证读取失败' }
+
+  const base = upstream.baseUrl.trim().replace(/\/+$/, '')
+  const path = codec.upstreamPath()
+  const url = base + (/\/v\d+$/.test(base) ? path.replace(/^\/v\d+/, '') : path)
+
+  try {
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', ...codec.authHeaders(apiKey) },
+      body: JSON.stringify({
+        model: upstream.model?.trim() || 'claude-sonnet-4-20250514',
+        max_tokens: 1,
+        messages: [{ role: 'user', content: 'hi' }],
+      }),
+      signal: AbortSignal.timeout(20_000),
+    })
+    if (response.ok) return { ok: true, message: `连通正常（HTTP ${response.status}）` }
+    const detail = await response.text().catch(() => '')
+    return { ok: false, message: `HTTP ${response.status}：${detail.slice(0, 300)}` }
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error)
+    return { ok: false, message: `请求失败：${message}` }
+  }
 }

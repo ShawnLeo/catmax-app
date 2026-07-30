@@ -61,6 +61,10 @@ export const IPC = {
   BACKEND_WRITE_CONFIG_FILE: 'backend.writeConfigFile',
   BACKEND_VALIDATE_CONFIG_FILE: 'backend.validateConfigFile',
   BACKEND_REVEAL_CONFIG_FILE: 'backend.revealConfigFile',
+  // Protocol Bridge: 本机协议转换桥（Responses ↔ Anthropic 等）
+  BACKEND_BRIDGE_STATUS: 'backend.bridgeStatus',
+  BACKEND_SET_BRIDGE_CREDENTIAL: 'backend.setBridgeCredential',
+  BACKEND_TEST_BRIDGE_UPSTREAM: 'backend.testBridgeUpstream',
   // session
   SESSION_LIST: 'session.list',
   SESSION_CREATE: 'session.create',

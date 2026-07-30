@@ -2,6 +2,7 @@
  * backend domain IPC 契约。
  * 函数签名即契约——main 实现，renderer 通过 window.api 调用。
  */
+import type { BridgeStatus } from '../protocol/bridge-config'
 import type {
   BackendConfigFileContent,
   BackendConfigFileInfo,
@@ -91,6 +92,18 @@ export type BackendHandlers = {
   }) => Promise<ConfigSyntaxResult>
   /** 在系统文件管理器里定位该文件；文件不存在时打开其所在目录 */
   'backend.revealConfigFile': (args: { id: string }) => Promise<void>
+  /**
+   * Protocol Bridge: 本机协议转换桥的状态。
+   * 只回运行态和「凭证是否就绪」，**密钥本身永不过 IPC**。
+   */
+  'backend.bridgeStatus': () => Promise<BridgeStatus>
+  /**
+   * 保存 / 清除上游密钥（传空串即清除）。
+   * 写到 userData 下 0600 的单独文件，不进 settings.json。
+   */
+  'backend.setBridgeCredential': (args: { secret: string }) => Promise<BridgeStatus>
+  /** 用当前配置打一次上游，验证 base_url / key / 模型名是否可用 */
+  'backend.testBridgeUpstream': () => Promise<{ ok: boolean; message: string }>
 }
 
 /** 主→渲染推送事件类型 */

@@ -93,6 +93,14 @@ export const api = {
     revealConfigFile: requestMain<BackendHandlers, 'backend.revealConfigFile'>(
       IPC.BACKEND_REVEAL_CONFIG_FILE,
     ),
+    // Protocol Bridge: 本机协议转换桥
+    bridgeStatus: requestMain<BackendHandlers, 'backend.bridgeStatus'>(IPC.BACKEND_BRIDGE_STATUS),
+    setBridgeCredential: requestMain<BackendHandlers, 'backend.setBridgeCredential'>(
+      IPC.BACKEND_SET_BRIDGE_CREDENTIAL,
+    ),
+    testBridgeUpstream: requestMain<BackendHandlers, 'backend.testBridgeUpstream'>(
+      IPC.BACKEND_TEST_BRIDGE_UPSTREAM,
+    ),
     /** 订阅 turnEvent 推送 */
     onTurnEvent: (cb: (payload: BackendPushEvents['backend:turnEvent']) => void) =>
       subscribeToMainEvent<BackendPushEvents, 'backend:turnEvent'>(PUSH.BACKEND_TURN_EVENT, cb),

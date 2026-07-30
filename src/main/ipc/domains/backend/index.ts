@@ -16,7 +16,10 @@ import {
   refreshModels,
   respondApproval,
   respondQuestion,
+  getBridgeStatus,
   revealBackendConfigFile,
+  setBridgeCredential,
+  testBridgeUpstream,
   startTurn,
   steerTurn,
   switchBackend,
@@ -86,6 +89,18 @@ export function registerBackendHandlers(): void {
   handleRendererRequest<BackendHandlers, 'backend.revealConfigFile'>(
     'backend.revealConfigFile',
     revealBackendConfigFile,
+  )
+  handleRendererRequest<BackendHandlers, 'backend.bridgeStatus'>(
+    'backend.bridgeStatus',
+    getBridgeStatus,
+  )
+  handleRendererRequest<BackendHandlers, 'backend.setBridgeCredential'>(
+    'backend.setBridgeCredential',
+    setBridgeCredential,
+  )
+  handleRendererRequest<BackendHandlers, 'backend.testBridgeUpstream'>(
+    'backend.testBridgeUpstream',
+    testBridgeUpstream,
   )
 }
 

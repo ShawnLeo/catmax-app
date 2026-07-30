@@ -100,6 +100,12 @@
          但同样跟着「默认后端」走，只显示当前默认后端的文件。 -->
     <BackendConfigFilesSection :backend-id="defaultBackend" />
 
+    <!-- Protocol Bridge: 只对 codex 有意义——claude 后端自己就说 Anthropic 协议，不需要转换 -->
+    <template v-if="defaultBackend === 'codex'">
+      <div class="h-px bg-sidebar-border my-1" />
+      <ProtocolBridgeSection />
+    </template>
+
     <div class="h-px bg-sidebar-border my-1" />
 
     <header>
@@ -182,6 +188,7 @@
 import BackendIcon from '@renderer/components/icons/BackendIcon.vue'
 import BackendConfigFilesSection from '@renderer/components/settings/BackendConfigFilesSection.vue'
 import BackendInstallCard from '@renderer/components/settings/BackendInstallCard.vue'
+import ProtocolBridgeSection from '@renderer/components/settings/ProtocolBridgeSection.vue'
 import { Button } from '@renderer/components/ui/button'
 import { DropdownMenu, type DropdownOption } from '@renderer/components/ui/dropdown-menu'
 import { Input } from '@renderer/components/ui/input'

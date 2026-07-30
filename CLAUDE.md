@@ -64,7 +64,7 @@ Backends are registered as `MainBackendPlugin`s, not just `AgentBackend` instanc
 
 ```ts
 interface MainBackendPlugin {
-  manifest: BackendPluginManifest        // id, displayName, version, blockTypes[], capabilities
+  manifest: BackendPluginManifest // id, displayName, version, blockTypes[], capabilities
   createAdapter: (context: BackendPluginContext) => AgentBackend
   applySettings?: (adapter: AgentBackend, settings: AppSettings) => void
 }
@@ -74,11 +74,12 @@ interface MainBackendPlugin {
 - `BackendManager` (`src/main/backend/manager.ts`, singleton on `ctx`) iterates registered plugins, calls `plugin.createAdapter(context)`, and enforces at construction time that (a) `adapter.id === plugin.manifest.id`, and (b) every block type the live adapter's `capabilities.chat.blockTypes` reports is a subset of `plugin.manifest.blockTypes` — a plugin can never emit an undeclared block type. The renderer mirrors this with a non-throwing warning (`registerRendererBackendBlocks` in `src/renderer/src/components/chat/blocks/plugin-registry.ts`).
 - `BackendPluginContext.onBackendThreadIdResolved` lets an adapter report "this internal placeholder session id now has a real backend-assigned id" (needed because Claude only learns its real `session_id` after the SDK stream starts); `BackendManager` persists this mapping to sqlite.
 - `applySettings` is how `settings.backendPaths.<id>` (binary path) and `proxySettingsToEnv(settings.httpProxy)` (see `src/main/backend/proxy-env.ts`) get pushed into a live adapter.
-- `src/main/backend/health-check.ts` runs `<binary> --version` to classify backend availability (`not-installed` / `killed-by-os` / `timeout` / `non-zero-exit`) so the UI can explain *why* a backend is unavailable.
+- `src/main/backend/health-check.ts` runs `<binary> --version` to classify backend availability (`not-installed` / `killed-by-os` / `timeout` / `non-zero-exit`) so the UI can explain _why_ a backend is unavailable.
 
 **2. Turn Coordination Is Backend-Agnostic (`PerTurnCoordinator`)**
 
 `src/main/backend/turn/per-turn-coordinator.ts` sits between `BackendManager` and every adapter. It does NOT parse any backend protocol; it guarantees things no adapter can be trusted to provide on its own:
+
 - **Per-session serialization**: turns for the same session queue in a `SessionLane`; different sessions run concurrently.
 - **Idle watchdog**: a turn producing no events for 30 min (`DEFAULT_TURN_IDLE_TIMEOUT_MS`) is force-errored.
 - **Cooperative cancel + grace**: `cancel()` calls the adapter's `interrupt`, then force-synthesizes a terminal `turn_completed(interrupted)` after a 15s grace period if the adapter never cleanly stops.
@@ -95,10 +96,12 @@ Persistence goes through the narrow `TurnRunRepository` interface (`turn-run-rep
 - See `docs/superpowers/specs/2026-07-25-chat-block-architecture-design.md` for the full design rationale (status: implemented, compat migration period; more backends like "pi agent"/"grok build" are planned to reuse this same block contract).
 
 **4. Type-Safe IPC**
+
 - Handler function signatures are the contract; `src/preload/api.ts` derives `window.api.*` from `src/shared/ipc/<domain>.ts` contracts, so changing a handler signature breaks renderer compilation instead of failing silently at runtime.
 - **Never** call `ipcRenderer.invoke` directly in renderer code — always go through `window.api.*`.
 
 **5. Cross-Layer Import Rules (enforced by both ESLint and tsconfig, not just convention)**
+
 ```
 renderer/  →  Can import: shared/, renderer/, browser-safe packages
               Forbidden (ESLint no-restricted-imports + tsconfig.web.json has no @main/@preload alias):
@@ -112,9 +115,11 @@ preload/   →  Can import: shared/, electron (contextBridge/ipcRenderer only)
 shared/    →  Can import: shared/, type-only packages
               Forbidden: main/, renderer/, preload/, electron, node:*
 ```
+
 The renderer restriction is enforced twice: an ESLint `overrides` block for `src/renderer/**`, and `tsconfig.web.json` simply not defining `@main`/`@preload` path aliases.
 
 **6. BackendManager Singleton**
+
 - Single instance on `ctx` (`src/main/context.ts`), which also holds `db`, `settingsStore`, and `ptyManager`.
 - Routes backend operations, delegates turn lifecycle to `PerTurnCoordinator`, broadcasts `TurnEvent` over IPC (`backend:turnEvent`).
 - Sessions always belong to their creating backend (immutable).
@@ -130,22 +135,38 @@ When adding a new backend: add to `BackendId` (`src/shared/constants.ts`), creat
 
 ## IPC Domains
 
-8 domains under `src/main/ipc/domains/` (there is **no `credential` domain** — this app does not store API keys/credentials at all; both backends manage their own auth externally, e.g. `codex login` / `claude login`, and catmax-app only persists the CLI binary path and proxy settings. The `backend.*ConfigFile` handlers let the settings page *edit* the backends' own config files in place — including `~/.codex/auth.json` — but nothing is copied into catmax's own storage, so the "no stored credentials" invariant holds):
+8 domains under `src/main/ipc/domains/` (there is **no `credential` domain**. Backends manage their own auth externally, e.g. `codex login` / `claude login`, and catmax-app only persists the CLI binary path and proxy settings. The `backend.*ConfigFile` handlers let the settings page _edit_ the backends' own config files in place — including `~/.codex/auth.json` — but nothing is copied into catmax's own storage.
 
-| Domain | Purpose |
-|---|---|
-| `backend` | Turn lifecycle (start/interrupt/approvals/agent questions), backend status/switch, models, turn-run listing, one-click install, and direct editing of the backends' own local config files (`src/shared/backend/config-files.ts` whitelist → `src/main/service/backend-config-files.ts`) |
-| `session` | Chat session create/resume, runtime config snapshot (model/effort/permissionMode/backend) |
-| `git` | Read-only git status/diff/commit info |
-| `fs` | Filesystem browsing + file preview (text/markdown/table/image/pdf/audio/video/document/archive/binary) |
-| `pty` | Terminal process management (create/write/resize/kill + `pty:data` push) |
-| `settings` | `settings.get` / `update` (patch) / `reset` against the `AppSettings` Zod schema |
-| `system` | Platform info, native dialogs, system HTTP proxy detection |
-| `workspace` | Workspace CRUD, per-workspace default editor |
+**One deliberate exception**: the Protocol Bridge (see below) must hold the upstream provider's API key to forward requests. When the user picks `credentialSource: 'stored'`, that key is written to `userData/bridge-credentials.json` with mode `0600` by `src/main/service/bridge-credentials.ts` — **never into `settings.json`** (which is `0644`, backed up, and readable wholesale by the renderer). It only ever travels renderer → main; IPC returns `credentialReady: boolean` and never the secret. `credentialSource: 'env'` stores only the env var _name_ and writes nothing to disk):
+
+| Domain      | Purpose                                                                                                                                                                                                                                                                                                                               |
+| ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `backend`   | Turn lifecycle (start/interrupt/approvals/agent questions), backend status/switch, models, turn-run listing, one-click install, direct editing of the backends' own local config files (`src/shared/backend/config-files.ts` whitelist → `src/main/service/backend-config-files.ts`), and Protocol Bridge status/credential/self-test |
+| `session`   | Chat session create/resume, runtime config snapshot (model/effort/permissionMode/backend)                                                                                                                                                                                                                                             |
+| `git`       | Read-only git status/diff/commit info                                                                                                                                                                                                                                                                                                 |
+| `fs`        | Filesystem browsing + file preview (text/markdown/table/image/pdf/audio/video/document/archive/binary)                                                                                                                                                                                                                                |
+| `pty`       | Terminal process management (create/write/resize/kill + `pty:data` push)                                                                                                                                                                                                                                                              |
+| `settings`  | `settings.get` / `update` (patch) / `reset` against the `AppSettings` Zod schema                                                                                                                                                                                                                                                      |
+| `system`    | Platform info, native dialogs, system HTTP proxy detection                                                                                                                                                                                                                                                                            |
+| `workspace` | Workspace CRUD, per-workspace default editor                                                                                                                                                                                                                                                                                          |
 
 Each domain: contract in `src/shared/ipc/<domain>.ts`, handlers in `src/main/ipc/domains/<domain>/handlers.ts`, registration in `src/main/ipc/domains/<domain>/index.ts`, aggregated in `src/main/ipc/register.ts`, exposed via `src/preload/api.ts`.
 
 **Adding a new IPC method** (6 steps): 1) contract in `src/shared/ipc/<domain>.ts` → 2) implement in `handlers.ts` → 3) register in domain `index.ts` → 4) aggregate in `register.ts` → 5) expose in `src/preload/api.ts` → 6) use via `window.api.<domain>.<method>()`.
+
+## Protocol Bridge (`src/shared/protocol/` + `src/main/protocol/`)
+
+Codex only speaks the OpenAI **Responses** protocol — `wire_api = "chat"` was deprecated 2025-12 and became a hard error 2026-02, and the current config reference states `responses` is the only supported value. To let codex reach upstreams that speak something else, catmax runs a local converting proxy.
+
+```
+codex app-server ──Responses──▶ BridgeServer (127.0.0.1:random) ──Anthropic──▶ upstream
+```
+
+- **IR hub-and-spoke, not pairwise.** `src/shared/protocol/ir.ts` defines a block-centric intermediate representation; each protocol contributes one `ProtocolCodec` (`codec.ts`) with a client half (`decodeRequest` / `createResponseEncoder`) and an upstream half (`encodeRequest` / `createStreamDecoder`). N codecs cover N² pairs — adding `openai.chat` means one new file in `codecs/` plus one line in `registry.ts`, and every existing codec is untouched. Fidelity is protected by `IrRequest.vendor` (verbatim original body, used for same-protocol passthrough) and `IrOpaque` (payloads the target protocol can't express — Anthropic thinking `signature`, Responses `encrypted_content` — carried through and restored).
+- **Encoders/decoders are stateful objects, not pure functions** — Responses requires `output_item.added`/`done` pairing and dense `output_index` allocation, which needs cross-event state. `ResponseEncoder.finish()` enforces the same exactly-one-terminal-event invariant `PerTurnCoordinator` does.
+- **codex is reconfigured at spawn time, not on disk.** `BridgeManager.codexSpawnArgs()` emits `-c model_provider=...` overrides consumed by `CodexAdapter.setExtraArgs()`; `~/.codex/config.toml` is never touched, so disabling the bridge is a complete revert. codex receives only the bridge's per-boot token via `CATMAX_BRIDGE_TOKEN`; **the real upstream key never enters codex's env or config**.
+- **Upstream quirks are data, not branches** — `UpstreamCapabilities` (`supportsImages`, `respectsThinkingBudget`, `defaultMaxOutputTokens`, …) drives downgrade decisions, with per-provider presets in `bridge-config.ts`.
+- Reference implementation studied when designing this: cc-switch's `src-tauri/src/proxy/providers/`. Design rationale and the Responses/Chat/Anthropic protocol comparison: `docs/superpowers/specs/2026-07-29-protocol-bridge-design.md`.
 
 ## Renderer Structure Notes
 
@@ -157,6 +178,7 @@ Each domain: contract in `src/shared/ipc/<domain>.ts`, handlers in `src/main/ipc
 ## Theme System
 
 Three-layer token architecture (`src/renderer/src/assets/styles/themes.css`):
+
 - Layer 1: raw tokens — OKLCH color primitives (neutral gray scale + a small number of intentional accent colors, e.g. purple reserved solely for "max effort" emphasis, blue reserved solely for unread-activity indicators — kept semantically distinct from success/danger green/red)
 - Layer 2: semantic tokens (`--background`, `--foreground`, etc.) — components may ONLY reference this layer
 - Layer 3: component tokens (optional, for specific component needs)
@@ -166,6 +188,7 @@ Switching themes = changing `<html data-theme="dark|light|system|...">`; CSS var
 ## Native Module Handling
 
 `better-sqlite3` and `node-pty` require native compilation, and Electron/Node use different V8 versions:
+
 - `pnpm rebuild:native` — for Electron (auto-run before dev/build)
 - `pnpm rebuild:node` — for Node/vitest (run manually before `pnpm test`)
 

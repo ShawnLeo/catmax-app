@@ -48,6 +48,38 @@ const backendRuntimeDefaultsSchema = z.object({
 })
 export type BackendRuntimeDefaults = z.infer<typeof backendRuntimeDefaultsSchema>
 
+/**
+ * Protocol Bridge: 协议桥设置。
+ *
+ * 这里**只存非机密的元信息**——上游密钥要么在环境变量里（credentialSource='env'，
+ * 只存变量名），要么在 userData 下单独的 0600 文件里（见 service/bridge-credentials.ts）。
+ * settings.json 是 0644、会被备份同步、renderer 能整份读走，绝不能放密钥。
+ */
+const upstreamCapabilitiesSchema = z.object({
+  supportsImages: z.boolean().default(true),
+  respectsThinkingBudget: z.boolean().default(true),
+  dropSamplingWhenThinking: z.boolean().default(true),
+  defaultMaxOutputTokens: z.number().int().min(256).max(200_000).default(8192),
+  toolNameMaxLength: z.number().int().min(16).max(256).default(64),
+})
+
+const protocolBridgeSchema = z.object({
+  enabled: z.boolean().default(false),
+  /** 选中的内置预设 id，仅用于 UI 回显 */
+  presetId: z.string().default('deepseek'),
+  upstream: z
+    .object({
+      protocol: z.enum(['anthropic.messages']).default('anthropic.messages'),
+      baseUrl: z.string().default(''),
+      model: z.string().nullable().default(null),
+      credentialSource: z.enum(['env', 'stored']).default('stored'),
+      credentialEnvVar: z.string().default(''),
+      capabilities: upstreamCapabilitiesSchema.default({}),
+    })
+    .default({}),
+})
+export type ProtocolBridgeSettings = z.infer<typeof protocolBridgeSchema>
+
 export const appSettingsSchema = z.object({
   defaultBackend: z
     .string()
@@ -71,6 +103,8 @@ export const appSettingsSchema = z.object({
     })
     .catchall(backendRuntimeDefaultsSchema)
     .default({ codex: {}, claude: {} }),
+  /** Protocol Bridge: codex 接非 Responses 协议上游时用的本地转换桥 */
+  protocolBridge: protocolBridgeSchema.default({}),
   defaultEditor: z.enum(EDITOR_IDS).default('vscode'),
   theme: themeSettingsSchema.default({}),
   httpProxy: httpProxySchema.default({}),
