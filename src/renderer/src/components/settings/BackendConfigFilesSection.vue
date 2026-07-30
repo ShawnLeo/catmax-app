@@ -25,7 +25,7 @@
         :class="[
           'flex items-center gap-2 px-3 py-2 rounded-md border text-sm transition-colors cursor-pointer',
           activeId === file.id
-            ? 'border-primary bg-primary/5 text-foreground'
+            ? 'border-foreground bg-foreground text-background shadow-sm'
             : 'border-sidebar-border text-muted-foreground hover:text-foreground hover:bg-muted',
         ]"
         @click="selectFile(file.id)"

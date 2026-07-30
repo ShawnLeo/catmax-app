@@ -18,9 +18,11 @@
         :class="[
           'flex items-center gap-2 px-3 py-2 rounded-md border text-sm capitalize transition-colors',
           defaultBackend === id
-            ? 'border-primary bg-primary/5 text-foreground'
+            ? 'border-foreground bg-foreground text-background shadow-sm'
             : 'border-sidebar-border text-muted-foreground hover:text-foreground hover:bg-muted',
-          !isBackendAvailable(id) ? 'opacity-40 cursor-not-allowed' : 'cursor-pointer',
+          !isBackendAvailable(id)
+            ? 'border-border bg-muted text-muted-foreground opacity-40 cursor-not-allowed shadow-none'
+            : 'cursor-pointer',
         ]"
         @click="selectDefault(id)"
       >
