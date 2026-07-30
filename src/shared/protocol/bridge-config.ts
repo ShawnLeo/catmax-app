@@ -153,6 +153,32 @@ export const BRIDGE_UPSTREAM_PRESETS: readonly BridgeUpstreamPreset[] = [
     },
   },
   {
+    id: 'zhipu',
+    label: '智谱编程套餐',
+    description:
+      '智谱 GLM 的 Anthropic 兼容端点（编程套餐）。套餐不提供模型列表接口，模型需手填；图片/思考支持视具体模型而定。',
+    docsUrl: 'https://docs.bigmodel.cn/cn/coding-plan/overview',
+    config: {
+      protocol: 'anthropic.messages',
+      baseUrl: 'https://open.bigmodel.cn/api/anthropic',
+      // 套餐不提供列表接口，manual 模式用手填列表
+      modelsUrl: '',
+      model: 'GLM-5.2',
+      // 用厂商语义名，避免和 Anthropic 官方的 ANTHROPIC_API_KEY 混淆
+      credentialEnvVar: 'ZHIPUAI_API_KEY',
+      capabilities: {
+        // 编程套餐通用模型不一定支持视觉（仅 GLM-4.6V 支持），保守关
+        supportsImages: false,
+        // 文档未提及 extended thinking，按保守默认
+        dropSamplingWhenThinking: true,
+        defaultMaxOutputTokens: 8192,
+        toolNameMaxLength: 64,
+      },
+      modelListMode: 'manual',
+      manualModels: ['GLM-5.2', 'GLM-5-Turbo', 'GLM-4.7'],
+    },
+  },
+  {
     id: 'custom',
     label: '自定义',
     description: '任何 Anthropic Messages 兼容端点。能力按最保守的一档默认。',
@@ -174,16 +200,25 @@ export function bridgeUpstreamPreset(id: string): BridgeUpstreamPreset | undefin
   return BRIDGE_UPSTREAM_PRESETS.find((preset) => preset.id === id)
 }
 
-export const DEFAULT_BRIDGE_UPSTREAM: BridgeUpstreamConfig = {
-  protocol: 'anthropic.messages',
-  baseUrl: '',
-  modelsUrl: '',
-  model: null,
-  credentialSource: 'stored',
-  credentialEnvVar: '',
-  capabilities: { ...DEFAULT_UPSTREAM_CAPABILITIES },
-  modelListMode: 'auto',
-  manualModels: [],
+/**
+ * 从预设创建一个新的 provider（带新生成的 id）。
+ *
+ * 用全局 crypto.randomUUID() 而非 node:crypto——shared 层禁 node:*，
+ * 而全局 Web Crypto 在 renderer 和 main（Node 19+）都可用。
+ */
+export function createProviderFromPreset(
+  presetId: string,
+  credentialSource: BridgeCredentialSource = 'stored',
+): BridgeProvider {
+  const preset = bridgeUpstreamPreset(presetId) ?? bridgeUpstreamPreset('custom')!
+  return {
+    id: crypto.randomUUID(),
+    name: preset.label,
+    presetId: preset.id,
+    createdAt: Date.now(),
+    ...preset.config,
+    credentialSource,
+  }
 }
 
 /** codex 侧使用的固定标识——写进 config.toml 的 provider 名 */
