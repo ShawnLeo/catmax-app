@@ -35,9 +35,11 @@ describe('protocolBridge schema', () => {
         },
       },
     }).protocolBridge
-    expect(parsed.providers.p1.modelListMode).toBe('manual')
-    expect(parsed.providers.p1.manualModels).toEqual(['a', 'b'])
-    expect(parsed.providers.p1.capabilities.supportsImages).toBe(false)
+    // noUncheckedIndexedAccess：Record 索引是 T | undefined；测试自己塞了 p1，用 ! 断言安全
+    const p1 = parsed.providers.p1!
+    expect(p1.modelListMode).toBe('manual')
+    expect(p1.manualModels).toEqual(['a', 'b'])
+    expect(p1.capabilities.supportsImages).toBe(false)
   })
 
   test('旧 upstream 字段被静默剥掉不报错（向后兼容）', () => {
@@ -63,7 +65,8 @@ describe('protocolBridge schema', () => {
         providers: { p1: { id: 'p1', baseUrl: 'x', protocol: 'anthropic.messages' } },
       },
     }).protocolBridge
-    expect(parsed.providers.p1.modelListMode).toBe('auto')
-    expect(parsed.providers.p1.manualModels).toEqual([])
+    const p1 = parsed.providers.p1!
+    expect(p1.modelListMode).toBe('auto')
+    expect(p1.manualModels).toEqual([])
   })
 })
