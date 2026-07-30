@@ -22,6 +22,14 @@ export type BridgeUpstreamProtocol = (typeof BRIDGE_UPSTREAM_PROTOCOLS)[number]
  */
 export type BridgeCredentialSource = 'env' | 'stored'
 
+/**
+ * 模型列表的获取方式。
+ *
+ * `auto`：从上游 modelsUrl 拉取（现有行为）；DeepSeek/Anthropic 这类有列表接口的用这个。
+ * `manual`：用用户手填的 manualModels，不请求上游；智谱编程套餐等不提供列表接口的厂商用这个。
+ */
+export type BridgeModelListMode = 'auto' | 'manual'
+
 export interface BridgeUpstreamConfig {
   /** 上游说什么协议 */
   protocol: BridgeUpstreamProtocol
@@ -48,11 +56,34 @@ export interface BridgeUpstreamConfig {
   credentialEnvVar: string
   /** 上游能力/怪癖 */
   capabilities: UpstreamCapabilities
+  /** 模型列表获取方式；auto=拉取上游接口，manual=用手填列表 */
+  modelListMode: BridgeModelListMode
+  /** modelListMode === 'manual' 时的手填模型 id 列表 */
+  manualModels: string[]
 }
 
+/**
+ * 一份完整的上游配置（含元数据）。id 是稳定主键，切换只改 currentProviderId 不挪数据。
+ */
+export interface BridgeProvider extends BridgeUpstreamConfig {
+  /** UUID v4，稳定主键 */
+  id: string
+  /** 用户可改名，如「我的 DeepSeek」；UI 显示用 */
+  name: string
+  /** 来源预设 id（deepseek/anthropic/zhipu/custom），仅 UI 回显用 */
+  presetId: string
+  /** 创建时间戳（毫秒），用于排序（升序） */
+  createdAt: number
+}
+
+/**
+ * BridgeManager 消费的整份桥配置。
+ * providers 是全部已保存配置；currentProviderId 指向当前启用的一个（'' 表示未选）。
+ */
 export interface BridgeSettings {
   enabled: boolean
-  upstream: BridgeUpstreamConfig
+  currentProviderId: string
+  providers: Record<string, BridgeProvider>
 }
 
 /**
@@ -101,6 +132,8 @@ export const BRIDGE_UPSTREAM_PRESETS: readonly BridgeUpstreamPreset[] = [
         defaultMaxOutputTokens: 8192,
         toolNameMaxLength: 64,
       },
+      modelListMode: 'auto',
+      manualModels: [],
     },
   },
   {
@@ -115,6 +148,8 @@ export const BRIDGE_UPSTREAM_PRESETS: readonly BridgeUpstreamPreset[] = [
       model: null,
       credentialEnvVar: 'ANTHROPIC_API_KEY',
       capabilities: { ...DEFAULT_UPSTREAM_CAPABILITIES },
+      modelListMode: 'auto',
+      manualModels: [],
     },
   },
   {
@@ -129,6 +164,8 @@ export const BRIDGE_UPSTREAM_PRESETS: readonly BridgeUpstreamPreset[] = [
       model: null,
       credentialEnvVar: '',
       capabilities: { ...DEFAULT_UPSTREAM_CAPABILITIES, supportsImages: false },
+      modelListMode: 'auto',
+      manualModels: [],
     },
   },
 ]
@@ -145,6 +182,8 @@ export const DEFAULT_BRIDGE_UPSTREAM: BridgeUpstreamConfig = {
   credentialSource: 'stored',
   credentialEnvVar: '',
   capabilities: { ...DEFAULT_UPSTREAM_CAPABILITIES },
+  modelListMode: 'auto',
+  manualModels: [],
 }
 
 /** codex 侧使用的固定标识——写进 config.toml 的 provider 名 */
@@ -161,6 +200,8 @@ export interface BridgeStatus {
   port: number | null
   /** 写进 codex config.toml 的 base_url */
   baseUrl: string | null
+  /** 当前启用的 provider id；null 表示未选任何配置 */
+  currentProviderId: string | null
   upstreamProtocol: BridgeUpstreamProtocol | null
   upstreamBaseUrl: string | null
   /** 凭证是否已就绪（只报 true/false，绝不回传密钥本身） */
