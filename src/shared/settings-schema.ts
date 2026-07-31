@@ -63,6 +63,20 @@ export type BackendRuntimeDefaults = z.infer<typeof backendRuntimeDefaultsSchema
 const upstreamCapabilitiesSchema = z.object({
   supportsImages: z.boolean().default(true),
   dropSamplingWhenThinking: z.boolean().default(true),
+  /**
+   * 把上游的思考签名塞进回给 codex 的 `encrypted_content`。
+   *
+   * 默认关：这个字段会被 codex **写进 rollout 永久保存**，而里面装的是桥自己的封装
+   * （`catmax-bridge-v1:` 前缀）。关桥后 codex 把同一段历史发给 ChatGPT，ChatGPT 会
+   * 尝试验证它并失败——`The encrypted content for item rs_... could not be verified`，
+   * 整个会话再也发不出消息。开着桥建的会话就这样被"毒"住了。
+   *
+   * 只有真正需要它的上游才值得付这个代价：官方 Anthropic 在 tool use 多轮里要求
+   * thinking 块带原样签名。DeepSeek 这类兼容实现返回的签名只有 36 字符（实测），
+   * 不是密码学签名；不回传时桥会把 thinking 降级成普通文本（见 anthropic-messages.ts），
+   * 语义不丢，也就没必要冒污染 rollout 的风险。
+   */
+  preserveThinkingSignature: z.boolean().default(false),
   defaultMaxOutputTokens: z.number().int().min(256).max(200_000).default(8192),
   toolNameMaxLength: z.number().int().min(16).max(256).default(64),
 })

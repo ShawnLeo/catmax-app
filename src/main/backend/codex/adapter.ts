@@ -37,6 +37,7 @@ import {
   reasoningDeltaParamsSchema,
   turnCompletedParamsSchema,
   turnDiffUpdatedParamsSchema,
+  turnErrorParamsSchema,
   turnStartedParamsSchema,
   type CodexItem,
   type JsonRpcNotification,
@@ -62,6 +63,7 @@ import {
 import { checkCliHealth } from '../health-check'
 import { type ProcessSpawner, RealProcessSpawner } from '../process-spawner'
 
+import { readCodexDefaultProvider } from './default-provider'
 import {
   codexTurnsToMessages,
   extractTurns,
@@ -256,9 +258,45 @@ export class CodexAdapter implements AgentBackend {
    * provider 返回空数组 = 「我没有意见」，照常走 codex 自己的 model/list。
    */
   setModelListProvider(provider: CodexModelListProvider | null): void {
+    // 桥开关翻转时模型缓存必须失效——否则关桥后 listModels() 还在返回上游那份列表，
+    // resolveTurnModel() 会认为 `deepseek-v4-pro` 依然有效，照发给 ChatGPT。
+    // 只在 有↔无 之间翻转时清：applySettings 每次都会调这个 setter，
+    // 无脑清会让每次设置变更都多打一次 model/list。
+    if ((this.modelListProvider === null) !== (provider === null)) {
+      this.cachedModelsPromise = null
+    }
     this.modelListProvider = provider
   }
   private modelListProvider: CodexModelListProvider | null = null
+
+  /**
+   * Protocol Bridge: resume 老会话时强制指定 model_provider。
+   *
+   * codex 把 provider **写死在 rollout 的 session_meta 里**，`thread/resume` 会把它
+   * 连同历史一起恢复，**完全无视** spawn 时的 `-c model_provider=`。两个方向都会坏：
+   *
+   * - 开桥前建的会话 → 开桥后继续：provider 还是原厂，请求照直发去 ChatGPT，桥全程
+   *   收不到东西。实测报 `The 'deepseek-v4-pro' model is not supported when using Codex
+   *   with a ChatGPT account.`——模型名换成了桥的，provider 却没换。
+   * - 开桥时建的会话 → 关桥后继续：rollout 里记着 `catmax-bridge`，而新进程没定义它，
+   *   thread/resume 直接 `failed to load configuration: Model provider not found`，
+   *   会话彻底打不开（后续 turn/start 连报 thread not found）。
+   *
+   * `thread/resume` 的 modelProvider 参数是唯一的覆盖口子，所以**两个方向都要显式传**：
+   * 桥开着传桥的 id，桥关着传用户 config.toml 里生效的那个（不能硬编码 'openai'，
+   * 用户很可能自定义过）。
+   */
+  setModelProvider(providerId: string | null): void {
+    this.modelProvider = providerId
+  }
+  private modelProvider: string | null = null
+
+  /** resume 参数：provider 必须显式给，两个方向都不能让 rollout 里的旧值生效 */
+  private async resumeParams(backendThreadId: string): Promise<Record<string, unknown>> {
+    // 桥关着时才去读 config.toml——桥开着时答案已经确定，没必要碰磁盘
+    const provider = this.modelProvider ?? (await readCodexDefaultProvider())
+    return { threadId: backendThreadId, modelProvider: provider }
+  }
 
   // ============ 生命周期 ============
 
@@ -555,7 +593,6 @@ export class CodexAdapter implements AgentBackend {
 
   async listSessions(cwd?: string): Promise<SessionSummary[]> {
     await this.ensureInitialized()
-    await this.ensureInitialized()
     // thread/list 默认只返回 "interactive sources"（codex 桌面 app 创建的会话）。
     // catmax 通过 app-server 协议创建的会话属于 appServer / exec 等 source kind，
     // 不传 sourceKinds 会被默认过滤掉——历史上因此看不到 catmax 创建的 codex 会话。
@@ -650,7 +687,7 @@ export class CodexAdapter implements AgentBackend {
 
   async resumeSession(backendThreadId: string): Promise<{ messages: never[] }> {
     await this.ensureInitialized()
-    await this.sendRequest('thread/resume', { threadId: backendThreadId })
+    await this.sendRequest('thread/resume', await this.resumeParams(backendThreadId))
     // TODO Plan 3+: 把 codex 返回的 items 转成 NormalizedMessage[]
     // MVP 阶段先返回空（用户重开历史会话时显示空，能继续聊）
     return { messages: [] }
@@ -673,7 +710,7 @@ export class CodexAdapter implements AgentBackend {
     void cwd // codex 是 long-running app-server，cwd 在 thread/start 时已绑定，这里不用
     await this.ensureInitialized()
     try {
-      await this.sendRequest('thread/resume', { threadId: backendThreadId })
+      await this.sendRequest('thread/resume', await this.resumeParams(backendThreadId))
     } catch (e) {
       if (isUnmaterializedThreadError(e)) {
         // thread/start 已分配 id、但首个 turn 尚在协调器队列中时还没有 rollout。
@@ -733,10 +770,10 @@ export class CodexAdapter implements AgentBackend {
       //   新版: input: [{ type: "text", text: "用户文本" }]
       // 不改的话 codex 报 "Invalid request: invalid type: string ..., expected a sequence"。
       // 同时 model 也是必需的（同 thread/start），用户没选时用 listModels 返回的默认。
-      const model = args.model ?? (await this.resolveDefaultModel())
+      const model = await this.resolveTurnModel(args.model)
       // effort='none' 时产生零 reasoning token——codex 是两端里唯一能真正"关闭思考"的后端。
       // effort 字段 schema 是 z.string().optional()，'none' 合法。
-      const turnResponse = await this.sendRequest('turn/start', {
+      const turnResponse = await this.startTurnRequest(args.sessionId, {
         threadId: args.sessionId,
         input: [{ type: 'text', text: args.prompt }],
         model,
@@ -802,6 +839,56 @@ export class CodexAdapter implements AgentBackend {
     } finally {
       this.currentSink = null
       this.turnIdMap.delete(internalTurnId)
+    }
+  }
+
+  /**
+   * 定这一轮实际发出去的 model。
+   *
+   * 会话把 model 存在自己身上，而 provider 是全局的——协议桥开关一翻，两者就对不上了：
+   * 关桥后老的桥会话还带着 `deepseek-v4-pro` 去请求 ChatGPT，codex 直接拒
+   * （`The 'deepseek-v4-pro' model is not supported when using Codex with a ChatGPT account.`）。
+   *
+   * 渲染层的 ensureValidModel() 做的是同一件事，但它依赖 backendStore.models 已经刷新；
+   * 桥开关翻转到用户发下一条消息之间有一段空档，这里是那段空档的兜底。
+   *
+   * 桥**开着**时不需要这层：bridge.ts 的 resolveModel() 已经把上游不认识的模型名换成兜底模型。
+   * 拿不到模型列表（RPC 失败/空）时原样发出去——宁可让 codex 自己报错，也不要凭空改用户的选择。
+   */
+  private async resolveTurnModel(requested?: string): Promise<string> {
+    if (!requested) return this.resolveDefaultModel()
+    const models = await this.listModels().catch(() => [] as ModelOption[])
+    if (models.length === 0 || models.some((m) => m.id === requested)) return requested
+    const fallback = await this.resolveDefaultModel()
+    log.info(`model ${requested} 不在当前 provider 的模型列表里，改用 ${fallback}`)
+    return fallback
+  }
+
+  /**
+   * 发 turn/start；撞上 "thread not found" 就先 thread/resume 再重试一次。
+   *
+   * codex app-server 把 thread 状态放在**进程内存**里。进程一换（崩溃、空闲回收，
+   * 或者协议桥开关翻转触发的 reconnect——那条路会 dispose + 重新 spawn），
+   * 内存里的 thread 就没了，而 catmax 侧的会话还开着、还拿着旧 threadId，
+   * 下一轮 turn/start 直接报 `thread not found: <id>`：用户看到的是"聊到一半
+   * 突然发不出消息"。rollout 文件仍在磁盘上，thread/resume 能把它冷装回内存。
+   *
+   * getHistory 里已有同样的 resume 前置，但那只覆盖"打开历史会话"这条路径；
+   * 会话已经开着时后端重启，没有任何东西会去 resume——必须在这里兜住。
+   *
+   * 只重试一次：resume 都失败说明 rollout 也没了，再转圈没有意义。
+   */
+  private async startTurnRequest(
+    backendThreadId: string,
+    params: Record<string, unknown>,
+  ): Promise<unknown> {
+    try {
+      return await this.sendRequest('turn/start', params)
+    } catch (e) {
+      if (!isThreadNotFoundError(e)) throw e
+      log.info('thread not in app-server memory, resuming before retry', backendThreadId)
+      await this.sendRequest('thread/resume', await this.resumeParams(backendThreadId))
+      return await this.sendRequest('turn/start', params)
     }
   }
 
@@ -943,6 +1030,22 @@ export class CodexAdapter implements AgentBackend {
         const status: 'completed' | 'interrupted' | 'error' =
           raw === 'completed' ? 'completed' : raw === 'interrupted' ? 'interrupted' : 'error'
         return { type: 'turn_completed', turnId: internalTurnId, status }
+      }
+      // codex 把「这一轮失败了」通过 error 通知发出来，**不是**走 turn/start 的 RPC 响应。
+      // 以前这里没处理，事件被整个丢掉：turn/completed 里只有一个光秃秃的 status=error，
+      // UI 上就是"消息发出去了，什么都没发生"，用户只能干等 60s idle 超时。
+      // 典型触发：provider 和 model 对不上（关桥后老会话还带着上游模型名）。
+      case 'error': {
+        const r = turnErrorParamsSchema.safeParse(params)
+        if (!r.success) return null
+        // willRetry=true 是重试中间态（"Reconnecting... 1/5"），报给用户只会造成误解
+        if (r.data.willRetry) {
+          log.info('codex 正在重试:', r.data.error.message)
+          return null
+        }
+        const message = codexErrorMessage(r.data.error.message)
+        log.warn('codex turn error:', message)
+        return { type: 'error', turnId: internalTurnId, message, recoverable: false }
       }
       case 'item/agentMessage/delta': {
         const r = agentMessageDeltaParamsSchema.safeParse(params)
@@ -1244,11 +1347,13 @@ export class CodexAdapter implements AgentBackend {
   }
 }
 
-/**
- * 把 codex stderr 里的 OpenAI API 错误（"error=http 400: ..."）翻译成对用户友好的中文提示。
- * codex 自己不会通过 stdout 把 API 错误通知给客户端（catmax），只在 stderr 打日志——
- * 所以这里要从 stderr 主动抓取并转成 error event 推给 UI，否则用户要等 60s idle 超时。
- */
+/** app-server 内存里没有这个 thread（进程重启过）——rollout 还在，resume 能救回来 */
+function isThreadNotFoundError(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error)
+  return message.includes('thread not found')
+}
+
+/** thread 刚 start、首个 turn 还没落盘——磁盘上压根没有 rollout，resume 救不回来 */
 function isUnmaterializedThreadError(error: unknown): boolean {
   const message = error instanceof Error ? error.message : String(error)
   return (
@@ -1257,6 +1362,46 @@ function isUnmaterializedThreadError(error: unknown): boolean {
   )
 }
 
+/**
+ * codex `error` 通知里的 message 常常是**一整个 JSON 字符串**，真正的人话埋在 detail 里：
+ *   "{\"detail\":\"The 'deepseek-v4-pro' model is not supported when using Codex with
+ *     a ChatGPT account.\"}"
+ * 原样丢给用户是一串转义，所以先剥出来，再走和 stderr 那条路一样的中文翻译。
+ */
+function codexErrorMessage(raw: string): string {
+  let detail = raw
+  const trimmed = raw.trim()
+  // 协议桥留下的历史被原厂拒了——错误原文完全不提 provider，用户无从下手。
+  // 两种表现取决于历史里存的是什么：带签名的报"验证不了"，只有 id 的报 404 找不到 item。
+  // 根因相同：reasoning item 属于生成它的那个 provider，换 provider 后无法被接受。
+  const crossProviderReasoning =
+    (raw.includes('encrypted content') && raw.includes('could not be verified')) ||
+    (raw.includes('Items are not persisted when `store`') && raw.includes('not found'))
+  if (crossProviderReasoning) {
+    return `这个会话是在协议桥开启时创建的，它的历史里带着上游模型的推理记录，原厂 OpenAI 不接受。
+这是协议层面的限制：推理记录属于生成它的那个供应商，换供应商后无法继续同一个会话。
+
+解决：重新开启协议桥继续这个会话，或者新建一个会话。`
+  }
+  if (trimmed.startsWith('{')) {
+    try {
+      const parsed = JSON.parse(trimmed) as { detail?: unknown; error?: { message?: unknown } }
+      if (typeof parsed.detail === 'string') detail = parsed.detail
+      else if (typeof parsed.error?.message === 'string') detail = parsed.error.message
+    } catch {
+      // 不是合法 JSON 就按原文处理
+    }
+  }
+  // friendlyApiError 认得的模式（model 不支持 / 401 / 429…）翻译成中文，否则原样返回
+  const friendly = friendlyApiError('', detail)
+  return friendly.startsWith('OpenAI API 错误') ? detail : friendly
+}
+
+/**
+ * 把 codex stderr 里的 OpenAI API 错误（"error=http 400: ..."）翻译成对用户友好的中文提示。
+ * codex 自己不会通过 stdout 把 API 错误通知给客户端（catmax），只在 stderr 打日志——
+ * 所以这里要从 stderr 主动抓取并转成 error event 推给 UI，否则用户要等 60s idle 超时。
+ */
 function friendlyApiError(httpCode: string, detail: string): string {
   // 常见模式："The 'XXX' model is not supported when using Codex with a ChatGPT account."
   const modelMatch = detail.match(/'([^']+)' model is not supported/)

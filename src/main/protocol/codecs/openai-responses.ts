@@ -366,7 +366,10 @@ class ResponsesEncoder implements ResponseEncoder {
   private usage: IrUsage = emptyUsage()
   private stopReason: IrStopReason | null = null
 
-  constructor(model: string) {
+  constructor(
+    model: string,
+    private readonly caps: UpstreamCapabilities,
+  ) {
     this.model = model
   }
 
@@ -636,7 +639,12 @@ class ResponsesEncoder implements ResponseEncoder {
       }
       // 上游的思考签名原样带回：codex 下一轮会把整个 item 回传给我们，
       // 我们再解出来还给上游，思考链才不会断。
-      if (block.opaque) {
+      //
+      // 默认**不带**：codex 会把它写进 rollout 永久保存，关桥后这段历史直接发给
+      // ChatGPT，它验签失败并拒绝整轮（`encrypted content ... could not be verified`），
+      // 会话彻底作废。只有真需要签名的上游（官方 Anthropic 的 tool use 多轮）才值得
+      // 付这个代价——见 UpstreamCapabilities.preserveThinkingSignature。
+      if (block.opaque && this.caps.preserveThinkingSignature) {
         item.encrypted_content = encodeOpaque(block.opaque)
       }
       return item
@@ -916,7 +924,7 @@ function decodeResponsesUsage(usage: Record<string, unknown> | null): IrUsage | 
 export const openaiResponsesCodec: ProtocolCodec = {
   id: PROTOCOL,
   decodeRequest: decodeResponsesRequest,
-  createResponseEncoder: (ctx) => new ResponsesEncoder(ctx.model),
+  createResponseEncoder: (ctx) => new ResponsesEncoder(ctx.model, ctx.capabilities),
   encodeRequest: encodeResponsesRequest,
   createStreamDecoder: () => new ResponsesStreamDecoder(),
   decodeResponse: () => [],

@@ -5,7 +5,11 @@ import {
   encodeOpaque,
   openaiResponsesCodec,
 } from '@main/protocol/codecs/openai-responses'
-import { BridgeRequestError } from '@shared/protocol/codec'
+import {
+  BridgeRequestError,
+  DEFAULT_UPSTREAM_CAPABILITIES,
+  type UpstreamCapabilities,
+} from '@shared/protocol/codec'
 import type { IrStreamEvent } from '@shared/protocol/ir'
 import { describe, expect, test } from 'vitest'
 
@@ -213,8 +217,15 @@ describe('opaque 封装', () => {
 
 // ---------------------------------------------------------------------------
 
-function encodeAll(events: IrStreamEvent[], finish?: 'completed' | 'truncated' | 'error'): string {
-  const encoder = openaiResponsesCodec.createResponseEncoder({ model: 'deepseek-v4-pro' })
+function encodeAll(
+  events: IrStreamEvent[],
+  finish?: 'completed' | 'truncated' | 'error',
+  caps: Partial<UpstreamCapabilities> = {},
+): string {
+  const encoder = openaiResponsesCodec.createResponseEncoder({
+    capabilities: { ...DEFAULT_UPSTREAM_CAPABILITIES, ...caps },
+    model: 'deepseek-v4-pro',
+  })
   const out: Buffer[] = []
   for (const event of events) out.push(...encoder.push(event))
   if (finish) out.push(...encoder.finish(finish))
@@ -276,24 +287,35 @@ describe('createResponseEncoder', () => {
     expect(sse).toContain('"arguments":"{\\"cmd\\":\\"ls\\"}"')
   })
 
-  test('block_meta 的 opaque 被封进 encrypted_content 带回客户端', () => {
-    const sse = encodeAll([
-      { type: 'block_start', index: 0, block: { kind: 'reasoning' } },
-      { type: 'block_delta', index: 0, delta: '想' },
-      {
-        type: 'block_meta',
-        index: 0,
-        opaque: { protocol: 'anthropic.messages', payload: { signature: 'sig-x' } },
-      },
-      { type: 'block_end', index: 0 },
-      { type: 'end', stopReason: 'completed' },
-    ])
+  const reasoningWithSignature: IrStreamEvent[] = [
+    { type: 'block_start', index: 0, block: { kind: 'reasoning' } },
+    { type: 'block_delta', index: 0, delta: '想' },
+    {
+      type: 'block_meta',
+      index: 0,
+      opaque: { protocol: 'anthropic.messages', payload: { signature: 'sig-x' } },
+    },
+    { type: 'block_end', index: 0 },
+    { type: 'end', stopReason: 'completed' },
+  ]
+
+  test('preserveThinkingSignature 开启时，opaque 被封进 encrypted_content 带回客户端', () => {
+    const sse = encodeAll(reasoningWithSignature, undefined, { preserveThinkingSignature: true })
     const match = /"encrypted_content":"([^"]+)"/.exec(sse)
     expect(match).not.toBeNull()
     expect(decodeOpaque(match![1])).toEqual({
       protocol: 'anthropic.messages',
       payload: { signature: 'sig-x' },
     })
+  })
+
+  test('默认不带 encrypted_content——它会被 codex 写进 rollout，关桥后毒死会话', () => {
+    // codex 把这个字段永久存进 rollout；关桥后同一段历史发给 ChatGPT，它验签失败
+    // 并拒绝整轮（`encrypted content ... could not be verified`），会话再也发不出消息。
+    const sse = encodeAll(reasoningWithSignature)
+    expect(sse).not.toContain('encrypted_content')
+    // 推理文本本身照常回传，只是不带签名
+    expect(sse).toContain('想')
   })
 
   test('output_index 按块开启顺序稠密递增', () => {
@@ -309,7 +331,10 @@ describe('createResponseEncoder', () => {
   })
 
   test('恰好一个终止事件——end 之后再 push 全部无效', () => {
-    const encoder = openaiResponsesCodec.createResponseEncoder({ model: 'm' })
+    const encoder = openaiResponsesCodec.createResponseEncoder({
+      capabilities: DEFAULT_UPSTREAM_CAPABILITIES,
+      model: 'm',
+    })
     encoder.push({ type: 'block_start', index: 0, block: { kind: 'text' } })
     encoder.push({ type: 'block_end', index: 0 })
     const first = Buffer.concat(encoder.push({ type: 'end', stopReason: 'completed' })).toString()

@@ -131,6 +131,10 @@ export const BRIDGE_UPSTREAM_PRESETS: readonly BridgeUpstreamPreset[] = [
         dropSamplingWhenThinking: true,
         defaultMaxOutputTokens: 8192,
         toolNameMaxLength: 64,
+        // 实测 DeepSeek 返回的 thinking 签名只有 36 字符，不是密码学签名；不回传时
+        // 桥把 thinking 降级成普通文本，语义不丢。换来的是 rollout 干净、关桥后
+        // 会话还能继续——这个取舍对第三方兼容实现明显划算。
+        preserveThinkingSignature: false,
       },
       modelListMode: 'auto',
       manualModels: [],
@@ -147,7 +151,13 @@ export const BRIDGE_UPSTREAM_PRESETS: readonly BridgeUpstreamPreset[] = [
       modelsUrl: 'https://api.anthropic.com/v1/models',
       model: null,
       credentialEnvVar: 'ANTHROPIC_API_KEY',
-      capabilities: { ...DEFAULT_UPSTREAM_CAPABILITIES },
+      capabilities: {
+        ...DEFAULT_UPSTREAM_CAPABILITIES,
+        // 唯一开这个开关的预设：官方 Anthropic 在 tool use 多轮里要求 thinking 块
+        // 带原样签名，不回传会被拒。代价是这些会话在关桥后无法继续（codex 把桥的
+        // 封装写进了 rollout，ChatGPT 验不了签）——对官方 Anthropic 这个取舍才成立。
+        preserveThinkingSignature: true,
+      },
       modelListMode: 'auto',
       manualModels: [],
     },
@@ -173,6 +183,9 @@ export const BRIDGE_UPSTREAM_PRESETS: readonly BridgeUpstreamPreset[] = [
         dropSamplingWhenThinking: true,
         defaultMaxOutputTokens: 8192,
         toolNameMaxLength: 64,
+        // 和 DeepSeek 同理：第三方兼容实现的「签名」不是官方那套密码学签名，回传
+        // 只会把桥的封装写进 rollout、让会话在关桥后作废，不值得。
+        preserveThinkingSignature: false,
       },
       modelListMode: 'manual',
       manualModels: ['glm-5.2', 'glm-5-turbo', 'glm-4.7'],

@@ -362,6 +362,30 @@
             />
             <span>支持图片输入</span>
           </label>
+          <!-- Protocol Bridge 思考签名：默认关，开了会让会话在关桥后无法继续 -->
+          <label class="flex items-start gap-2 cursor-pointer">
+            <input
+              type="checkbox"
+              class="mt-0.5"
+              :checked="editingProvider.capabilities.preserveThinkingSignature"
+              @change="
+                patchProvider(editingProvider!.id, {
+                  capabilities: {
+                    ...editingProvider!.capabilities,
+                    preserveThinkingSignature: checked($event),
+                  },
+                })
+              "
+            />
+            <span>
+              回传思考签名
+              <span class="text-muted-foreground">
+                —— 开启后签名会被 codex
+                永久写进会话历史，导致这些会话在<b>关闭协议桥后无法继续</b>。只有官方 Anthropic
+                的工具调用多轮需要它；DeepSeek 等兼容实现不需要，保持关闭即可。
+              </span>
+            </span>
+          </label>
           <div class="flex items-center gap-2">
             <span>max_tokens 兜底值</span>
             <Input

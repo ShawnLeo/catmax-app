@@ -34,6 +34,14 @@ export interface UpstreamCapabilities {
   defaultMaxOutputTokens: number
   /** 工具名长度上限，超了要截断并建立映射 */
   toolNameMaxLength: number
+  /**
+   * 是否把上游的思考签名回传给客户端（Responses 的 `encrypted_content`）。
+   *
+   * 关掉是默认：codex 会把这个字段**永久写进 rollout**，而里面是桥自己的封装，
+   * 只有桥认得。关桥后同一段历史被直接发给 ChatGPT，它验签失败并拒绝整轮——
+   * 那个会话从此发不出消息。详见 settings-schema.ts 里的完整说明。
+   */
+  preserveThinkingSignature: boolean
 }
 
 export const DEFAULT_UPSTREAM_CAPABILITIES: UpstreamCapabilities = {
@@ -41,6 +49,7 @@ export const DEFAULT_UPSTREAM_CAPABILITIES: UpstreamCapabilities = {
   dropSamplingWhenThinking: true,
   defaultMaxOutputTokens: 8192,
   toolNameMaxLength: 64,
+  preserveThinkingSignature: false,
 }
 
 /**
@@ -68,7 +77,7 @@ export interface ProtocolCodec {
   // ── 客户端侧 ──
   /** 解析客户端请求体。入参是不可信输入，解析失败必须抛 BridgeRequestError。 */
   decodeRequest(body: unknown): IrRequest
-  createResponseEncoder(ctx: { model: string }): ResponseEncoder
+  createResponseEncoder(ctx: { model: string; capabilities: UpstreamCapabilities }): ResponseEncoder
 
   // ── 上游侧 ──
   encodeRequest(ir: IrRequest, caps: UpstreamCapabilities): unknown

@@ -88,7 +88,10 @@ export async function runBridgeTurn(options: BridgeTurnOptions): Promise<BridgeT
     thinking: ir.reasoning.enabled,
   })
 
-  const encoder = clientCodec.createResponseEncoder({ model: ir.model })
+  const encoder = clientCodec.createResponseEncoder({
+    model: ir.model,
+    capabilities: options.upstream.capabilities,
+  })
 
   const response = await fetch(url, {
     method: 'POST',

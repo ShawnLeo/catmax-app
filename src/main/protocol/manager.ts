@@ -222,10 +222,21 @@ export class BridgeManager {
    * spawn codex 时要追加的参数。桥没跑就返回空数组——
    * 空数组意味着 codex 完全按用户自己的 config.toml 走，和没装过 catmax 一样。
    */
+  /**
+   * 桥当前生效时 codex 应该用的 model_provider id，否则 null。
+   *
+   * 判断条件必须和 codexSpawnArgs() 严格一致：spawn 参数没定义这个 provider 时，
+   * 拿它去 thread/resume 会指向一个不存在的 provider。两者共用同一个前置判断。
+   */
+  codexModelProviderId(): string | null {
+    if (!this.settings?.enabled || !this.server.baseUrl) return null
+    return BRIDGE_CODEX_PROVIDER_ID
+  }
+
   codexSpawnArgs(): string[] {
+    const provider = this.codexModelProviderId()
     const baseUrl = this.server.baseUrl
-    if (!this.settings?.enabled || !baseUrl) return []
-    const provider = BRIDGE_CODEX_PROVIDER_ID
+    if (!provider || !baseUrl) return []
     return [
       // 桥接管 model_provider 后，上游是 DeepSeek/Anthropic 等，不再是 ChatGPT。
       // codex 0.145+ 的 `apps` feature 会内置一个 codex_apps MCP，它连 ChatGPT 远程

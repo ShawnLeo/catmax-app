@@ -9,7 +9,7 @@ import { createServer, type Server } from 'node:http'
 import type { AddressInfo } from 'node:net'
 
 import { BridgeServer } from '@main/protocol/server'
-import { DEFAULT_UPSTREAM_CAPABILITIES } from '@shared/protocol/codec'
+import { DEFAULT_UPSTREAM_CAPABILITIES, type UpstreamCapabilities } from '@shared/protocol/codec'
 import { afterEach, beforeEach, describe, expect, test } from 'vitest'
 
 interface FakeUpstream {
@@ -114,6 +114,7 @@ async function startBridge(
   target: FakeUpstream,
   model: string | null = null,
   knownModelIds: ReadonlySet<string> | null = null,
+  caps: Partial<UpstreamCapabilities> = {},
 ): Promise<BridgeServer> {
   const server = new BridgeServer({
     resolveUpstream: () => ({
@@ -122,7 +123,7 @@ async function startBridge(
       apiKey: 'sk-upstream',
       model,
       knownModelIds,
-      capabilities: { ...DEFAULT_UPSTREAM_CAPABILITIES, supportsImages: false },
+      capabilities: { ...DEFAULT_UPSTREAM_CAPABILITIES, supportsImages: false, ...caps },
     }),
   })
   await server.start()
@@ -134,9 +135,10 @@ async function restartBridge(
   target: FakeUpstream,
   model: string | null,
   knownModelIds: ReadonlySet<string> | null,
+  caps: Partial<UpstreamCapabilities> = {},
 ): Promise<BridgeServer> {
   await bridge?.stop()
-  return startBridge(target, model, knownModelIds)
+  return startBridge(target, model, knownModelIds, caps)
 }
 
 async function callBridge(
@@ -279,8 +281,16 @@ describe('BridgeServer 端到端', () => {
     expect(result.text).toContain('"output_tokens":22')
   })
 
-  test('思考签名被封进 encrypted_content 带回客户端', async () => {
+  test('默认不把思考签名写进 encrypted_content——那会被 codex 存进 rollout', async () => {
+    // 关桥后 codex 把同一段历史发给 ChatGPT，它验不了桥的封装，整轮被拒，
+    // 会话彻底发不出消息。默认不写，代价只是 thinking 降级成普通文本。
     const result = await callBridge(bridge!, RESPONSES_REQUEST)
+    expect(result.text).not.toContain('encrypted_content')
+  })
+
+  test('preserveThinkingSignature 开启时才带回签名（官方 Anthropic 的 tool use 需要）', async () => {
+    bridge = await restartBridge(upstream!, null, null, { preserveThinkingSignature: true })
+    const result = await callBridge(bridge, RESPONSES_REQUEST)
     expect(result.text).toContain('"encrypted_content":"catmax-bridge-v1:')
   })
 
@@ -371,7 +381,8 @@ describe('BridgeServer 异常路径', () => {
 describe('多轮工具循环', () => {
   test('第二轮把 thinking 签名和工具结果原样带回上游', async () => {
     upstream = await startFakeUpstream({ script: DEFAULT_SCRIPT })
-    bridge = await startBridge(upstream)
+    // 签名往返只在 preserveThinkingSignature 开着时发生（官方 Anthropic 那档）
+    bridge = await startBridge(upstream, null, null, { preserveThinkingSignature: true })
 
     // 模拟 codex 拿到第一轮结果后的第二轮请求：带 reasoning item（含我们塞的封装）、
     // function_call 和 function_call_output

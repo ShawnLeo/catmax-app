@@ -50,6 +50,7 @@ function makeProvider(over: Partial<BridgeProvider> = {}): BridgeProvider {
       dropSamplingWhenThinking: true,
       defaultMaxOutputTokens: 8192,
       toolNameMaxLength: 64,
+      preserveThinkingSignature: false,
     },
     modelListMode: 'manual',
     manualModels: ['m1'],

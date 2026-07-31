@@ -111,6 +111,18 @@ export const turnCompletedParamsSchema = z.object({
   }),
 })
 
+/**
+ * codex 的 `error` 通知——一轮失败时走这里，**不是**走 turn/start 的 RPC 响应。
+ * willRetry=true 表示 codex 自己还在重试（"Reconnecting... 1/5"），不是终态。
+ */
+export const turnErrorParamsSchema = z.object({
+  error: z.object({
+    message: z.string(),
+    additionalDetails: z.string().nullish(),
+  }),
+  willRetry: z.boolean().default(false),
+})
+
 // ============ Item 事件 ============
 
 /** item/agentMessage/delta —— 流式文本 */

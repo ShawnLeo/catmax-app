@@ -43,6 +43,9 @@ export function registerBuiltinBackendPlugins(): void {
           ...bridgeManager.codexSpawnEnv(),
         })
         adapter.setExtraArgs(bridgeManager.codexSpawnArgs())
+        // 老会话的 provider 写死在 rollout 里，`-c model_provider` 覆盖不了它——
+        // resume 时必须显式传（详见 CodexAdapter.setModelProvider）。
+        adapter.setModelProvider(bridgeManager.codexModelProviderId())
         // 桥开着时模型列表必须来自上游——codex 的 model/list 是写死的 ChatGPT 目录，
         // 跟当前 model_provider 无关（详见 CodexAdapter.setModelListProvider）。
         adapter.setModelListProvider(

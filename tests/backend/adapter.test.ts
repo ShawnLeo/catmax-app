@@ -667,6 +667,122 @@ describe('CodexAdapter', () => {
     expect(events.some((e) => e.type === 'turn_completed')).toBe(true)
   })
 
+  test('turn/start 撞上 "thread not found" 时先 resume 再重试（后端进程换过）', async () => {
+    // 复现：用户开着一个会话正常聊天 → 在设置里翻转协议桥开关 → codex 被 dispose
+    // 并重新 spawn → 新进程内存里没有这个 thread → 下一条消息报
+    // "thread not found: <id>"。rollout 文件还在磁盘上，resume 能把 thread 冷装回内存。
+    const { spawner, stdout, stdin } = createMockSpawner()
+    const adapter = new CodexAdapter({ spawner })
+
+    const methods: string[] = []
+    let turnStartSeen = 0
+    let threadInMemory = false
+    stdin.on('data', (data) => {
+      const lines = data.toString().split('\n').filter(Boolean)
+      for (const line of lines) {
+        const msg = JSON.parse(line)
+        if (msg.method === 'initialize') {
+          pushLine(stdout, { id: msg.id, result: { ok: true } })
+          continue
+        }
+        if (msg.id === undefined) continue
+        if (msg.method === 'model/list') {
+          pushLine(stdout, {
+            id: msg.id,
+            result: { data: [{ id: 'deepseek-v4-pro', displayName: 'ds', isDefault: true }] },
+          })
+          continue
+        }
+        methods.push(msg.method)
+        if (msg.method === 'thread/resume') {
+          threadInMemory = true
+          pushLine(stdout, { id: msg.id, result: { thread: { id: 'thr_lost' } } })
+        } else if (msg.method === 'turn/start') {
+          turnStartSeen++
+          if (!threadInMemory) {
+            // 新 spawn 的 app-server：内存里没有这个 thread
+            pushLine(stdout, {
+              id: msg.id,
+              error: { code: -32000, message: 'thread not found: thr_lost' },
+            })
+            continue
+          }
+          pushLine(stdout, { id: msg.id, result: { turn: { id: 'turn_1' } } })
+          pushLine(stdout, {
+            method: 'turn/completed',
+            params: { turn: { id: 'turn_1', status: 'completed', items: [] } },
+          })
+        }
+      }
+    })
+
+    const events: any[] = []
+    for await (const ev of adapter.startTurn({
+      sessionId: 'thr_lost',
+      prompt: 'hi',
+      model: 'deepseek-v4-pro',
+    })) {
+      events.push(ev)
+    }
+
+    // resume 夹在两次 turn/start 之间（initialize 后的 model/list 预热与本用例无关）
+    expect(methods.filter((m) => m !== 'model/list')).toEqual([
+      'turn/start',
+      'thread/resume',
+      'turn/start',
+    ])
+    expect(turnStartSeen).toBe(2)
+    // 用户侧看不到任何错误，这一轮正常完成
+    expect(events.some((e) => e.type === 'error')).toBe(false)
+    expect(events.at(-1)).toMatchObject({ type: 'turn_completed', status: 'completed' })
+  })
+
+  test('resume 也救不回来时报错，不无限重试', async () => {
+    // rollout 文件也没了（被删/损坏）——只重试一次，错误如实抛给用户
+    const { spawner, stdout, stdin } = createMockSpawner()
+    const adapter = new CodexAdapter({ spawner })
+
+    let turnStartSeen = 0
+    stdin.on('data', (data) => {
+      const lines = data.toString().split('\n').filter(Boolean)
+      for (const line of lines) {
+        const msg = JSON.parse(line)
+        if (msg.method === 'initialize') {
+          pushLine(stdout, { id: msg.id, result: { ok: true } })
+        } else if (msg.method === 'model/list' && msg.id !== undefined) {
+          pushLine(stdout, {
+            id: msg.id,
+            result: { data: [{ id: 'deepseek-v4-pro', displayName: 'ds', isDefault: true }] },
+          })
+        } else if (msg.method === 'turn/start' && msg.id !== undefined) {
+          turnStartSeen++
+          pushLine(stdout, {
+            id: msg.id,
+            error: { code: -32000, message: 'thread not found: thr_gone' },
+          })
+        } else if (msg.method === 'thread/resume' && msg.id !== undefined) {
+          pushLine(stdout, {
+            id: msg.id,
+            error: { code: -32000, message: 'no rollout found for thread id thr_gone' },
+          })
+        }
+      }
+    })
+
+    const events: any[] = []
+    for await (const ev of adapter.startTurn({
+      sessionId: 'thr_gone',
+      prompt: 'hi',
+      model: 'deepseek-v4-pro',
+    })) {
+      events.push(ev)
+    }
+
+    expect(turnStartSeen).toBe(1)
+    expect(events.some((e) => e.type === 'error')).toBe(true)
+    expect(events.at(-1)).toMatchObject({ type: 'turn_completed', status: 'error' })
+  })
+
   test('getHistory 返回 NormalizedMessage 数组', async () => {
     const { spawner, stdout, stdin } = createMockSpawner()
     const adapter = new CodexAdapter({ spawner })
