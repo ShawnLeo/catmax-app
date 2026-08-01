@@ -63,6 +63,43 @@ export const useSessionStore = defineStore('session', () => {
     }
   }
 
+  /**
+   * Session Pin: 置顶 / 取消置顶。
+   *
+   * 置顶改变的是排序，不只是那一行的样子，所以就地改完还要重排——
+   * 排序规则跟 main 的 SESSION_ORDER_BY 保持一致（置顶优先，组内按时间倒序）。
+   * 重排而不是重 load：避免整列表闪一下，也省一次 IPC。
+   */
+  async function setPinned(sessionId: string, pinned: boolean): Promise<void> {
+    const updated = await window.api.session.setPinned({ sessionId, pinned })
+    const index = sessions.value.findIndex((s) => s.id === sessionId)
+    if (index !== -1) sessions.value[index] = updated
+    sessions.value.sort((a, b) => {
+      if (a.pinnedAt !== null && b.pinnedAt !== null) return b.pinnedAt - a.pinnedAt
+      if (a.pinnedAt !== null) return -1
+      if (b.pinnedAt !== null) return 1
+      return b.lastActiveAt - a.lastActiveAt
+    })
+  }
+
+  /** Session Rename: 重命名会话，就地替换列表里那一行（标题不影响排序）。 */
+  async function rename(sessionId: string, title: string): Promise<void> {
+    const updated = await window.api.session.rename({ sessionId, title })
+    const index = sessions.value.findIndex((s) => s.id === sessionId)
+    if (index !== -1) sessions.value[index] = updated
+  }
+
+  /**
+   * Session Fork: 复制会话。返回新会话 id，调用方决定要不要跳过去。
+   *
+   * 复制后必须重 load：新会话是 main 侧 insert 的，本地列表里没有它。
+   */
+  async function fork(sessionId: string, workspaceId: string, backend: BackendId): Promise<string> {
+    const result = await window.api.session.fork({ sessionId })
+    await load(workspaceId, backend)
+    return result.sessionId
+  }
+
   function setCurrent(sessionId: string): void {
     currentSessionId.value = sessionId
     selectionVersion.value++
@@ -106,6 +143,9 @@ export const useSessionStore = defineStore('session', () => {
     reconcile,
     create,
     remove,
+    setPinned,
+    rename,
+    fork,
     setCurrent,
     loadHistory,
   }

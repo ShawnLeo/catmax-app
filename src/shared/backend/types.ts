@@ -636,6 +636,25 @@ export interface AgentBackend {
    * removeSession 会同时写 tombstone 兜底，即便这里删不掉，reconcile 也不会让它复活。
    */
   deleteSession?(backendThreadId: string, cwd?: string): Promise<void>
+
+  /**
+   * Session Fork: 把一个已有会话的历史整份复制成一个新会话，返回新的 backendThreadId。
+   *
+   * 语义是"分叉"——新旧会话各自独立，之后在副本里聊不影响原会话。
+   *
+   * - claude：SDK 的 forkSession()，会复制 transcript 并重映射所有 message uuid
+   *   与 parentUuid 链（不是简单 cp，否则 uuid 撞车）。
+   * - codex：没有 fork RPC，手动复制 rollout 文件——只有首行 session_meta.payload.id
+   *   是 thread id，其余行不含 id，所以改首行 + 换文件名即可。
+   *
+   * 关键前提：fork 出来的会话**不需要**任何 turn 层改动。两个 adapter 都是"磁盘上有
+   * 文件就能 resume"：claude 的 startTurn 用 resolveSessionJsonlPath 探测文件决定
+   * canResume；codex 的 startTurnRequest 撞 "thread not found" 会自动 thread/resume
+   * 重试一次。所以新文件落盘即可用。
+   *
+   * 不支持的后端不实现此方法，UI 据此隐藏「复制会话」菜单项。
+   */
+  forkSession?(backendThreadId: string, cwd?: string): Promise<{ backendThreadId: string }>
 }
 
 /** 会话摘要（跨进程共享） */

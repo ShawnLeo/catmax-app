@@ -21,6 +21,7 @@ import { join } from 'node:path'
 
 import {
   deleteSession as deleteSdkSession,
+  forkSession as forkSdkSession,
   query,
   type CanUseTool,
   type ModelInfo,
@@ -394,6 +395,29 @@ export class ClaudeAdapter implements AgentBackend {
       if ((e as NodeJS.ErrnoException).code === 'ENOENT') return
       log.warn('deleteSession: unlink failed', jsonlPath, e)
     }
+  }
+
+  /**
+   * Session Fork: 复制会话——直接用 SDK 的 forkSession。
+   *
+   * 不能自己 cp 那个 .jsonl：transcript 每行都带 uuid / parentUuid 构成一条链，
+   * 原样复制会让两个会话共用同一批 uuid，claude 侧 resume 时会串。SDK 的实现会
+   * 重映射整条链，所以走它。
+   *
+   * dir 必须传 cwd——claude 按 cwd 编码分目录存 transcript，不传会去 main 进程的
+   * cwd（catmax-app 自己的根目录）里找，直接 not found（同 getHistory 的坑）。
+   */
+  async forkSession(backendThreadId: string, cwd?: string): Promise<{ backendThreadId: string }> {
+    const spawnCwd = cwd ?? this.opts.cwd
+    const options: Parameters<typeof forkSdkSession>[1] = {}
+    if (spawnCwd !== undefined) options.dir = spawnCwd
+    const { sessionId } = await forkSdkSession(backendThreadId, options)
+    // fork 出的 id 立刻标记为可 resume——它的 transcript 已经在磁盘上了。
+    // 不标也能自愈（startTurn 会 existsSync 探测），标了省一次系统调用。
+    this.sessionIdMap.set(sessionId, sessionId)
+    this.resumableSessions.add(sessionId)
+    log.info('forked session', backendThreadId, '->', sessionId)
+    return { backendThreadId: sessionId }
   }
 
   async resumeSession(backendThreadId: string): Promise<{ messages: NormalizedMessage[] }> {

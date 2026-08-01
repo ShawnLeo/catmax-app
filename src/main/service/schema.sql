@@ -33,6 +33,12 @@ CREATE TABLE IF NOT EXISTS sessions (
   turn_count        INTEGER NOT NULL DEFAULT 0,
   created_at        INTEGER NOT NULL,
   last_active_at    INTEGER NOT NULL,
+  -- Session Pin: 置顶时间戳（NULL = 未置顶）。存时间戳而非布尔，
+  -- 多条置顶会话之间按"最近置顶的在最上面"排序。
+  pinned_at         INTEGER,
+  -- Session Rename: 用户手动改过标题。置 1 后 claude 的 aiTitle 不再回写覆盖，
+  -- 否则用户重命名完，下一个 turn 结束就被 AI 自动标题冲掉。
+  title_custom      INTEGER NOT NULL DEFAULT 0,
   UNIQUE(backend, backend_thread_id)
 );
 

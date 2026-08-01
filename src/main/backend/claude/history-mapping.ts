@@ -244,10 +244,20 @@ export function claudeReplayToMessages(messages: ClaudeStreamMessage[]): Normali
       // message.id）。若每行都新建一条 NormalizedMessage，同一条 API 消息会被拆成
       // 多条 → UI 上画出多个紧挨着的色点，其中只含 server_tool_use / tool_result 等
       // 未渲染类型的行还变成空消息（只画点没内容）。
-      // 这里按 message.id 合并：id 与 currentAssistant 相同 → 把本行 blocks 追加进去，
-      // 不新建消息；id 变了 → flush 旧的，新建。
+      //
+      // 合并目标有两个：尚未 flush 的 currentAssistant，以及已被 flush 进 result 的
+      // 同 id 消息。后者必须处理——后台任务 summary 场景里，同一条 API message 被
+      // 拆成多行、中间夹着一条带文本的 user 行（任务完成通知 / 下一轮 prompt），
+      // user 文本会触发 flushAssistant() 把 currentAssistant 推进 result 并清空，
+      // 之后到来的同 id assistant 行若只对照 currentAssistant 会判失败 → 新建一条
+      // 同 id 消息 → result 里两条相同 id → renderer MessageList :key 报 Duplicate keys。
       if (currentAssistant && currentAssistant.id === assistantMsg.message.id) {
         appendAssistantBlocks(currentAssistant, assistantMsg, pendingToolUseIds)
+        continue
+      }
+      const flushedSameId = result.find((m) => m.id === assistantMsg.message.id)
+      if (flushedSameId) {
+        appendAssistantBlocks(flushedSameId, assistantMsg, pendingToolUseIds)
         continue
       }
       // 新 assistant message——先 flush 上一个

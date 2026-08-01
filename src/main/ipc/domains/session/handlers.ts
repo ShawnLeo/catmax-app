@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto'
+import { existsSync } from 'node:fs'
 
 import { readSubagentHistory as readSubagentHistoryFromJsonl } from '@main/backend/claude/jsonl-reader'
 import { encodeCwdToProjectDir } from '@main/backend/claude/jsonl-reader'
@@ -15,6 +16,7 @@ import type {
   RuntimeConfigSnapshot,
   ScanImportableResult,
 } from '@shared/ipc/session'
+import { shell } from 'electron'
 
 const log = logger.domain('session-handler')
 
@@ -81,6 +83,8 @@ export const createSession = async (args: CreateSessionArgs): Promise<{ sessionI
     turnCount: 0,
     createdAt: now,
     lastActiveAt: now,
+    pinnedAt: null,
+    titleCustom: false,
   })
   log.info('created session', sessionId, 'backend=', backend)
 
@@ -112,6 +116,116 @@ export const removeSession = async (args: { sessionId: string }): Promise<void> 
     args.sessionId,
     `(${session.backend}/${session.backendThreadId})`,
   )
+}
+
+/**
+ * Session Pin: 置顶 / 取消置顶。
+ *
+ * 纯 catmax db 属性，不通知后端——claude/codex 都没有"置顶"的概念，
+ * reconcile 也只增删行、不改已有行，所以置顶状态不会被对账冲掉。
+ */
+export const setSessionPinned = async (args: {
+  sessionId: string
+  pinned: boolean
+}): Promise<SessionView> => {
+  const session = ctx.db.findSessionById(args.sessionId)
+  if (!session) {
+    throw new SessionError('not-found', `session not found: ${args.sessionId}`)
+  }
+  ctx.db.setSessionPinned(args.sessionId, args.pinned)
+  const updated = ctx.db.findSessionById(args.sessionId)
+  if (!updated) throw new SessionError('not-found', `session not found: ${args.sessionId}`)
+  return toView(updated)
+}
+
+/**
+ * Session Rename: 用户手动重命名会话。
+ *
+ * 只改 catmax 的 db 标题，不动后端历史文件里的标题——claude 的 aiTitle 写在 jsonl
+ * 头部，改它等于改用户的原始会话记录，代价远大于收益。db 的 title_custom 标志会
+ * 让后端标题从此不再覆盖用户的命名（见 database.updateSessionTitle）。
+ */
+export const renameSession = async (args: {
+  sessionId: string
+  title: string
+}): Promise<SessionView> => {
+  const session = ctx.db.findSessionById(args.sessionId)
+  if (!session) {
+    throw new SessionError('not-found', `session not found: ${args.sessionId}`)
+  }
+  const title = args.title.trim()
+  if (!title) {
+    throw new SessionError('not-found', '会话标题不能为空')
+  }
+  ctx.db.renameSession(args.sessionId, title)
+  const updated = ctx.db.findSessionById(args.sessionId)
+  if (!updated) throw new SessionError('not-found', `session not found: ${args.sessionId}`)
+  log.info('renamed session', args.sessionId, '->', title)
+  return toView(updated)
+}
+
+/**
+ * Session Reveal: 在 Finder / 资源管理器里定位会话所属的工作区目录。
+ *
+ * showItemInFolder 的语义是"选中这一项"，传目录时会在其父目录里把它选中——
+ * 这正是用户想要的"在 Finder 中显示"，比 openPath 直接进目录内部更符合菜单文案。
+ */
+export const revealSessionInFolder = async (args: { sessionId: string }): Promise<void> => {
+  const session = ctx.db.findSessionById(args.sessionId)
+  if (!session) {
+    throw new SessionError('not-found', `session not found: ${args.sessionId}`)
+  }
+  const workspace = ctx.db.findWorkspaceById(session.workspaceId)
+  if (!workspace) {
+    throw new SessionError('workspace-not-found', `workspace not found: ${session.workspaceId}`)
+  }
+  if (!existsSync(workspace.path)) {
+    throw new SessionError('workspace-not-found', `目录不存在：${workspace.path}`)
+  }
+  shell.showItemInFolder(workspace.path)
+}
+
+/**
+ * Session Fork: 复制会话——让后端把历史复制成一个新 thread，再在 db 登记新会话。
+ *
+ * 顺序很重要：先 fork 后端文件，成功了才写 db。反过来会在 fork 失败时留下一条
+ * 指向不存在 thread 的 db 记录，用户点开只能看到报错。
+ *
+ * 副本的 title 加「(副本)」后缀并置 titleCustom——否则打开副本时 getSessionDetail
+ * 会用后端 jsonl 里的原标题回写，两条会话在侧边栏长得一模一样，分不清哪条是副本。
+ * 副本不继承置顶状态：置顶是"我关注这一条"，复制出来的是新的一条。
+ */
+export const forkSession = async (args: { sessionId: string }): Promise<{ sessionId: string }> => {
+  const session = ctx.db.findSessionById(args.sessionId)
+  if (!session) {
+    throw new SessionError('not-found', `session not found: ${args.sessionId}`)
+  }
+  const workspace = ctx.db.findWorkspaceById(session.workspaceId)
+  const { backendThreadId } = await ctx.backendManager.forkSession(
+    session.backend,
+    session.backendThreadId,
+    workspace?.path,
+  )
+
+  const now = Date.now()
+  const newSessionId = randomUUID()
+  ctx.db.insertSession({
+    id: newSessionId,
+    backend: session.backend,
+    backendThreadId,
+    workspaceId: session.workspaceId,
+    title: `${session.title ?? '(新会话)'} (副本)`,
+    model: session.model,
+    effort: session.effort,
+    permissionMode: session.permissionMode,
+    turnCount: session.turnCount,
+    createdAt: now,
+    lastActiveAt: now,
+    pinnedAt: null,
+    titleCustom: true,
+  })
+  log.info('forked session', args.sessionId, '->', newSessionId, `(${backendThreadId})`)
+  return { sessionId: newSessionId }
 }
 
 export const reconcileSessions = async (args: { workspaceId: string }) => {
@@ -164,6 +278,8 @@ export const reconcileSessions = async (args: { workspaceId: string }) => {
       turnCount: 0,
       createdAt: now,
       lastActiveAt: bs.lastActiveAt,
+      pinnedAt: null,
+      titleCustom: false,
     })
     const inserted = ctx.db.findSessionById(sessionId)
     if (inserted) added.push(toView(inserted))
@@ -358,6 +474,8 @@ export const importSessions = async (args: ImportSessionArgs): Promise<ImportSes
       // 没拿到磁盘记录的创建时间，用 lastActiveAt 代替
       createdAt: lastActiveAt,
       lastActiveAt,
+      pinnedAt: null,
+      titleCustom: false,
     })
     const inserted = ctx.db.findSessionById(sessionId)
     if (inserted) {
@@ -388,7 +506,12 @@ export const getSessionDetail = async (args: { sessionId: string }) => {
 
   // 后端返回了 aiTitle（claude 自动生成的会话标题）且 db 里 title 为空/不一致时，
   // 把它回写到 db + 用回写后的 session 视图返回。这样侧边栏会话标题会刷新。
+  // Session Rename: 用户手动改过标题时不回写，也不把 aiTitle 返给 renderer——
+  // sessionStore.loadHistory 拿到 aiTitle 会直接更新侧边栏，等于绕过 db 的守卫。
   let updatedSession = session
+  if (session.titleCustom) {
+    return { session: toView(session), messages, aiTitle: null }
+  }
   if (aiTitle && aiTitle !== session.title) {
     ctx.db.updateSessionTitle(session.id, aiTitle)
     log.info('updated session title from backend', session.id, aiTitle)

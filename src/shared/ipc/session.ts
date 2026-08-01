@@ -100,6 +100,24 @@ export type SessionHandlers = {
   'session.list': (args: { workspaceId: string; backend: BackendId }) => Promise<SessionView[]>
   'session.create': (args: CreateSessionArgs) => Promise<{ sessionId: string }>
   'session.remove': (args: { sessionId: string }) => Promise<void>
+  /**
+   * Session Pin: 置顶 / 取消置顶。返回更新后的视图，渲染层就地替换即可，
+   * 不用重拉整个列表（但排序变了，调用方需要重排或重 load）。
+   */
+  'session.setPinned': (args: { sessionId: string; pinned: boolean }) => Promise<SessionView>
+  /**
+   * Session Rename: 用户手动重命名。空标题（trim 后）被拒绝——传空会抛错，
+   * 渲染层应在提交前自己挡掉。改完后 titleCustom=true，后端 aiTitle 不再覆盖。
+   */
+  'session.rename': (args: { sessionId: string; title: string }) => Promise<SessionView>
+  /** Session Reveal: 在 Finder / 资源管理器中定位会话所属工作区目录。 */
+  'session.revealInFolder': (args: { sessionId: string }) => Promise<void>
+  /**
+   * Session Fork: 复制会话——复制后端历史文件生成新 thread，并在 db 登记一条新会话。
+   *
+   * 返回新会话的 catmax session id。后端不支持 fork（adapter 没实现 forkSession）时抛错。
+   */
+  'session.fork': (args: { sessionId: string }) => Promise<{ sessionId: string }>
   'session.reconcile': (args: { workspaceId: string }) => Promise<{
     added: SessionView[]
     removed: string[]

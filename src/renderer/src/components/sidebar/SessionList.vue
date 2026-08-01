@@ -54,8 +54,13 @@
           :active="session.id === sessionStore.currentSessionId"
           :running="isSessionRunning(session.id)"
           :unread-activity="hasUnreadActivity(session.id)"
+          :renaming="renamingSessionId === session.id"
+          :menu-open="contextMenu?.session.id === session.id"
           @click="selectSession(session.id)"
-          @remove="removeSession(session.id)"
+          @contextmenu="openContextMenu(session, $event)"
+          @menu="openMenuFromButton(session, $event)"
+          @rename="renameSession(session.id, $event)"
+          @rename-cancel="renamingSessionId = null"
         />
 
         <!-- 空状态 -->
@@ -68,20 +73,41 @@
       </div>
     </template>
 
+    <!-- 会话右键菜单：置顶 / 重命名 / 在文件管理器中显示 / 复制会话 -->
+    <ContextMenu
+      v-if="contextMenu"
+      :x="contextMenu.x"
+      :y="contextMenu.y"
+      :items="contextMenuItems"
+      @select="onContextMenuSelect"
+      @close="closeContextMenu"
+    />
+
     <!-- 「扫描导入」对话框 -->
     <ImportSessionsDialog v-if="importDialogOpen" @close="onImportDialogClose" />
   </div>
 </template>
 
 <script setup lang="ts">
+import { ContextMenu, type ContextMenuItem } from '@renderer/components/ui/context-menu'
 import { useBackendStore } from '@renderer/stores/backend'
 import { useMessageStore } from '@renderer/stores/message'
 import { useSessionStore } from '@renderer/stores/session'
 import { useSettingsStore } from '@renderer/stores/settings'
 import { useWorkspaceStore } from '@renderer/stores/workspace'
 import { type BackendId } from '@shared/constants'
-import { PlusIcon, RefreshCwIcon } from 'lucide-vue-next'
-import { onMounted, ref, watch } from 'vue'
+import type { SessionView } from '@shared/domain'
+import {
+  CopyIcon,
+  FolderOpenIcon,
+  PencilIcon,
+  PinIcon,
+  PinOffIcon,
+  PlusIcon,
+  RefreshCwIcon,
+  Trash2Icon,
+} from 'lucide-vue-next'
+import { computed, onMounted, ref, watch } from 'vue'
 
 import ImportSessionsDialog from './ImportSessionsDialog.vue'
 import SessionItem from './SessionItem.vue'
@@ -95,6 +121,143 @@ const settings = useSettingsStore()
 const importDialogOpen = ref(false)
 const refreshingSessions = ref(false)
 const messageStore = useMessageStore()
+
+// ---------------------------------------------------------------------------
+// 会话右键菜单
+// ---------------------------------------------------------------------------
+
+/** 右键菜单状态：目标会话 + 鼠标坐标。null = 未打开 */
+const contextMenu = ref<{ session: SessionView; x: number; y: number } | null>(null)
+/** Session Rename: 正在就地编辑标题的会话（同一时刻只允许一条） */
+const renamingSessionId = ref<string | null>(null)
+/** 「在 Finder / 文件资源管理器中显示」的文案随平台变——启动时问一次 */
+const platform = ref<'darwin' | 'win32' | 'linux'>('darwin')
+
+const revealLabel = computed(() => {
+  if (platform.value === 'darwin') return '在 Finder 中显示'
+  if (platform.value === 'win32') return '在文件资源管理器中显示'
+  return '在文件管理器中显示'
+})
+
+const contextMenuItems = computed<ContextMenuItem[]>(() => {
+  const session = contextMenu.value?.session
+  if (!session) return []
+  const pinned = session.pinnedAt !== null
+  return [
+    {
+      key: 'pin',
+      label: pinned ? '取消置顶' : '置顶聊天',
+      icon: pinned ? PinOffIcon : PinIcon,
+    },
+    { key: 'rename', label: '重命名会话', icon: PencilIcon },
+    { key: 'reveal', label: revealLabel.value, icon: FolderOpenIcon },
+    { key: 'fork', label: '复制会话', icon: CopyIcon },
+    // 删除单独隔一档——它是这里唯一不可逆的操作，不该跟前面几项挨着让人误点
+    { key: 'delete-sep', label: '', separator: true },
+    { key: 'delete', label: '删除会话', icon: Trash2Icon, danger: true },
+  ]
+})
+
+function openContextMenu(session: SessionView, event: MouseEvent): void {
+  // 右键换一条会话时，先前那条的就地编辑框直接收掉——它的 blur 会自行提交
+  renamingSessionId.value = null
+  contextMenu.value = { session, x: event.clientX, y: event.clientY }
+}
+
+/**
+ * 最近一次菜单关闭的会话与时刻——只为让「更多」按钮能真正 toggle。
+ *
+ * 菜单开着时点那个按钮，事件顺序是：ContextMenu 的 mousedown(capture) 先判定
+ * "点到了菜单外面"把菜单关掉，之后才轮到按钮的 click。等 click 跑起来时
+ * contextMenu 已经是 null，"开着就关掉"的判断永远命中不了，表现就是菜单
+ * 关掉又立刻重开（看起来像点了没反应）。所以要记住这一下是不是关闭的余波。
+ */
+let lastMenuClose: { sessionId: string; at: number } | null = null
+
+function closeContextMenu(): void {
+  if (contextMenu.value) {
+    lastMenuClose = { sessionId: contextMenu.value.session.id, at: Date.now() }
+  }
+  contextMenu.value = null
+}
+
+/**
+ * 「更多」按钮打开菜单——内容跟右键完全一样，只有定位方式不同。
+ *
+ * 用按钮的位置而不是鼠标坐标：按钮是个固定目标，菜单每次都贴在它下方同一处；
+ * 跟着鼠标走的话，同一个按钮点两次菜单会出现在两个地方，看着像飘。
+ * 贴近窗口右/下边缘时 ContextMenu 自己会翻转，这里不用管。
+ */
+function openMenuFromButton(session: SessionView, event: MouseEvent): void {
+  // 同一次点击里刚把这一条的菜单关掉（见 lastMenuClose）——这下就是收起，不再开
+  if (
+    lastMenuClose &&
+    lastMenuClose.sessionId === session.id &&
+    Date.now() - lastMenuClose.at < 250
+  ) {
+    lastMenuClose = null
+    return
+  }
+  renamingSessionId.value = null
+  const rect = (event.currentTarget as HTMLElement).getBoundingClientRect()
+  contextMenu.value = { session, x: rect.left, y: rect.bottom + 4 }
+}
+
+/**
+ * 菜单项分发。
+ *
+ * 先把菜单目标取出来再执行——onContextMenuSelect 之后 ContextMenu 会 emit close
+ * 把 contextMenu 置 null，异步动作里再读就没了。
+ */
+async function onContextMenuSelect(key: string): Promise<void> {
+  const session = contextMenu.value?.session
+  if (!session) return
+  try {
+    switch (key) {
+      case 'pin':
+        await sessionStore.setPinned(session.id, session.pinnedAt === null)
+        break
+      case 'rename':
+        renamingSessionId.value = session.id
+        break
+      case 'reveal':
+        await window.api.session.revealInFolder({ sessionId: session.id })
+        break
+      case 'fork':
+        await forkSession(session)
+        break
+      case 'delete':
+        await removeSession(session.id)
+        break
+    }
+  } catch (e) {
+    // 项目还没有 toast 机制，跟删除确认一样用原生弹窗兜底
+    window.alert(e instanceof Error ? e.message : String(e))
+  }
+}
+
+/** Session Rename: 提交新标题。失败时保持编辑态，让用户能重试或按 Esc 放弃 */
+async function renameSession(sessionId: string, title: string): Promise<void> {
+  try {
+    await sessionStore.rename(sessionId, title)
+    renamingSessionId.value = null
+  } catch (e) {
+    window.alert(e instanceof Error ? e.message : String(e))
+  }
+}
+
+/**
+ * Session Fork: 复制会话并切到副本。
+ *
+ * 切过去是刻意的——用户复制会话就是为了在副本里接着聊（保住原会话不被污染），
+ * 复制完停在原会话上还得自己再点一次。
+ */
+async function forkSession(session: SessionView): Promise<void> {
+  const workspace = workspaceStore.currentWorkspace
+  if (!workspace) return
+  const newSessionId = await sessionStore.fork(session.id, workspace.id, backendStore.currentId)
+  await selectSession(newSessionId)
+}
 
 /**
  * 查某会话是否有 turn 在后台跑。
@@ -124,6 +287,14 @@ function isBackendAvailable(id: BackendId): boolean {
 }
 
 onMounted(async () => {
+  // 右键菜单的「在 Finder 中显示」文案要按平台改，拿一次缓存住。
+  // 拿不到就用默认文案，不值得为此报错。
+  try {
+    platform.value = (await window.api.system.platformInfo()).platform
+  } catch {
+    /* 保持默认 */
+  }
+
   if (workspaceStore.currentWorkspace) {
     await sessionStore.load(workspaceStore.currentWorkspace.id, backendStore.currentId)
     await sessionStore.reconcile(workspaceStore.currentWorkspace.id, backendStore.currentId)

@@ -36,6 +36,14 @@ function rowToRecord(row: WorkspaceRow): WorkspaceRecord {
   }
 }
 
+/**
+ * Session Pin: 会话列表统一排序。
+ *
+ * `pinned_at IS NULL` 在 sqlite 里求值成 0/1，升序即"置顶的（0）排在未置顶的（1）前面"；
+ * 置顶组内按置顶时间倒序（最近置顶的在最上），未置顶组内按活跃时间倒序（原有行为）。
+ */
+const SESSION_ORDER_BY = 'ORDER BY pinned_at IS NULL, pinned_at DESC, last_active_at DESC'
+
 export class DatabaseService {
   private db: Database.Database
 
@@ -62,7 +70,29 @@ export class DatabaseService {
     // 而按 process.cwd() 找源码的兜底只在"从项目根目录启动"时才碰巧成立，
     // 从 Finder/Dock 启动时 cwd 是 /，迁移必然失败且窗口永远不显示。
     this.db.exec(schemaSql)
+    this.migrateAddColumns()
     log.info('migrated')
+  }
+
+  /**
+   * 给已存在的表补列。
+   *
+   * schema.sql 全是 `CREATE TABLE IF NOT EXISTS`，没有版本号——老库里表已经存在，
+   * 重跑 schema 不会把新列加进去，所以每个新增列都要在这里手写一条守卫 ALTER。
+   * 判断方式用 PRAGMA table_info 而不是 catch 异常，避免把真正的 SQL 错误吞掉。
+   */
+  private migrateAddColumns(): void {
+    const addColumn = (table: string, column: string, definition: string): void => {
+      const columns = this.db.prepare(`PRAGMA table_info(${table})`).all() as Array<{
+        name: string
+      }>
+      if (columns.some((c) => c.name === column)) return
+      this.db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`)
+      log.info(`migrated: added ${table}.${column}`)
+    }
+    // Session Pin / Session Rename——见 schema.sql 里同名列的注释
+    addColumn('sessions', 'pinned_at', 'INTEGER')
+    addColumn('sessions', 'title_custom', 'INTEGER NOT NULL DEFAULT 0')
   }
 
   // ===== Workspace =====
@@ -154,18 +184,20 @@ export class DatabaseService {
    * backend 可选——传了则只返回该 backend 的会话（走 idx_sessions_backend 索引），
    * 不传则返回所有 backend 的会话（走 idx_sessions_workspace 索引，用于 reconcile /
    * scanImportable 等需要全量对账的场景）。
+   *
+   * Session Pin: 排序统一走 SESSION_ORDER_BY——置顶的整体排在前面，组内各自按时间倒序。
    */
   listSessions(workspaceId: string, backend?: BackendId): SessionRecord[] {
     if (backend) {
       const rows = this.db
         .prepare(
-          'SELECT * FROM sessions WHERE workspace_id = ? AND backend = ? ORDER BY last_active_at DESC',
+          `SELECT * FROM sessions WHERE workspace_id = ? AND backend = ? ${SESSION_ORDER_BY}`,
         )
         .all(workspaceId, backend) as SessionRow[]
       return rows.map(rowToSessionRecord)
     }
     const rows = this.db
-      .prepare('SELECT * FROM sessions WHERE workspace_id = ? ORDER BY last_active_at DESC')
+      .prepare(`SELECT * FROM sessions WHERE workspace_id = ? ${SESSION_ORDER_BY}`)
       .all(workspaceId) as SessionRow[]
     return rows.map(rowToSessionRecord)
   }
@@ -186,8 +218,8 @@ export class DatabaseService {
   insertSession(record: SessionRecord): SessionRecord {
     this.db
       .prepare(
-        `INSERT INTO sessions (id, backend, backend_thread_id, workspace_id, title, model, effort, permission_mode, turn_count, created_at, last_active_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO sessions (id, backend, backend_thread_id, workspace_id, title, model, effort, permission_mode, turn_count, created_at, last_active_at, pinned_at, title_custom)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         record.id,
@@ -201,12 +233,38 @@ export class DatabaseService {
         record.turnCount,
         record.createdAt,
         record.lastActiveAt,
+        record.pinnedAt,
+        record.titleCustom ? 1 : 0,
       )
     return record
   }
 
+  /**
+   * 后端自动标题（claude aiTitle）回写。
+   *
+   * Session Rename: 带 `title_custom = 0` 条件——用户手动重命名过的会话不再被
+   * AI 标题覆盖。用户重命名后下一个 turn 结束时 refreshClaudeSessionTitle 会再次
+   * 尝试回写，没有这个条件用户的改名就白改了。
+   */
   updateSessionTitle(id: string, title: string): void {
-    this.db.prepare('UPDATE sessions SET title = ? WHERE id = ?').run(title, id)
+    this.db
+      .prepare('UPDATE sessions SET title = ? WHERE id = ? AND title_custom = 0')
+      .run(title, id)
+  }
+
+  /**
+   * Session Rename: 用户手动重命名——直接覆盖并把 title_custom 置 1。
+   * 与 updateSessionTitle 的区别就是"谁说了算"：这个无条件生效，且锁死后端自动标题。
+   */
+  renameSession(id: string, title: string): void {
+    this.db.prepare('UPDATE sessions SET title = ?, title_custom = 1 WHERE id = ?').run(title, id)
+  }
+
+  /** Session Pin: 置顶/取消置顶。pinned=true 时写当前时间戳，false 时写 NULL。 */
+  setSessionPinned(id: string, pinned: boolean): void {
+    this.db
+      .prepare('UPDATE sessions SET pinned_at = ? WHERE id = ?')
+      .run(pinned ? Date.now() : null, id)
   }
 
   /**
@@ -419,6 +477,8 @@ interface SessionRow {
   turn_count: number
   created_at: number
   last_active_at: number
+  pinned_at: number | null
+  title_custom: number
 }
 
 interface MessageRow {
@@ -458,6 +518,9 @@ function rowToSessionRecord(row: SessionRow): SessionRecord {
     turnCount: row.turn_count,
     createdAt: row.created_at,
     lastActiveAt: row.last_active_at,
+    pinnedAt: row.pinned_at,
+    // 老库补列前写入的行读出来是 0，`?? 0` 只是防御 PRAGMA 之外的意外 null
+    titleCustom: (row.title_custom ?? 0) === 1,
   }
 }
 

@@ -394,6 +394,10 @@ export class BackendManager {
       log.warn('refreshClaudeSessionTitle: session not found for', realThreadId)
       return
     }
+    // Session Rename: 用户手动改过标题就不再刷新。db 层的 updateSessionTitle 也带了
+    // 同样的守卫，但这里必须提前返回——否则 titleChanged 广播照发，renderer 会把
+    // 侧边栏改回 AI 标题，跟 db 里的实际值不一致（刷新后又变回来，像是"改名没生效"）。
+    if (session.titleCustom) return
     // 用 workspace.path 作为 cwd（claude jsonl 按 cwd 分目录存）
     const workspace = ctx.db.findWorkspaceById(session.workspaceId)
     const realCwd = cwd ?? workspace?.path
@@ -553,6 +557,27 @@ export class BackendManager {
     } catch (e) {
       log.warn('backend.deleteSession failed', backendId, backendThreadId, e)
     }
+  }
+
+  /**
+   * Session Fork: 让后端把会话历史复制一份，返回新的 backendThreadId。
+   *
+   * 与 deleteSession 的容错策略相反——这里失败必须抛：fork 拿不到新 thread id
+   * 就没有会话可登记，静默吞掉只会让用户点了"复制会话"却什么都没发生。
+   */
+  async forkSession(
+    backendId: BackendId,
+    backendThreadId: string,
+    cwd?: string,
+  ): Promise<{ backendThreadId: string }> {
+    const adapter = this.adapters.get(backendId)
+    if (!adapter) {
+      throw new BackendError('not-initialized', `unknown backend: ${backendId}`)
+    }
+    if (!adapter.forkSession) {
+      throw new BackendError('protocol', `后端 ${backendId} 不支持复制会话`)
+    }
+    return adapter.forkSession(backendThreadId, cwd)
   }
 
   /**

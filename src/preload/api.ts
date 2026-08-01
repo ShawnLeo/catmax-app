@@ -134,6 +134,12 @@ export const api = {
     list: requestMain<SessionHandlers, 'session.list'>(IPC.SESSION_LIST),
     create: requestMain<SessionHandlers, 'session.create'>(IPC.SESSION_CREATE),
     remove: requestMain<SessionHandlers, 'session.remove'>(IPC.SESSION_REMOVE),
+    setPinned: requestMain<SessionHandlers, 'session.setPinned'>(IPC.SESSION_SET_PINNED),
+    rename: requestMain<SessionHandlers, 'session.rename'>(IPC.SESSION_RENAME),
+    revealInFolder: requestMain<SessionHandlers, 'session.revealInFolder'>(
+      IPC.SESSION_REVEAL_IN_FOLDER,
+    ),
+    fork: requestMain<SessionHandlers, 'session.fork'>(IPC.SESSION_FORK),
     reconcile: requestMain<SessionHandlers, 'session.reconcile'>(IPC.SESSION_RECONCILE),
     scanImportable: requestMain<SessionHandlers, 'session.scanImportable'>(
       IPC.SESSION_SCAN_IMPORTABLE,

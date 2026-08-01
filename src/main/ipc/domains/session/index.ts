@@ -4,6 +4,7 @@ import { handleRendererRequest } from '../../typed'
 
 import {
   createSession,
+  forkSession,
   getSessionDetail,
   getLastRuntimeConfig,
   importSessions,
@@ -11,8 +12,11 @@ import {
   readSubagentHistory,
   reconcileSessions,
   removeSession,
+  renameSession,
+  revealSessionInFolder,
   scanImportableSessions,
   setLastRuntimeConfig,
+  setSessionPinned,
   updateSessionConfig,
 } from './handlers'
 
@@ -20,6 +24,13 @@ export function registerSessionHandlers(): void {
   handleRendererRequest<SessionHandlers, 'session.list'>('session.list', listSessions)
   handleRendererRequest<SessionHandlers, 'session.create'>('session.create', createSession)
   handleRendererRequest<SessionHandlers, 'session.remove'>('session.remove', removeSession)
+  handleRendererRequest<SessionHandlers, 'session.setPinned'>('session.setPinned', setSessionPinned)
+  handleRendererRequest<SessionHandlers, 'session.rename'>('session.rename', renameSession)
+  handleRendererRequest<SessionHandlers, 'session.revealInFolder'>(
+    'session.revealInFolder',
+    revealSessionInFolder,
+  )
+  handleRendererRequest<SessionHandlers, 'session.fork'>('session.fork', forkSession)
   handleRendererRequest<SessionHandlers, 'session.reconcile'>(
     'session.reconcile',
     reconcileSessions,

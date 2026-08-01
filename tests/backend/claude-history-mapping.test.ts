@@ -444,6 +444,49 @@ describe('claude history mapping', () => {
     expect(assistantMsgs[0]!.textBlocks).toHaveLength(2)
   })
 
+  test('Same-Id Merge：中间夹的 user 文本行不打断同 id 合并（后台任务 summary 场景）', () => {
+    // 后台任务场景：后台 Bash 启动（tool_use）→ SDK 把任务完成通知 / summary turn
+    // 写成一条带文本的 user 消息 → 紧接着模型开始新的总结轮。若新一轮的 assistant
+    // 行复用了启动轮的 message.id（或同一条 API message 被 SDK 拆成多行、中间夹着
+    // 这条 user 文本），现有逻辑会在 user 文本行处 flushAssistant() 把已收集的同 id
+    // assistant 推进 result，后续同 id 行就新建一条 → result 里出现两条相同 id 的
+    // NormalizedMessage → renderer MessageList :key="message.id" 报 Duplicate keys。
+    // 合并必须能回 result 里找到已被 flush 的同 id 消息并继续追加 block。
+    const messages = claudeReplayToMessages([
+      {
+        type: 'assistant',
+        message: {
+          id: 'msg_dup01',
+          type: 'message',
+          role: 'assistant',
+          content: [{ type: 'thinking', thinking: '先想想' }],
+        },
+      },
+      // 中间夹一条带文本的 user 行——触发 flushAssistant()
+      {
+        type: 'user',
+        message: { role: 'user', content: [{ type: 'text', text: '继续' }] },
+      },
+      // 同 id 的后续行——应合并回已被 flush 的那条，而非新建
+      {
+        type: 'assistant',
+        message: {
+          id: 'msg_dup01',
+          type: 'message',
+          role: 'assistant',
+          content: [{ type: 'text', text: '我来执行' }],
+        },
+      },
+    ])
+    const assistantMsgs = messages.filter((m) => m.role === 'assistant')
+    expect(assistantMsgs).toHaveLength(1)
+    expect(assistantMsgs[0]!.id).toBe('msg_dup01')
+    // thinking + text 都合并进同一条
+    expect(assistantMsgs[0]!.textBlocks).toHaveLength(2)
+    expect(assistantMsgs[0]!.textBlocks?.[0]?.kind).toBe('reasoning')
+    expect(assistantMsgs[0]!.textBlocks?.[1]?.kind).toBe('text')
+  })
+
   test('Empty Message Guard：只含 server_tool_use/tool_result 的 assistant 行不产空消息', () => {
     // claude 服务端工具（webReader 等）的 server_tool_use / tool_result 块本项目不渲染。
     // 若一条 assistant 行只含这些块，合并后该行不贡献任何可见 block；

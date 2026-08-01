@@ -14,12 +14,13 @@
  * - AsyncIterable<TurnEvent> 作为 startTurn 输出契约
  * - codex 协议细节（item 类型、approval 流程）在这里全部转译为 TurnEvent
  */
-import { randomUUID } from 'node:crypto'
-import { createReadStream } from 'node:fs'
-import { readdir, unlink } from 'node:fs/promises'
+import { randomBytes, randomUUID } from 'node:crypto'
+import { createReadStream, createWriteStream } from 'node:fs'
+import { mkdir, readdir, unlink } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { createInterface } from 'node:readline'
+import { pipeline } from 'node:stream/promises'
 
 import { logger } from '@main/service/logger'
 import { CODEX_CAPABILITIES } from '@shared/backend/builtin-capabilities'
@@ -655,34 +656,108 @@ export class CodexAdapter implements AgentBackend {
     return all
   }
 
-  async deleteSession(backendThreadId: string): Promise<void> {
-    // codex CLI 当前没有暴露 thread 删除 RPC——按文件名扫 rollout 文件删。
-    // 文件路径：~/.codex/sessions/YYYY/MM/DD/rollout-<ts>-<threadId>.jsonl
-    // threadId 是 UUID，跨所有日期目录 glob `**/rollout-*-${threadId}.jsonl`。
-    // 失败仅日志不抛——DB tombstone 兜底。
+  /**
+   * 扫出某个 thread 的 rollout 文件绝对路径。
+   *
+   * codex 没有"按 thread id 查文件"的 RPC，只能扫目录：
+   * ~/.codex/sessions/YYYY/MM/DD/rollout-<ts>-<threadId>.jsonl，threadId 是 UUID，
+   * 所以跨所有日期目录匹配后缀 `-${threadId}.jsonl` 即可。
+   * 理论上只会有一个匹配，返回全部让调用方决定（删除要删干净，fork 只取第一个）。
+   */
+  private async findRolloutFiles(backendThreadId: string): Promise<string[]> {
     const sessionsDir = join(homedir(), '.codex', 'sessions')
     try {
       // recursive: true 需要 Node 18.17+，catmax 要求 Node 22
       const entries = await readdir(sessionsDir, { recursive: true, withFileTypes: true })
       const suffix = `-${backendThreadId}.jsonl`
-      const matches = entries.filter(
-        (e) => e.isFile() && e.name.startsWith('rollout-') && e.name.endsWith(suffix),
+      return (
+        entries
+          .filter((e) => e.isFile() && e.name.startsWith('rollout-') && e.name.endsWith(suffix))
+          // ent.path 是父目录（Node readdir withFileTypes 提供）
+          .map((e) => join((e as unknown as { path: string }).path ?? sessionsDir, e.name))
       )
+    } catch (e) {
+      if ((e as NodeJS.ErrnoException).code === 'ENOENT') return [] // sessions 目录不存在
+      throw e
+    }
+  }
+
+  async deleteSession(backendThreadId: string): Promise<void> {
+    // codex CLI 当前没有暴露 thread 删除 RPC——按文件名扫 rollout 文件删。
+    // 失败仅日志不抛——DB tombstone 兜底。
+    try {
+      const matches = await this.findRolloutFiles(backendThreadId)
       if (matches.length === 0) {
         log.warn('no codex rollout file found for thread', backendThreadId)
         return
       }
-      for (const ent of matches) {
-        // ent.path 是父目录（Node readdir withFileTypes 提供）
-        const abs = join((ent as { path: string }).path ?? sessionsDir, ent.name)
+      for (const abs of matches) {
         await unlink(abs).catch(() => {})
         log.info('deleted codex rollout file', abs)
       }
     } catch (e) {
-      const code = (e as NodeJS.ErrnoException).code
-      if (code === 'ENOENT') return // sessions 目录不存在，幂等
       log.warn('failed to delete codex session files', backendThreadId, e)
     }
+  }
+
+  /**
+   * Session Fork: 复制会话——codex 没有 fork RPC，所以在 rollout 文件层面做。
+   *
+   * 之所以能这么干：整个 rollout 里**只有首行 session_meta.payload.id 是 thread id**，
+   * 其余行都是 response_item，不含任何会话标识（见文件格式）。所以复制 = 换文件名
+   * + 改首行的 id/timestamp，剩下的行原样透传。
+   *
+   * 新 id 用 UUIDv7 而不是 v4：codex 自己发的 thread id 都是 v7（时间有序），
+   * 保持一致能让 codex 原生 UI 里的排序也正确。
+   *
+   * 不做的事：不 thread/start、不动 app-server 内存。fork 出的 thread 第一次
+   * turn/start 必然 "thread not found"，startTurnRequest 会自动 thread/resume 一次
+   * 把这个新 rollout 冷装回来——这条自愈路径本来就存在（进程重启时走的同一条）。
+   */
+  async forkSession(backendThreadId: string): Promise<{ backendThreadId: string }> {
+    const sources = await this.findRolloutFiles(backendThreadId)
+    const source = sources[0]
+    if (!source) {
+      throw new BackendError(
+        'protocol',
+        `codex forkSession: 找不到会话 ${backendThreadId} 的 rollout 文件，无法复制`,
+      )
+    }
+
+    const now = new Date()
+    const newThreadId = uuidV7(now)
+    const target = codexRolloutPath(now, newThreadId)
+    await mkdir(join(target, '..'), { recursive: true })
+
+    // 逐行流式改写——rollout 可能有几十 MB，不整份读进内存。
+    const input = createInterface({
+      input: createReadStream(source, { encoding: 'utf-8' }),
+      crlfDelay: Infinity,
+    })
+    const output = createWriteStream(target, { encoding: 'utf-8' })
+    let isFirstLine = true
+    try {
+      await pipeline(
+        (async function* () {
+          for await (const line of input) {
+            if (!isFirstLine) {
+              yield `${line}\n`
+              continue
+            }
+            isFirstLine = false
+            yield `${rewriteSessionMetaLine(line, newThreadId, now)}\n`
+          }
+        })(),
+        output,
+      )
+    } catch (e) {
+      // 半成品 rollout 比没有更糟——codex 读到残缺文件会报解析错，而不是"会话不存在"
+      await unlink(target).catch(() => {})
+      throw e
+    }
+
+    log.info('forked codex thread', backendThreadId, '->', newThreadId, target)
+    return { backendThreadId: newThreadId }
   }
 
   async resumeSession(backendThreadId: string): Promise<{ messages: never[] }> {
@@ -1534,5 +1609,87 @@ function makeSink(state: SinkState): TurnEventSink {
     done() {
       return Promise.resolve()
     },
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Session Fork: rollout 文件层面的会话复制（codex 没有 fork RPC）
+//
+// 下面三个函数只被 forkSession 用，export 是为了能单测——它们的正确性依赖对
+// codex 磁盘格式的推断（UUID 版本位、日期目录用本地时间、session_meta 的形状），
+// 而 forkSession 本身要写 ~/.codex 真实目录，不适合在测试里跑。
+// ---------------------------------------------------------------------------
+
+/**
+ * 生成 UUIDv7（48 bit 毫秒时间戳前缀 + 随机位）。
+ *
+ * codex 自己发的 thread id 全是 v7，fork 出的新 id 保持同一格式，
+ * 这样 codex 原生 UI 按 id 排序时新会话仍落在正确位置。
+ * randomUUID() 是 v4（纯随机），会破坏这个顺序。
+ */
+export function uuidV7(now: Date): string {
+  const bytes = randomBytes(16)
+  const ms = BigInt(now.getTime())
+  for (let i = 0; i < 6; i++) {
+    bytes[i] = Number((ms >> BigInt(8 * (5 - i))) & 0xffn)
+  }
+  bytes[6] = (bytes[6]! & 0x0f) | 0x70 // version 7
+  bytes[8] = (bytes[8]! & 0x3f) | 0x80 // variant 10
+  const hex = bytes.toString('hex')
+  return [
+    hex.slice(0, 8),
+    hex.slice(8, 12),
+    hex.slice(12, 16),
+    hex.slice(16, 20),
+    hex.slice(20, 32),
+  ].join('-')
+}
+
+/**
+ * 拼 rollout 文件路径：~/.codex/sessions/YYYY/MM/DD/rollout-<本地时间>-<threadId>.jsonl
+ *
+ * 注意日期目录和文件名里的时间戳都是**本地时间**（payload 里的 timestamp 才是 UTC）——
+ * 实测 2026-01-31T11:46:14Z 的会话落在 2026/01/31/rollout-2026-01-31T19-46-14-…（UTC+8）。
+ * 用 UTC 拼会在跨日的时段把文件放进错误的日期目录。
+ */
+export function codexRolloutPath(now: Date, threadId: string): string {
+  const p = (n: number): string => String(n).padStart(2, '0')
+  const [yyyy, mm, dd] = [now.getFullYear(), p(now.getMonth() + 1), p(now.getDate())]
+  const stamp = `${yyyy}-${mm}-${dd}T${p(now.getHours())}-${p(now.getMinutes())}-${p(now.getSeconds())}`
+  return join(
+    homedir(),
+    '.codex',
+    'sessions',
+    String(yyyy),
+    mm,
+    dd,
+    `rollout-${stamp}-${threadId}.jsonl`,
+  )
+}
+
+/**
+ * 改写 rollout 首行的 session_meta：换 thread id + 更新时间戳，其余字段（cwd /
+ * model_provider / base_instructions…）原样保留——它们决定 fork 出的会话跟原会话
+ * 跑在同样的配置下。
+ *
+ * 首行不是预期的 session_meta（格式变了 / 文件损坏）时原样返回：宁可产出一个
+ * 打不开的副本，也不要把一行乱七八糟的 JSON 塞进去污染 codex 的解析。
+ */
+export function rewriteSessionMetaLine(line: string, newThreadId: string, now: Date): string {
+  try {
+    const parsed = JSON.parse(line) as {
+      type?: string
+      timestamp?: string
+      payload?: Record<string, unknown>
+    }
+    if (parsed.type !== 'session_meta' || !parsed.payload) return line
+    const iso = now.toISOString()
+    return JSON.stringify({
+      ...parsed,
+      timestamp: iso,
+      payload: { ...parsed.payload, id: newThreadId, timestamp: iso },
+    })
+  } catch {
+    return line
   }
 }

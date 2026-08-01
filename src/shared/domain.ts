@@ -26,6 +26,16 @@ export interface SessionRecord {
   turnCount: number
   createdAt: number
   lastActiveAt: number
+  /**
+   * Session Pin: 置顶时间戳，null = 未置顶。
+   * 纯 catmax 本地属性——后端（claude/codex）完全不知情，reconcile 也不会动它。
+   */
+  pinnedAt: number | null
+  /**
+   * Session Rename: 标题是否被用户手动改过。
+   * true 时后端自动标题（claude aiTitle）不再回写覆盖，见 database.updateSessionTitle。
+   */
+  titleCustom: boolean
 }
 
 /** 渲染层用的 Session 视图（含 continuable / stale 标记） */

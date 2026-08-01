@@ -4,6 +4,7 @@ import { join } from 'node:path'
 
 import { DatabaseService } from '@main/service/database'
 import type { MessagePreview, SessionRecord, TurnRunRecord, WorkspaceRecord } from '@shared/domain'
+import Database from 'better-sqlite3'
 import { describe, expect, test, beforeEach, afterEach } from 'vitest'
 
 let db: DatabaseService
@@ -35,6 +36,45 @@ function makeWorkspace(overrides: Partial<WorkspaceRecord> = {}): WorkspaceRecor
 describe('DatabaseService', () => {
   test('migrate 创建表（重复执行不报错）', () => {
     expect(() => db.migrate()).not.toThrow()
+  })
+
+  /**
+   * schema.sql 全是 CREATE TABLE IF NOT EXISTS——老库里 sessions 表已经存在，
+   * 重跑 schema 不会给它加新列，只能靠 migrateAddColumns 的守卫 ALTER。
+   * 这条路径在测试里最容易被漏掉（新建的库天然带全部列），但线上每个用户都走它。
+   */
+  test('migrate 给老库补 pinned_at / title_custom 列，且不动已有数据', () => {
+    const legacyPath = join(tempDir, 'legacy.db')
+    // 手工建一张"补列之前"的 sessions 表并塞一行——绕过 DatabaseService 直接写，
+    // 否则拿不到"老库"的状态（它的 migrate 一开就把新列补上了）
+    const seed = new Database(legacyPath)
+    seed.exec(`
+      CREATE TABLE sessions (
+        id TEXT PRIMARY KEY, backend TEXT NOT NULL, backend_thread_id TEXT NOT NULL,
+        workspace_id TEXT NOT NULL, title TEXT, model TEXT, effort TEXT,
+        permission_mode TEXT, turn_count INTEGER NOT NULL DEFAULT 0,
+        created_at INTEGER NOT NULL, last_active_at INTEGER NOT NULL,
+        UNIQUE(backend, backend_thread_id)
+      );
+      INSERT INTO sessions (id, backend, backend_thread_id, workspace_id, title,
+        turn_count, created_at, last_active_at)
+      VALUES ('old-1', 'codex', 'thr-old', 'ws-1', '老会话', 3, 1000, 2000);
+    `)
+    seed.close()
+
+    const upgraded = new DatabaseService(legacyPath)
+    expect(() => upgraded.migrate()).not.toThrow()
+
+    const found = upgraded.findSessionById('old-1')
+    expect(found?.title).toBe('老会话')
+    expect(found?.turnCount).toBe(3)
+    // 补出来的列取默认值：未置顶 + 标题未被用户改过
+    expect(found?.pinnedAt).toBeNull()
+    expect(found?.titleCustom).toBe(false)
+
+    // 补列是幂等的——每次启动都会跑一遍
+    expect(() => upgraded.migrate()).not.toThrow()
+    upgraded.close()
   })
 
   test('insertWorkspace + findWorkspaceById', () => {
@@ -109,6 +149,8 @@ function makeSession(overrides: Partial<SessionRecord> = {}): SessionRecord {
     turnCount: 0,
     createdAt: Date.now(),
     lastActiveAt: Date.now(),
+    pinnedAt: null,
+    titleCustom: false,
     ...overrides,
   }
 }
@@ -219,6 +261,57 @@ describe('DatabaseService Session', () => {
     db.insertSession(makeSession({ id: 's1', workspaceId: 'ws-1' }))
     db.deleteWorkspace('ws-1')
     expect(db.findSessionById('s1')).toBeNull()
+  })
+
+  // Session Pin
+  test('setSessionPinned 让置顶会话排在前面，组内各自按时间倒序', () => {
+    db.insertWorkspace(makeWorkspace({ id: 'ws-1', path: '/tmp/test-ws-1' }))
+    for (const [id, lastActiveAt] of [
+      ['s1', 1000],
+      ['s2', 3000],
+      ['s3', 2000],
+    ] as const) {
+      db.insertSession(
+        makeSession({ id, backendThreadId: `t-${id}`, workspaceId: 'ws-1', lastActiveAt }),
+      )
+    }
+    // 未置顶时纯按活跃时间
+    expect(db.listSessions('ws-1').map((s) => s.id)).toEqual(['s2', 's3', 's1'])
+
+    // 置顶最不活跃的那条——它应该跳到最上面，其余顺序不变
+    db.setSessionPinned('s1', true)
+    expect(db.listSessions('ws-1').map((s) => s.id)).toEqual(['s1', 's2', 's3'])
+    expect(db.findSessionById('s1')?.pinnedAt).not.toBeNull()
+
+    // 再置顶一条：后置顶的排在先置顶的前面
+    db.setSessionPinned('s3', true)
+    expect(db.listSessions('ws-1').map((s) => s.id)).toEqual(['s3', 's1', 's2'])
+
+    // 取消置顶后回到活跃时间序
+    db.setSessionPinned('s1', false)
+    db.setSessionPinned('s3', false)
+    expect(db.listSessions('ws-1').map((s) => s.id)).toEqual(['s2', 's3', 's1'])
+    expect(db.findSessionById('s1')?.pinnedAt).toBeNull()
+  })
+
+  // Session Rename
+  test('renameSession 之后后端自动标题不再覆盖', () => {
+    db.insertWorkspace(makeWorkspace({ id: 'ws-1', path: '/tmp/test-ws-1' }))
+    db.insertSession(makeSession({ id: 's1', workspaceId: 'ws-1', title: '原标题' }))
+
+    // 用户没改过标题时，后端 aiTitle 正常回写
+    db.updateSessionTitle('s1', 'AI 起的标题')
+    expect(db.findSessionById('s1')?.title).toBe('AI 起的标题')
+    expect(db.findSessionById('s1')?.titleCustom).toBe(false)
+
+    // 用户手动重命名
+    db.renameSession('s1', '我的名字')
+    expect(db.findSessionById('s1')?.title).toBe('我的名字')
+    expect(db.findSessionById('s1')?.titleCustom).toBe(true)
+
+    // 此后 aiTitle 回写是 no-op——否则用户改完名，下一个 turn 结束就被冲掉
+    db.updateSessionTitle('s1', 'AI 又起了一个')
+    expect(db.findSessionById('s1')?.title).toBe('我的名字')
   })
 })
 
