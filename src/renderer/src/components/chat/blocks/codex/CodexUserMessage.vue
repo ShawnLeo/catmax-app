@@ -1,5 +1,9 @@
 <template>
-  <div class="flex justify-end">
+  <div
+    v-message-anchor="messageAnchorId"
+    :data-message-id="messageAnchorId ?? undefined"
+    class="flex scroll-mt-2 justify-end"
+  >
     <div class="flex max-w-[80%] flex-col items-end gap-2 break-words">
       <div v-if="imageInputs.length" class="flex max-w-full justify-end gap-2 overflow-x-auto">
         <!--
@@ -47,6 +51,8 @@
 </template>
 
 <script setup lang="ts">
+import { useMessageAnchorDirective } from '@renderer/composables/useMessageAnchors'
+import { isNavigableUserMessage } from '@renderer/lib/message-navigation'
 import { useImagePreviewStore, type PreviewImageItem } from '@renderer/stores/image-preview'
 import { useWorkspaceStore } from '@renderer/stores/workspace'
 import type {
@@ -63,6 +69,10 @@ import { getBlockRenderer } from '../registry'
 import CodexUserInputBlockView from './CodexUserInputBlockView.vue'
 
 const props = defineProps<{ message: NormalizedMessage }>()
+const vMessageAnchor = useMessageAnchorDirective()
+const messageAnchorId = computed(() =>
+  isNavigableUserMessage(props.message) ? props.message.id : null,
+)
 const blocks = computed(() => messageBlocks(props.message))
 const contextBlocks = computed(() =>
   blocks.value.filter((block): block is ContextContentBlock => block.type === 'context'),

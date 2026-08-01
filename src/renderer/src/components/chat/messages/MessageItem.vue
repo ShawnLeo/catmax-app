@@ -24,8 +24,10 @@
   -->
   <article
     v-else
+    v-message-anchor="messageAnchorId"
+    :data-message-id="messageAnchorId ?? undefined"
     :class="[
-      'flex gap-3',
+      'flex gap-3 scroll-mt-2',
       message.role === 'user'
         ? // user 消息:靠右。
           // mt-4 补 assistant→user 方向的间距（上一轮回复 → 这一轮提问）；
@@ -142,7 +144,9 @@
 </template>
 
 <script setup lang="ts">
+import { useMessageAnchorDirective } from '@renderer/composables/useMessageAnchors'
 import { formatMessageTime } from '@renderer/lib/format'
+import { isNavigableUserMessage } from '@renderer/lib/message-navigation'
 import { useMessageStore } from '@renderer/stores/message'
 import type {
   ContextContentBlock,
@@ -164,6 +168,7 @@ import InterruptedHistoryEntry from './InterruptedHistoryEntry.vue'
 type TextBlock = ReasoningContentBlock
 
 const messageStore = useMessageStore()
+const vMessageAnchor = useMessageAnchorDirective()
 
 const props = defineProps<{
   message: NormalizedMessage
@@ -176,6 +181,9 @@ const props = defineProps<{
   /** 是否是第一条 assistant——是则遮住色点上方的竖线段(上方接 user,无需延伸到色点之上) */
   isFirstAssistant?: boolean
 }>()
+const messageAnchorId = computed(() =>
+  isNavigableUserMessage(props.message) ? props.message.id : null,
+)
 
 const blocks = computed(() => messageBlocks(props.message))
 const contextBlocks = computed(() =>

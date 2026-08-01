@@ -1,6 +1,6 @@
 <template>
   <!--
-    根滚动容器——同时是 absolute / sticky 按钮的定位上下文。
+    根层负责给侧轨提供定位上下文；内部滚动容器继续负责原有 sticky 按钮与滚动逻辑。
 
     ChatView 给 MessageList 传 class=\"flex-1\"，合并到这个根 div 上。
     flex-1 在 flex-col 父容器里占满剩余高度；min-h-0 让它能正确 shrink
@@ -9,16 +9,17 @@
     悬浮按钮用 sticky 而不是 absolute——sticky 在滚动容器里会贴视口底部，
     不会随内容滚走（absolute 会，fixed 会脱离容器跑到窗口级别）。
   -->
-  <div ref="container" class="h-full overflow-y-auto relative min-h-0" @scroll="onScroll">
-    <div
-      v-if="messageStore.loading"
-      class="flex items-center justify-center h-full text-muted-foreground"
-    >
-      <div class="text-center">
-        <div class="animate-pulse text-[length:var(--chat-text-u1)]">加载历史中...</div>
+  <div ref="root" class="relative h-full min-h-0">
+    <div ref="container" class="relative h-full min-h-0 overflow-y-auto" @scroll="onScroll">
+      <div
+        v-if="messageStore.loading"
+        class="flex items-center justify-center h-full text-muted-foreground"
+      >
+        <div class="text-center">
+          <div class="animate-pulse text-[length:var(--chat-text-u1)]">加载历史中...</div>
+        </div>
       </div>
-    </div>
-    <!--
+      <!--
       响应式宽度（两段式）：
         小窗 <640px   → 跟随窗口（仅 px-6 边距）
         sm ≥640px     → 768px (max-w-3xl)
@@ -27,48 +28,48 @@
         2xl ≥1536px   → 1440px（终极上限，超宽屏不会再变宽）
       mx-auto 居中。Composer 用同样的 class 保持对齐。
     -->
-    <div v-else :class="conversationClass">
-      <component
-        :is="backendConversationRenderer"
-        v-if="backendConversationRenderer"
-        :messages="messageStore.messages"
-        :show-thinking="showThinking"
-        :cwd="cwd"
-        :running="messageStore.isRunning"
-        :current-turn-id="messageStore.currentTurnId"
-      />
-      <template v-else>
-        <!--
+      <div v-else :class="conversationClass">
+        <component
+          :is="backendConversationRenderer"
+          v-if="backendConversationRenderer"
+          :messages="messageStore.messages"
+          :show-thinking="showThinking"
+          :cwd="cwd"
+          :running="messageStore.isRunning"
+          :current-turn-id="messageStore.currentTurnId"
+        />
+        <template v-else>
+          <!--
           Turn Changes Card: 每轮末尾挂一张「本轮改了哪些文件」，点进去是右侧审查面板。
           codex 由它自己的 CodexTurn 渲染同一个组件；这里覆盖的是没有专属会话渲染器的
           后端（claude 及后续新增的），改动数据由 lib/review.ts 从工具调用现推。
         -->
-        <template v-for="(message, index) in messageStore.messages" :key="message.id">
-          <MessageItem
-            :message="message"
-            :show-thinking="showThinking"
-            :cwd="cwd"
-            :is-last="index === lastAssistantIdx"
-            :is-first-assistant="index === firstAssistantIdx"
-          />
-          <ChangesCard
-            v-if="turnChanges.get(index)"
-            :files="turnChanges.get(index)!.files"
-            :stats="turnChanges.get(index)!.stats"
-          />
+          <template v-for="(message, index) in messageStore.messages" :key="message.id">
+            <MessageItem
+              :message="message"
+              :show-thinking="showThinking"
+              :cwd="cwd"
+              :is-last="index === lastAssistantIdx"
+              :is-first-assistant="index === firstAssistantIdx"
+            />
+            <ChangesCard
+              v-if="turnChanges.get(index)"
+              :files="turnChanges.get(index)!.files"
+              :stats="turnChanges.get(index)!.stats"
+            />
+          </template>
         </template>
-      </template>
 
-      <!--
+        <!--
         /compact 分隔线：用户发 /compact 时不展示 /compact 消息气泡，
         改为在消息流末尾插入这条分隔线。
         - pending（呼吸）：claude 后台正在压缩上下文
         - done（静态）：压缩完成，分隔线上下的对话被压缩隔离
         compactState 由 messageStore 跟踪（turn_completed 自动切 pending → done）。
       -->
-      <CompactDivider v-if="messageStore.compactState" :state="messageStore.compactState" />
+        <CompactDivider v-if="messageStore.compactState" :state="messageStore.compactState" />
 
-      <!--
+        <!--
         agent 工作中指示器——消息流底部的一行"正在干活"反馈。
 
         显示条件：turn 正在跑（isRunning）且没卡在等用户输入
@@ -81,39 +82,39 @@
         样式跟 assistant 消息的时间轴一致：左侧竖线 + 色点（绿色脉冲 = running），
         让它视觉上属于 assistant 侧的对话流，而不是一个突兀的浮层。
       -->
-      <div v-if="agentWorking && !backendConversationRenderer" class="flex gap-3 flex-row mt-3">
-        <div class="min-w-0 flex-1">
-          <div class="relative pl-6 border-l-2 border-border/60">
-            <span
-              class="absolute w-2 h-2 rounded-full -left-[6px] top-1.5 bg-success animate-pulse"
-            />
-            <div
-              class="flex items-center gap-2 text-[length:var(--chat-text-base)] text-muted-foreground"
-            >
-              <Loader2Icon class="w-3.5 h-3.5 flex-shrink-0 animate-spin" />
-              <span>正在思考</span>
-              <LoadingDots class="text-muted-foreground" :dot-size="4" :duration="1.6" />
+        <div v-if="agentWorking && !backendConversationRenderer" class="flex gap-3 flex-row mt-3">
+          <div class="min-w-0 flex-1">
+            <div class="relative pl-6 border-l-2 border-border/60">
+              <span
+                class="absolute w-2 h-2 rounded-full -left-[6px] top-1.5 bg-success animate-pulse"
+              />
+              <div
+                class="flex items-center gap-2 text-[length:var(--chat-text-base)] text-muted-foreground"
+              >
+                <Loader2Icon class="w-3.5 h-3.5 flex-shrink-0 animate-spin" />
+                <span>正在思考</span>
+                <LoadingDots class="text-muted-foreground" :dot-size="4" :duration="1.6" />
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 错误提示（codex/claude 调 API 失败时 messageStore.lastError 会被设置） -->
+        <div
+          v-if="messageStore.lastError"
+          class="rounded-md border border-destructive/30 bg-destructive/5 px-4 py-3 text-[length:var(--chat-text-u1)] text-destructive whitespace-pre-wrap"
+        >
+          <div class="flex items-start gap-2">
+            <AlertCircleIcon class="w-4 h-4 flex-shrink-0 mt-0.5" />
+            <div class="flex-1 min-w-0">
+              <div class="font-medium mb-1">出错了</div>
+              <div class="text-[length:var(--chat-text-d1)]">{{ messageStore.lastError }}</div>
             </div>
           </div>
         </div>
       </div>
 
-      <!-- 错误提示（codex/claude 调 API 失败时 messageStore.lastError 会被设置） -->
-      <div
-        v-if="messageStore.lastError"
-        class="rounded-md border border-destructive/30 bg-destructive/5 px-4 py-3 text-[length:var(--chat-text-u1)] text-destructive whitespace-pre-wrap"
-      >
-        <div class="flex items-start gap-2">
-          <AlertCircleIcon class="w-4 h-4 flex-shrink-0 mt-0.5" />
-          <div class="flex-1 min-w-0">
-            <div class="font-medium mb-1">出错了</div>
-            <div class="text-[length:var(--chat-text-d1)]">{{ messageStore.lastError }}</div>
-          </div>
-        </div>
-      </div>
-    </div>
-
-    <!--
+      <!--
       悬浮"回到底部"箭头：用户向上滚离底部超过阈值（120px）时显示，
       点击平滑滚到最新消息。
 
@@ -122,34 +123,39 @@
       半透明悬浮效果：bg-background/80 + backdrop-blur + shadow-lg + border，
       hover 时背景更实（bg-background）+ 轻微上浮。
     -->
-    <Transition
-      enter-active-class="transition-all duration-200 ease-out"
-      leave-active-class="transition-all duration-150 ease-in"
-      enter-from-class="opacity-0 translate-y-2"
-      leave-to-class="opacity-0 translate-y-2"
-    >
-      <button
-        v-if="showScrollToBottom"
-        type="button"
-        class="sticky bottom-4 mx-auto flex items-center justify-center w-10 h-10 rounded-full border border-border bg-background/80 backdrop-blur-md shadow-lg text-muted-foreground hover:text-foreground hover:bg-background hover:-translate-y-0.5 hover:shadow-xl transition-all"
-        title="回到底部"
-        @click="scrollToBottom"
+      <Transition
+        enter-active-class="transition-all duration-200 ease-out"
+        leave-active-class="transition-all duration-150 ease-in"
+        enter-from-class="opacity-0 translate-y-2"
+        leave-to-class="opacity-0 translate-y-2"
       >
-        <ArrowDownIcon class="w-4 h-4" />
-      </button>
-    </Transition>
+        <button
+          v-if="showScrollToBottom"
+          type="button"
+          class="sticky bottom-4 mx-auto flex items-center justify-center w-10 h-10 rounded-full border border-border bg-background/80 backdrop-blur-md shadow-lg text-muted-foreground hover:text-foreground hover:bg-background hover:-translate-y-0.5 hover:shadow-xl transition-all"
+          title="回到底部"
+          @click="scrollToBottom"
+        >
+          <ArrowDownIcon class="w-4 h-4" />
+        </button>
+      </Transition>
+    </div>
+
+    <MessageNavRail v-if="railVisible" :user-messages="userMessages" />
   </div>
 </template>
 
 <script setup lang="ts">
+import { MESSAGE_ANCHOR_KEY, useMessageAnchors } from '@renderer/composables/useMessageAnchors'
 import type { DiffStats } from '@renderer/lib/diff-stats'
+import { isNavigableUserMessage } from '@renderer/lib/message-navigation'
 import { buildReviewFilesFromMessages, sumReviewStats, type ReviewFile } from '@renderer/lib/review'
 import { useBackendStore } from '@renderer/stores/backend'
 import { useMessageStore } from '@renderer/stores/message'
 import { useWorkspaceStore } from '@renderer/stores/workspace'
 import type { NormalizedMessage } from '@shared/backend/types'
 import { AlertCircleIcon, ArrowDownIcon, Loader2Icon } from 'lucide-vue-next'
-import { onMounted, ref, watch, nextTick, computed } from 'vue'
+import { computed, nextTick, onMounted, onUnmounted, provide, ref, watch } from 'vue'
 
 import { getBackendConversationRenderer } from '../blocks/plugin-registry'
 import ChangesCard from '../changes/ChangesCard.vue'
@@ -157,6 +163,7 @@ import ChangesCard from '../changes/ChangesCard.vue'
 import CompactDivider from './CompactDivider.vue'
 import LoadingDots from './LoadingDots.vue'
 import MessageItem from './MessageItem.vue'
+import MessageNavRail from './MessageNavRail.vue'
 
 const props = defineProps<{
   /** 是否显示思考块（reasoning）。OFF 时 MessageItem 折叠 kind='reasoning' 的 textBlocks。 */
@@ -170,18 +177,37 @@ const backendStore = useBackendStore()
 const cwd = computed(() => workspaceStore.currentWorkspace?.path ?? '')
 
 const messageStore = useMessageStore()
+const root = ref<HTMLElement | null>(null)
 const container = ref<HTMLElement | null>(null)
+const anchorApi = useMessageAnchors(
+  container,
+  computed(() => messageStore.currentSessionId),
+)
+provide(MESSAGE_ANCHOR_KEY, anchorApi)
+
+const MIN_WIDTH_FOR_RAIL = 640
+const rootWidth = ref(0)
+const userMessages = computed(() => messageStore.messages.filter(isNavigableUserMessage))
+const railVisible = computed(
+  () =>
+    !messageStore.loading &&
+    rootWidth.value >= MIN_WIDTH_FOR_RAIL &&
+    userMessages.value.length >= 2,
+)
 
 const backendConversationRenderer = computed(() =>
   getBackendConversationRenderer(backendStore.currentId),
 )
 const conversationClass = computed(() =>
   backendConversationRenderer.value
-    ? 'mx-auto flex w-full max-w-3xl flex-col px-4 py-4'
+    ? ['mx-auto flex w-full max-w-3xl flex-col py-4 pr-4', railVisible.value ? 'pl-10' : 'pl-4']
     : // 不用 flex gap——gap 会在每条消息之间留空白,打断 assistant 时间轴竖线。
       // 间距改由 MessageItem 内部控制:user 消息底部留呼吸空间(分隔对话轮次),
       // 连续 assistant 消息之间零间距,竖线才能连续不断。
-      'mx-auto flex flex-col px-6 py-4 max-w-3xl lg:max-w-screen-lg xl:max-w-[1280px] 2xl:max-w-[1440px]',
+      [
+        'mx-auto flex flex-col py-4 pr-6 max-w-3xl lg:max-w-screen-lg xl:max-w-[1280px] 2xl:max-w-[1440px]',
+        railVisible.value ? 'pl-10' : 'pl-6',
+      ],
 )
 
 /**
@@ -297,6 +323,7 @@ function snapToBottom(): void {
   const doScroll = (): void => {
     if (container.value) {
       container.value.scrollTop = container.value.scrollHeight
+      anchorApi.refreshActive()
     }
   }
   doScroll()
@@ -336,8 +363,23 @@ watch(
 )
 
 // mount 时兜底滚一次——处理 v-if fresh mount 场景（watch immediate=false 漏掉）
+let resizeObserver: ResizeObserver | null = null
+
 onMounted(async () => {
+  if (root.value) {
+    rootWidth.value = root.value.clientWidth
+    resizeObserver = new ResizeObserver((entries) => {
+      const entry = entries[0]
+      if (entry) rootWidth.value = entry.contentRect.width
+    })
+    resizeObserver.observe(root.value)
+  }
   await nextTick()
   snapToBottom()
+})
+
+onUnmounted(() => {
+  resizeObserver?.disconnect()
+  resizeObserver = null
 })
 </script>
