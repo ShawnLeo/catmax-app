@@ -6,13 +6,13 @@
     这两种都能设 model/env/permissions，所以「影响范围」必须在 tab 和编辑器上方都标出来。
   -->
   <section class="flex flex-col gap-3">
-    <header>
+    <header class="flex items-center gap-1.5">
       <h2 class="text-[length:var(--ui-text-u3)] font-semibold text-foreground">后端配置文件</h2>
-      <p class="text-[length:var(--ui-text-base)] text-muted-foreground">
+      <HelpTooltip>
         保存前会校验语法，并把旧内容备份到 catmax 数据目录（保留最近 10 份）。
-        下方显示的是上面选中的「默认后端」的配置文件——切换默认后端会显示该后端的文件。 注意区分每个
-        tab 的影响范围：改后端自己的文件会连命令行一起生效，改 catmax 覆盖配置只影响本应用。
-      </p>
+        此处显示当前「默认后端」的配置文件。后端自己的文件也会影响命令行；catmax
+        覆盖配置只影响本应用。
+      </HelpTooltip>
     </header>
 
     <!-- 文件选择器：当前默认后端支持的配置文件各一个按钮，未创建的文件标灰 -->
@@ -116,9 +116,10 @@
         </template>
       </div>
 
-      <p class="text-[length:var(--ui-text-d3)] text-muted-foreground">
-        {{ activeFile.description }}
-      </p>
+      <div class="flex items-center gap-1.5 text-[length:var(--ui-text-d3)] text-muted-foreground">
+        <span>文件说明</span>
+        <HelpTooltip>{{ activeFile.description }}</HelpTooltip>
+      </div>
 
       <!-- 敏感文件门禁：含明文密钥（codex auth.json / catmax 覆盖配置的 env 块），默认不渲染内容，点开才读 -->
       <div
@@ -209,31 +210,33 @@
         </div>
 
         <div
-          class="text-[length:var(--ui-text-d3)] text-muted-foreground px-3 py-2 bg-muted/30 rounded-md space-y-1"
+          class="flex items-center gap-1.5 text-[length:var(--ui-text-d3)] text-muted-foreground"
         >
-          <p>💡 保存后的生效范围：</p>
-          <ul class="list-disc ml-5 space-y-0.5">
-            <li v-if="props.backendId === 'codex'">
-              codex 是 long-running 进程——已 spawn 的进程读不到新配置，切走 codex 再切回来才会重新
-              spawn
-            </li>
-            <li v-else-if="props.backendId === 'claude'">
-              claude 每个 turn 由 SDK 新起进程，下一个 turn 就会读到新配置
-            </li>
-            <li v-if="activeFile.location === 'catmax-userdata'">
-              这一层里<strong class="font-medium">没写的 key 会回落到本地配置</strong>——删掉一个 key
-              就等于把这项交还给 {{ props.backendId }} 自己的文件
-            </li>
-            <li v-if="activeFile.id === 'claude.catmaxSettings'">
-              例外：<code>permissions</code> 的 allow/deny 数组是和本地配置<strong
-                class="font-medium"
-                >取并集</strong
-              >，这一层只能加权限、减不了
-            </li>
-            <li>
-              这里改的是后端的配置文件，和上面「默认运行时配置」（catmax 自己的兜底值）互不覆盖
-            </li>
-          </ul>
+          <span>保存后的生效方式</span>
+          <HelpTooltip>
+            <ul class="list-disc ml-5 space-y-0.5">
+              <li v-if="props.backendId === 'codex'">
+                codex 是 long-running 进程——已 spawn 的进程读不到新配置，切走 codex 再切回来才会重新
+                spawn
+              </li>
+              <li v-else-if="props.backendId === 'claude'">
+                claude 每个 turn 由 SDK 新起进程，下一个 turn 就会读到新配置
+              </li>
+              <li v-if="activeFile.location === 'catmax-userdata'">
+                这一层里<strong class="font-medium">没写的 key 会回落到本地配置</strong>——删掉一个
+                key 就等于把这项交还给 {{ props.backendId }} 自己的文件
+              </li>
+              <li v-if="activeFile.id === 'claude.catmaxSettings'">
+                例外：<code>permissions</code> 的 allow/deny 数组是和本地配置<strong
+                  class="font-medium"
+                  >取并集</strong
+                >，这一层只能加权限、减不了
+              </li>
+              <li>
+                这里改的是后端的配置文件，和上面「默认运行时配置」（catmax 自己的兜底值）互不覆盖
+              </li>
+            </ul>
+          </HelpTooltip>
         </div>
       </template>
     </template>
@@ -249,6 +252,7 @@
 
 <script setup lang="ts">
 import BackendIcon from '@renderer/components/icons/BackendIcon.vue'
+import HelpTooltip from '@renderer/components/settings/HelpTooltip.vue'
 import { Button } from '@renderer/components/ui/button'
 import { useSettingsStore } from '@renderer/stores/settings'
 import type {

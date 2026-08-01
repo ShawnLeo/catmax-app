@@ -1,9 +1,9 @@
 <template>
   <!--
-    Review File Tree: 把 CodexFileChange.path 字符串聚合成目录树。
+    Review File Tree: 把 ReviewFile.path 字符串聚合成目录树。
 
     与工作区 FileTree 不同——这里只展示「本轮被改动的文件」，数据全在内存
-    （CodexFileChange[]），不需要懒加载 IPC。所以自建一个轻量树组件，
+    （ReviewFile[]），不需要懒加载 IPC。所以自建一个轻量树组件，
     复用 FileTypeIcon 做图标，样式跟 FileTreeNode 保持一致（缩进/chevron/选中态）。
 
     默认全部展开：一轮变更的文件通常不多，默认展开省去用户逐层点开。
@@ -37,14 +37,14 @@
 </template>
 
 <script setup lang="ts">
+import type { ReviewFile } from '@renderer/lib/review'
 import { buildReviewTree, collectReviewDirPaths } from '@renderer/lib/review-tree'
-import type { CodexFileChange } from '@shared/backend/blocks'
 import { computed, ref, watch } from 'vue'
 
 import ReviewFileTreeNode from './ReviewFileTreeNode.vue'
 
 const props = defineProps<{
-  files: CodexFileChange[]
+  files: ReviewFile[]
   selectedPath: string | null
 }>()
 

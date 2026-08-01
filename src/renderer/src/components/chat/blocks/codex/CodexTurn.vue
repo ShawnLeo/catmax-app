@@ -42,7 +42,7 @@
       <MarkdownView v-for="block in sections.finalBlocks" :key="block.id" :text="block.text" />
     </div>
 
-    <CodexChangesCard v-if="changedFiles.length" :files="changedFiles" :stats="changeStats" />
+    <ChangesCard v-if="changedFiles.length" :files="changedFiles" :stats="changeStats" />
 
     <!-- Codex Turn Thinking: 始终跟在当前已输出内容之后，保持为回合最末状态。 -->
     <div
@@ -59,20 +59,17 @@
 </template>
 
 <script setup lang="ts">
-import type {
-  CodexActivityContentBlock,
-  CodexDiffStats,
-  CodexFileChange,
-  ReasoningContentBlock,
-} from '@shared/backend/blocks'
+import type { DiffStats } from '@renderer/lib/diff-stats'
+import { reviewFileFromCodexChange, type ReviewFile } from '@renderer/lib/review'
+import type { CodexActivityContentBlock, ReasoningContentBlock } from '@shared/backend/blocks'
 import type { NormalizedMessage } from '@shared/backend/types'
 import { ChevronDownIcon } from 'lucide-vue-next'
 import { computed, onUnmounted, ref, watch } from 'vue'
 
+import ChangesCard from '../../changes/ChangesCard.vue'
 import LoadingDots from '../../messages/LoadingDots.vue'
 
 import CodexActivityBlockView from './CodexActivityBlockView.vue'
-import CodexChangesCard from './CodexChangesCard.vue'
 import CodexToolCallBlockView from './CodexToolCallBlockView.vue'
 import { splitCodexTurn } from './conversation'
 import MarkdownView from './MarkdownView.vue'
@@ -173,18 +170,22 @@ const activityBlocks = computed(() =>
     (block): block is CodexActivityContentBlock => block.type === 'codex_activity',
   ),
 )
-const changedFiles = computed<CodexFileChange[]>(() => {
-  const byPath = new Map<string, CodexFileChange>()
+// codex 的 file_change 每次下发的都是「该文件本轮至今的累计 diff」，所以按 path
+// 覆盖式收集即可，最后一次就是最终结果——不像 claude 需要把多次编辑串起来。
+const changedFiles = computed<ReviewFile[]>(() => {
+  const byPath = new Map<string, ReviewFile>()
   for (const block of activityBlocks.value) {
     for (const activity of block.activities) {
       if (activity.kind !== 'file_change') continue
-      for (const change of activity.changes) byPath.set(change.path, change)
+      for (const change of activity.changes) {
+        byPath.set(change.path, reviewFileFromCodexChange(change))
+      }
     }
   }
   return [...byPath.values()]
 })
-const changeStats = computed<CodexDiffStats>(() => {
-  let turnStats: CodexDiffStats | undefined
+const changeStats = computed<DiffStats>(() => {
+  let turnStats: DiffStats | undefined
   for (let index = activityBlocks.value.length - 1; index >= 0; index--) {
     turnStats = activityBlocks.value[index]?.turnDiffStats
     if (turnStats) break

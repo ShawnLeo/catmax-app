@@ -1,10 +1,11 @@
 /**
- * Review File Tree 构建：把扁平的 CodexFileChange.path 列表聚合成嵌套目录树。
+ * Review File Tree 构建：把扁平的 ReviewFile.path 列表聚合成嵌套目录树。
  *
  * 抽成纯函数模块——便于单测，且不依赖 Vue 运行时。
- * path 在各平台都是 / 风格（codex 协议保证），统一用 / 切分。
+ * path 在各平台都是 / 风格（codex 协议保证；claude 的绝对路径在
+ * buildReviewFilesFromMessages 里已归一并相对 cwd 化），统一用 / 切分。
  */
-import type { CodexFileChange } from '@shared/backend/blocks'
+import type { ReviewFile } from './review'
 
 /** 树节点。目录节点有 children；文件节点带原始 change 数据。 */
 export interface ReviewTreeNode {
@@ -14,14 +15,14 @@ export interface ReviewTreeNode {
   dir: boolean
   children: ReviewTreeNode[]
   /** 仅文件节点有 */
-  change?: CodexFileChange
+  change?: ReviewFile
 }
 
 /**
  * 把 files 聚合成树。目录在前、文件在后，同类按名字升序（类 IDE 排序）。
  * 共享前缀的文件会归到同一目录节点下（如 a/b.ts 与 a/c.ts 都在 a/ 下）。
  */
-export function buildReviewTree(files: CodexFileChange[]): ReviewTreeNode[] {
+export function buildReviewTree(files: ReviewFile[]): ReviewTreeNode[] {
   const root: ReviewTreeNode = { name: '', path: '', dir: true, children: [] }
   for (const file of files) {
     const segments = file.path.split('/').filter(Boolean)
@@ -47,7 +48,7 @@ export function buildReviewTree(files: CodexFileChange[]): ReviewTreeNode[] {
 }
 
 /** 收集所有目录路径，用于默认全部展开 */
-export function collectReviewDirPaths(files: CodexFileChange[]): string[] {
+export function collectReviewDirPaths(files: ReviewFile[]): string[] {
   const dirs = new Set<string>()
   for (const file of files) {
     const segments = file.path.split('/').filter(Boolean)

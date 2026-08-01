@@ -8,7 +8,7 @@ describe('settings-schema', () => {
     expect(result.defaultEditor).toBe('vscode')
     expect(result.theme.mode).toBe('system')
     // 三条字号基准（界面 / 对话 / 等宽），与 themes.css 里同名 CSS 变量的兜底值一一对应
-    expect(result.theme.fontSize).toBe(15)
+    expect(result.theme.fontSize).toBe(14)
     expect(result.theme.chatFontSize).toBe(13)
     expect(result.theme.codeFontSize).toBe(13)
     expect(result.sendOnEnter).toBe(true)

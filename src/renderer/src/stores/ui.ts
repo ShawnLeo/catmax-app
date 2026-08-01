@@ -1,4 +1,5 @@
-import type { CodexDiffStats, CodexFileChange } from '@shared/backend/blocks'
+import type { DiffStats } from '@renderer/lib/diff-stats'
+import type { ReviewFile } from '@renderer/lib/review'
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
 
@@ -32,11 +33,12 @@ export const useUiStore = defineStore('ui', () => {
   const rightPanelTab = ref<RightPanelTab>('git')
 
   // ===== 审查 tab 状态 =====
-  // 审查是「某一轮 codex 改动」的只读快照：files/stats 由 CodexChangesCard 传入，
+  // 审查是「某一轮改动」的只读快照：files/stats 由 ChangesCard 传入（codex 来自
+  // file_change 活动，claude 来自本轮的 Edit/Write 工具调用，见 lib/review.ts），
   // selectedPath/diffMode 是用户在审查面板内的交互选择。数据只活在内存，不持久化
   // （每轮的 diff 已在消息块里，点审核时把当前轮的 files 快照塞进来即可）。
-  const reviewFiles = ref<CodexFileChange[]>([])
-  const reviewStats = ref<CodexDiffStats>({ additions: 0, deletions: 0 })
+  const reviewFiles = ref<ReviewFile[]>([])
+  const reviewStats = ref<DiffStats>({ additions: 0, deletions: 0 })
   const reviewDiffMode = ref<ReviewDiffMode>('unified')
   const reviewSelectedPath = ref<string | null>(null)
   // 审查面板内文件树的宽度和显隐（可拖宽、可关闭让 diff 列表占满）
@@ -151,13 +153,13 @@ export const useUiStore = defineStore('ui', () => {
    * 打开审查 tab：把当前轮的变更文件快照塞进来。
    *
    * - 无 focusPath：默认展开第一个有 diff 的文件（列表里直接能看到它的 diff）。
-   * - 有 focusPath（从 CodexChangesCard 点具体文件进入）：选中该文件并展开它，
+   * - 有 focusPath（从 ChangesCard 点具体文件进入）：选中该文件并展开它，
    *   列表会滚动定位到这张卡片。
    *
    * split diff 视图需要足够宽度——若右栏当前太窄，临时撑到 REVIEW_PANEL_MIN_WIDTH
    * 并持久化（拖拽时用户仍可自由调，这里只在打开时兜底，避免 split 挤成一团）。
    */
-  function showReview(files: CodexFileChange[], stats: CodexDiffStats, focusPath?: string): void {
+  function showReview(files: ReviewFile[], stats: DiffStats, focusPath?: string): void {
     reviewFiles.value = files
     reviewStats.value = stats
     reviewExpandedPaths.value = new Set()
@@ -165,8 +167,9 @@ export const useUiStore = defineStore('ui', () => {
       reviewSelectedPath.value = focusPath
       reviewExpandedPaths.value = new Set([focusPath])
     } else {
-      // 默认展开第一个带 diff 的文件——没 diff 的展开也是占位，优先给有用的
-      const firstWithDiff = files.find((f) => Boolean(f.diff))
+      // 默认展开第一个有内容可看的文件——没 diff 也没 edits 的展开只是占位。
+      // 两个字段都要看：codex 给 diff，claude 给 edits（见 lib/review.ts）。
+      const firstWithDiff = files.find((f) => Boolean(f.diff) || Boolean(f.edits?.length))
       const target = firstWithDiff?.path ?? files[0]?.path ?? null
       reviewSelectedPath.value = target
       if (target) reviewExpandedPaths.value = new Set([target])

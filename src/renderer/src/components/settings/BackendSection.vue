@@ -1,10 +1,10 @@
 <template>
   <section class="flex flex-col gap-4">
-    <header>
+    <header class="flex items-center gap-1.5">
       <h2 class="text-[length:var(--ui-text-u3)] font-semibold text-foreground">默认后端</h2>
-      <p class="text-[length:var(--ui-text-base)] text-muted-foreground">
+      <HelpTooltip>
         新建会话时默认使用的后端。点击历史会话时会自动切换到该会话所属后端。
-      </p>
+      </HelpTooltip>
     </header>
 
     <!-- 默认后端选择器——按钮组，不可用的后端禁用并 tooltip 显示原因 -->
@@ -42,12 +42,12 @@
 
     <div class="h-px bg-sidebar-border my-1" />
 
-    <header>
+    <header class="flex items-center gap-1.5">
       <h2 class="text-[length:var(--ui-text-u3)] font-semibold text-foreground">默认运行时配置</h2>
-      <p class="text-[length:var(--ui-text-base)] text-muted-foreground">
+      <HelpTooltip>
         新建会话时，若没有"上次使用"记录，用这里的默认值兜底。已有 last-used 时优先用 last-used。
-        下方显示的是上面选中的「默认后端」对应的配置——切换默认后端会显示该后端的配置。
-      </p>
+        此处始终显示当前「默认后端」对应的配置。
+      </HelpTooltip>
     </header>
 
     <!-- 当前选中后端的运行时配置——切到 codex/claude 显示对应配置 -->
@@ -137,11 +137,9 @@
       不再需要用户手动配置 CLI 路径。
     -->
     <template v-if="defaultBackend === 'codex'">
-      <header>
+      <header class="flex items-center gap-1.5">
         <h2 class="text-[length:var(--ui-text-u3)] font-semibold text-foreground">后端 CLI 路径</h2>
-        <p class="text-[length:var(--ui-text-base)] text-muted-foreground">
-          指定 codex 可执行文件的路径。留空则从系统 PATH 自动查找。
-        </p>
+        <HelpTooltip>指定 codex 可执行文件的路径。留空则从系统 PATH 自动查找。</HelpTooltip>
       </header>
 
       <!-- codex -->
@@ -180,16 +178,12 @@
         {{ statusMessage }}
       </div>
 
-      <!-- 重要提示 -->
-      <div
-        class="text-[length:var(--ui-text-d3)] text-muted-foreground space-y-1 px-3 py-2 bg-muted/30 rounded-md"
-      >
-        <p>💡 改了路径后会：</p>
-        <ul class="list-disc ml-5 space-y-0.5">
-          <li>立即应用到 adapter（不重启 catmax）</li>
-          <li>自动清掉模型缓存，下次拉取会用新 binary 的 model/list</li>
-          <li>codex 是 long-running 进程，已有进程不会重启——切走 codex 再切回来才会重新 spawn</li>
-        </ul>
+      <div class="flex items-center gap-1.5 text-[length:var(--ui-text-d3)] text-muted-foreground">
+        <span>路径变更会立即用于后续启动</span>
+        <HelpTooltip>
+          路径会立即应用并清除模型缓存。已运行的 codex
+          进程不会重启；切换到其他后端再切回来后，才会使用新路径启动。
+        </HelpTooltip>
       </div>
     </template>
   </section>
@@ -199,6 +193,7 @@
 import BackendIcon from '@renderer/components/icons/BackendIcon.vue'
 import BackendConfigFilesSection from '@renderer/components/settings/BackendConfigFilesSection.vue'
 import BackendInstallCard from '@renderer/components/settings/BackendInstallCard.vue'
+import HelpTooltip from '@renderer/components/settings/HelpTooltip.vue'
 import ProtocolBridgeSection from '@renderer/components/settings/ProtocolBridgeSection.vue'
 import { Button } from '@renderer/components/ui/button'
 import { DropdownMenu, type DropdownOption } from '@renderer/components/ui/dropdown-menu'

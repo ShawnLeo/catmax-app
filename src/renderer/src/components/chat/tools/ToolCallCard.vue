@@ -39,6 +39,23 @@
         >{{ displayPath }}</span
       >
 
+      <!--
+        改动行数：只有文件编辑类工具有。收起状态下这是唯一能看出"改了多大一块"的信息，
+        所以放在 header 而不是内容区。tabular-nums 让位数变化时数字不左右跳。
+      -->
+      <span
+        v-if="diffStats"
+        class="flex-shrink-0 font-mono text-[length:var(--chat-text-d2)] tabular-nums"
+        :title="diffStatsTooltip"
+      >
+        <span v-if="diffStats.additions" class="text-emerald-500">+{{ diffStats.additions }}</span>
+        <span
+          v-if="diffStats.deletions"
+          :class="['text-red-500', diffStats.additions ? 'ml-1' : '']"
+          >-{{ diffStats.deletions }}</span
+        >
+      </span>
+
       <!-- 箭头：collapsed 不旋转；expanded 旋转 180 -->
       <ChevronDownIcon
         :class="[
@@ -118,6 +135,7 @@
 </template>
 
 <script setup lang="ts">
+import { editDiffStats } from '@renderer/lib/diff-stats'
 import { basename } from '@renderer/lib/path'
 import { useFilesStore } from '@renderer/stores/files'
 import { useWorkspaceStore } from '@renderer/stores/workspace'
@@ -191,6 +209,29 @@ function iconForKind(kind: string): Component {
       return WrenchIcon
   }
 }
+
+/**
+ * header 上的 +N / -M。
+ *
+ * computed 而不是在 mapping 层预先算好：ToolEditInfo 里已经有全部原始数据，
+ * 算一遍是纯函数，这样历史会话（早于本功能写入磁盘的那些）也一样有数字，
+ * 不需要给 shared 类型加字段再等两个 backend 的 mapping 都补上。
+ *
+ * 全 0 时返回 null 不渲染——"改了 0 行"是噪音，不如什么都不显示。
+ */
+const diffStats = computed(() => {
+  const edit = props.tool.info.edit
+  if (!edit) return null
+  const stats = editDiffStats(edit)
+  if (!stats || (stats.additions === 0 && stats.deletions === 0)) return null
+  return stats
+})
+
+const diffStatsTooltip = computed(() =>
+  diffStats.value
+    ? `新增 ${diffStats.value.additions} 行，删除 ${diffStats.value.deletions} 行`
+    : undefined,
+)
 
 /** control.type → 渲染组件映射 */
 const controlComponent = computed<Component | null>(() => {

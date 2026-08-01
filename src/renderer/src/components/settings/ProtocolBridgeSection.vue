@@ -2,13 +2,13 @@
   <!-- Protocol Bridge: codex 只会说 Responses 协议，这一节让它能接 Anthropic 等其它协议的上游 -->
   <section class="flex flex-col gap-3">
     <header class="flex items-start justify-between gap-4">
-      <div>
+      <div class="flex items-center gap-1.5">
         <h2 class="text-[length:var(--ui-text-u3)] font-semibold text-foreground">协议转换桥</h2>
-        <p class="text-[length:var(--ui-text-base)] text-muted-foreground">
+        <HelpTooltip>
           codex 从 0.96 起只支持 Responses 协议。开启后 catmax 在本机起一个只听 127.0.0.1
-          的转换服务，对 codex 装成 Responses
-          端点，对上游说上游的协议。可保存多个上游配置，同时只启用一个。
-        </p>
+          的转换服务，对 codex 提供 Responses
+          端点，并转换为上游协议。可保存多个上游配置，同时只启用一个。
+        </HelpTooltip>
       </div>
       <div class="mt-1 flex shrink-0 items-center gap-2">
         <span
@@ -162,7 +162,10 @@
 
       <!-- 兜底模型名 -->
       <div class="flex flex-col gap-1.5">
-        <label class="text-[length:var(--ui-text-d3)] text-muted-foreground">兜底模型名</label>
+        <div class="flex items-center gap-1.5">
+          <label class="text-[length:var(--ui-text-d3)] text-muted-foreground">兜底模型名</label>
+          <HelpTooltip>codex 发来的模型名不在上游列表里时使用此模型。</HelpTooltip>
+        </div>
         <Input
           :model-value="editingProvider.model ?? ''"
           placeholder="deepseek-v4-pro"
@@ -170,9 +173,6 @@
             (v: string | number) => patchProvider(editingProvider!.id, { model: String(v) || null })
           "
         />
-        <p class="text-[length:var(--ui-text-d3)] text-muted-foreground">
-          codex 发来的模型名不在上游列表里时用它顶上。
-        </p>
       </div>
 
       <!-- 模型列表来源 -->
@@ -291,9 +291,12 @@
               {{ id }} <span class="ml-1 opacity-60" @click.stop="removeManualModel(id)">×</span>
             </button>
           </div>
-          <p class="text-[length:var(--ui-text-d3)] text-muted-foreground">
-            手动录入的模型会显示在 codex 下拉框里，codex 选用时原样透传给上游。
-          </p>
+          <div
+            class="flex items-center gap-1.5 text-[length:var(--ui-text-d3)] text-muted-foreground"
+          >
+            <span>手动模型说明</span>
+            <HelpTooltip>手动录入的模型会显示在 codex 下拉框里，选用时原样透传给上游。</HelpTooltip>
+          </div>
         </template>
       </div>
 
@@ -325,9 +328,12 @@
                 patchProvider(editingProvider!.id, { credentialEnvVar: String(v) })
             "
           />
-          <p class="text-[length:var(--ui-text-d3)] text-muted-foreground">
-            catmax 只记住变量名，值在每次请求时从进程环境读取——不落盘。
-          </p>
+          <div
+            class="flex items-center gap-1.5 text-[length:var(--ui-text-d3)] text-muted-foreground"
+          >
+            <span>环境变量说明</span>
+            <HelpTooltip>catmax 只记住变量名，值在每次请求时从进程环境读取，不落盘。</HelpTooltip>
+          </div>
         </template>
         <template v-else>
           <div class="flex items-center gap-2">
@@ -351,9 +357,15 @@
               清除
             </Button>
           </div>
-          <p class="text-[length:var(--ui-text-d3)] text-muted-foreground">
-            存在 catmax 数据目录下权限 0600 的单独文件里（不进 settings.json），界面不会再回显。
-          </p>
+          <div
+            class="flex items-center gap-1.5 text-[length:var(--ui-text-d3)] text-muted-foreground"
+          >
+            <span>凭证存储说明</span>
+            <HelpTooltip
+              >保存在 catmax 数据目录下权限为 0600 的独立文件中，不写入
+              settings.json，界面不会再次回显。</HelpTooltip
+            >
+          </div>
         </template>
       </div>
 
@@ -442,6 +454,7 @@
 </template>
 
 <script setup lang="ts">
+import HelpTooltip from '@renderer/components/settings/HelpTooltip.vue'
 import { Button } from '@renderer/components/ui/button'
 import { DropdownMenu, type DropdownOption } from '@renderer/components/ui/dropdown-menu'
 import { Input } from '@renderer/components/ui/input'

@@ -1,3 +1,4 @@
+import { countUnifiedDiffStats } from '@renderer/lib/diff-stats'
 import { randomUUID } from '@renderer/lib/utils'
 import type {
   CodexActivity,
@@ -734,7 +735,7 @@ export const useMessageStore = defineStore('message', () => {
         const block = message.blocks![blockIndex]!
         if (block.type !== 'codex_activity') continue
         block.turnDiff = diff
-        block.turnDiffStats = countDiffStats(diff)
+        block.turnDiffStats = countUnifiedDiffStats(diff)
         return
       }
     }
@@ -963,14 +964,4 @@ function aggregateCodexActivityStatus(activities: CodexActivity[]): CodexActivit
   if (activities.some((activity) => activity.status === 'running')) return 'running'
   if (activities.some((activity) => activity.status === 'failed')) return 'failed'
   return 'completed'
-}
-
-function countDiffStats(diff: string): { additions: number; deletions: number } {
-  let additions = 0
-  let deletions = 0
-  for (const line of diff.split('\n')) {
-    if (line.startsWith('+') && !line.startsWith('+++')) additions++
-    if (line.startsWith('-') && !line.startsWith('---')) deletions++
-  }
-  return { additions, deletions }
 }

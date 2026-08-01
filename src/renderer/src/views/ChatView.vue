@@ -37,19 +37,19 @@
           </p>
 
           <div
-            class="mt-5 flex items-center justify-center gap-3 text-[length:var(--ui-text-d3)] text-muted-foreground"
+            class="mt-5 flex items-center justify-center gap-3 text-[length:var(--ui-text-d3)] leading-none text-muted-foreground"
           >
-            <span>
-              工作区
-              <span class="ml-1 inline-flex items-center gap-1.5 font-medium text-foreground/80">
+            <span class="inline-flex items-center gap-1.5">
+              <span>工作区</span>
+              <span class="inline-flex items-center gap-1.5 font-medium text-foreground/80">
                 <HouseIcon class="h-3.5 w-3.5" />
                 {{ workspaceStore.currentWorkspace?.name ?? '当前工作区' }}
               </span>
             </span>
             <span class="h-3 w-px bg-border" aria-hidden="true" />
-            <span>
-              后端
-              <span class="ml-1 inline-flex items-center gap-1.5 font-medium text-foreground/80">
+            <span class="inline-flex items-center gap-1.5">
+              <span>后端</span>
+              <span class="inline-flex items-center gap-1.5 font-medium text-foreground/80">
                 <BackendIcon :backend="backendStore.currentId" class="h-3.5 w-3.5" />
                 {{ backendDisplayName }}
               </span>

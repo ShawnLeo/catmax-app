@@ -133,7 +133,7 @@ export const DEFAULT_THEME_MODE = 'system' as const
  * --code-font-size 的兜底值必须与这里一致——那是设置加载完成前的一瞬间用的。
  */
 /** 界面：侧边栏 / 面板 / 设置页 / 命令面板 */
-export const DEFAULT_FONT_SIZE = 15
+export const DEFAULT_FONT_SIZE = 14
 /** 对话正文与 Markdown（含标题） */
 export const DEFAULT_CHAT_FONT_SIZE = 13
 /** 等宽区域：代码块 / diff / 终端 / 文件预览 */

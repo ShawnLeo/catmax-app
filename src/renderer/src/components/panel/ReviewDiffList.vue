@@ -7,7 +7,7 @@
     - 展开态：卡片下方渲染该文件的 <DiffView>（统一/拆分由 reviewDiffMode 决定）
 
     多文件可同时展开。展开状态存在 uiStore.reviewExpandedPaths，
-    这样从 CodexChangesCard 点具体文件进入时（showReview focusPath）能自动展开对应卡片。
+    这样从 ChangesCard 点具体文件进入时（showReview focusPath）能自动展开对应卡片。
     选中的 focusPath 卡片会滚动定位到视口。
   -->
   <div class="review-diff-list">
@@ -54,6 +54,29 @@
           :mode="uiStore.reviewDiffMode"
           :key="file.path + uiStore.reviewDiffMode"
         />
+        <!--
+          claude：没有整轮累计 diff，只有一串独立的编辑片段，按调用顺序逐个渲染。
+          多于一处时标出序号，否则用户会以为这就是文件的全部改动。
+        -->
+        <template v-else-if="file.edits?.length">
+          <div
+            v-for="(edit, index) in file.edits"
+            :key="`${file.path}-${index}`"
+            class="not-first:mt-2"
+          >
+            <div
+              v-if="file.edits.length > 1"
+              class="px-1 pb-1 text-[length:var(--ui-text-d4)] text-muted-foreground"
+            >
+              第 {{ index + 1 }} 处修改 / 共 {{ file.edits.length }} 处
+            </div>
+            <DiffView
+              :edit="edit"
+              :mode="uiStore.reviewDiffMode"
+              :key="`${file.path}-${index}-${uiStore.reviewDiffMode}`"
+            />
+          </div>
+        </template>
         <!-- 有统计但无行级 diff（二进制/超大文件/流式未完成） -->
         <div v-else class="py-4 text-center text-[length:var(--ui-text-d3)] text-muted-foreground">
           此文件无行级差异 ·
@@ -76,8 +99,8 @@
 
 <script setup lang="ts">
 import DiffView from '@renderer/components/chat/tools/DiffView.vue'
+import type { ReviewFile } from '@renderer/lib/review'
 import { useUiStore } from '@renderer/stores/ui'
-import type { CodexFileChange } from '@shared/backend/blocks'
 import type { ToolEditInfo } from '@shared/backend/types'
 import { ChevronRightIcon, FileDiffIcon } from 'lucide-vue-next'
 import { nextTick, ref, watch } from 'vue'
@@ -98,8 +121,8 @@ function onToggle(path: string): void {
   uiStore.toggleReviewFileExpanded(path)
 }
 
-/** CodexFileChange → ToolEditInfo（DiffView 的 unified_diff 分支） */
-function toolEditFor(change: CodexFileChange): ToolEditInfo {
+/** codex 的累计 unified diff → ToolEditInfo（DiffView 的 unified_diff 分支） */
+function toolEditFor(change: ReviewFile): ToolEditInfo {
   return { type: 'unified_diff', filePath: change.path, diff: change.diff ?? '' }
 }
 
@@ -108,7 +131,7 @@ function fileName(path: string): string {
   return clean.slice(Math.max(clean.lastIndexOf('/'), clean.lastIndexOf('\\')) + 1)
 }
 
-// 选中的 focusPath 变化时，滚动对应卡片到视口（从 CodexChangesCard 点文件进入时触发）
+// 选中的 focusPath 变化时，滚动对应卡片到视口（从 ChangesCard 点文件进入时触发）
 watch(
   () => uiStore.reviewSelectedPath,
   async (path) => {

@@ -187,20 +187,24 @@
  * 是自引用循环，CSS 会整条判为无效。要取当前基准做减法，得在 JS 里算好再传进来。
  */
 :root {
-  --ui-font-size: 15px;
+  --ui-font-size: 14px;
   --chat-font-size: 13px;
   --code-font-size: 13px;
 }
 
 /*
- * 界面刻度（基准 15）。偏移取自清扫前写死的绝对值，所以默认下除正文外观感不变：
- *   d5   10px  原 text-[10px]
- *   d4   11px  原 text-[11px]
- *   d3   12px  原 text-xs / text-[12px]
- *   d2   13px  原 text-[13px]
- *   base 15px  原 text-sm（14px）← 正文基准，是唯一被抬高 1px 的一档
- *   u3   18px  原 text-lg
- *   display 30px 原 text-3xl（欢迎页字标）——按倍数走，基准调大时保持视觉比例
+ * 界面刻度（基准 14，= 清扫前 body 的 14px，所以正文观感与改造前一致）：
+ *   d5    9px  原 text-[10px]
+ *   d4   10px  原 text-[11px]
+ *   d3   11px  原 text-xs / text-[12px]
+ *   d2   12px  原 text-[13px]
+ *   base 14px  原 text-sm ← 正文基准
+ *   u3   17px  原 text-lg
+ *   display 28px 原 text-3xl（欢迎页字标）——按倍数走，基准调大时保持视觉比例
+ *
+ * 偏移量是照基准 15 的那版定的（各档正好等于清扫前的绝对值），基准降到 14 后
+ * 整条梯子跟着降 1px——这正是基准该有的行为，不要为了凑回旧绝对值去改偏移，
+ * 那样只是把默认值特殊化，用户把基准调到别的数时反而对不上。
  */
 :root,
 .ui-font-scope {

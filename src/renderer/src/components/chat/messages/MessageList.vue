@@ -38,15 +38,25 @@
         :current-turn-id="messageStore.currentTurnId"
       />
       <template v-else>
-        <MessageItem
-          v-for="(message, index) in messageStore.messages"
-          :key="message.id"
-          :message="message"
-          :show-thinking="showThinking"
-          :cwd="cwd"
-          :is-last="index === lastAssistantIdx"
-          :is-first-assistant="index === firstAssistantIdx"
-        />
+        <!--
+          Turn Changes Card: 每轮末尾挂一张「本轮改了哪些文件」，点进去是右侧审查面板。
+          codex 由它自己的 CodexTurn 渲染同一个组件；这里覆盖的是没有专属会话渲染器的
+          后端（claude 及后续新增的），改动数据由 lib/review.ts 从工具调用现推。
+        -->
+        <template v-for="(message, index) in messageStore.messages" :key="message.id">
+          <MessageItem
+            :message="message"
+            :show-thinking="showThinking"
+            :cwd="cwd"
+            :is-last="index === lastAssistantIdx"
+            :is-first-assistant="index === firstAssistantIdx"
+          />
+          <ChangesCard
+            v-if="turnChanges.get(index)"
+            :files="turnChanges.get(index)!.files"
+            :stats="turnChanges.get(index)!.stats"
+          />
+        </template>
       </template>
 
       <!--
@@ -132,13 +142,17 @@
 </template>
 
 <script setup lang="ts">
+import type { DiffStats } from '@renderer/lib/diff-stats'
+import { buildReviewFilesFromMessages, sumReviewStats, type ReviewFile } from '@renderer/lib/review'
 import { useBackendStore } from '@renderer/stores/backend'
 import { useMessageStore } from '@renderer/stores/message'
 import { useWorkspaceStore } from '@renderer/stores/workspace'
+import type { NormalizedMessage } from '@shared/backend/types'
 import { AlertCircleIcon, ArrowDownIcon, Loader2Icon } from 'lucide-vue-next'
 import { onMounted, ref, watch, nextTick, computed } from 'vue'
 
 import { getBackendConversationRenderer } from '../blocks/plugin-registry'
+import ChangesCard from '../changes/ChangesCard.vue'
 
 import CompactDivider from './CompactDivider.vue'
 import LoadingDots from './LoadingDots.vue'
@@ -189,6 +203,38 @@ const lastAssistantIdx = computed(() => {
     if (msgs[i]!.role === 'assistant') return i
   }
   return -1
+})
+
+/**
+ * 每轮的改动汇总，key 是该轮最后一条消息的 index——卡片就插在那条消息之后。
+ *
+ * 按 turnId 分组而不是整个会话汇总：和 codex 的 CodexChangesCard 口径一致，
+ * 「这一轮改了什么」才是用户点审核时想复核的范围；整个会话的累计改动是 git 面板的事。
+ *
+ * 只在没有专属会话渲染器的后端走这里（codex 由 CodexTurn 自己渲染）。
+ */
+const turnChanges = computed(() => {
+  const byLastIndex = new Map<number, { files: ReviewFile[]; stats: DiffStats }>()
+  if (backendConversationRenderer.value) return byLastIndex
+
+  const lastIndexByTurn = new Map<string, number>()
+  const messagesByTurn = new Map<string, NormalizedMessage[]>()
+  messageStore.messages.forEach((message, index) => {
+    if (!message.turnId) return
+    lastIndexByTurn.set(message.turnId, index)
+    const list = messagesByTurn.get(message.turnId)
+    if (list) list.push(message)
+    else messagesByTurn.set(message.turnId, [message])
+  })
+
+  for (const [turnId, messages] of messagesByTurn) {
+    const files = buildReviewFilesFromMessages(messages, cwd.value)
+    if (files.length === 0) continue
+    const index = lastIndexByTurn.get(turnId)
+    if (index === undefined) continue
+    byLastIndex.set(index, { files, stats: sumReviewStats(files) })
+  }
+  return byLastIndex
 })
 
 /**

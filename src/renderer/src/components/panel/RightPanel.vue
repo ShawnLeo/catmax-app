@@ -14,11 +14,15 @@
         class="right-panel-titlebar h-12 flex items-end border-b border-border"
         @dblclick="onTitlebarDoubleClick"
       >
+        <!--
+          pt-[2px] 抵消 border-b-2：下边框吃掉内容盒 2px，items-center 居中后文字会比
+          按钮的几何中心高 1px——加回 2px 上内边距，内容盒重新对称。
+        -->
         <button
           v-for="tab in tabs"
           :key="tab.id"
           :class="[
-            'h-12 w-24 flex items-center justify-center gap-1.5 text-[length:var(--ui-text-d3)] font-medium border-b-2 transition-colors',
+            'h-12 w-24 pt-[2px] flex items-center justify-center gap-1.5 text-[length:var(--ui-text-d2)] font-medium border-b-2 transition-colors',
             uiStore.rightPanelTab === tab.id
               ? 'border-primary text-foreground'
               : 'border-transparent text-muted-foreground hover:text-foreground hover:bg-muted/40',
