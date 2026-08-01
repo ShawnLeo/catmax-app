@@ -14,7 +14,7 @@
     视觉上精确占据输入框位置，确认完恢复输入框。
   -->
   <div>
-    <div class="mx-auto max-w-3xl lg:max-w-screen-lg xl:max-w-[1280px] 2xl:max-w-[1440px] p-3">
+    <div :class="[chatContentWidthClass(navRailVisible), 'p-3']">
       <div
         class="rounded-2xl border bg-background transition-colors overflow-hidden"
         :class="isHighRisk ? 'border-destructive/60' : 'border-border'"
@@ -150,11 +150,13 @@
 <script setup lang="ts">
 import MarkdownView from '@renderer/components/chat/blocks/base/MarkdownView.vue'
 import { Button } from '@renderer/components/ui/button'
+import { chatContentWidthClass } from '@renderer/lib/chat-layout'
 import { useMessageStore } from '@renderer/stores/message'
 import { ListChecksIcon, PlayIcon, ShieldAlertIcon } from 'lucide-vue-next'
 import { computed, onMounted, onUnmounted } from 'vue'
 
 const messageStore = useMessageStore()
+defineProps<{ navRailVisible?: boolean }>()
 
 /**
  * 当前 pending：claude 权限或 codex 权限二选一（同一时刻只一个 backend 在跑 turn）。

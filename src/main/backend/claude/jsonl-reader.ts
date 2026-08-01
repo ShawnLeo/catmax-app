@@ -29,6 +29,7 @@ import type { ClaudeStreamMessage } from '@shared/backend/claude-schema'
 import type { NormalizedMessage } from '@shared/backend/types'
 
 import { claudeReplayToMessages } from './history-mapping'
+import { isWarmupTranscript } from './warmup-transcript'
 
 const log = logger.domain('claude-jsonl')
 
@@ -148,30 +149,99 @@ async function readTitleAndModel(
  * 单个文件出错不影响整个扫描——只跳过该文件。
  */
 export async function listClaudeSessionsFromDisk(cwd?: string): Promise<ClaudeSessionOnDisk[]> {
+  const results: ClaudeSessionOnDisk[] = []
+  let warmupSkipped = 0
+  for (const { filePath, sessionId, decodedCwd, mtimeMs, size } of iterateJsonlFiles(cwd)) {
+    try {
+      // Warmup Transcript: 预热残留不是用户会话，扫描层直接跳过。
+      // 放在这里而不是只靠启动清理：清理删的是磁盘文件，而预热**正在进行中**时
+      // 文件也在磁盘上，不跳过的话侧边栏会闪出一条 "Session warmup" 又消失。
+      if (await isWarmupTranscript(filePath)) {
+        warmupSkipped++
+        continue
+      }
+      const { title, model } = await readTitleAndModel(filePath)
+      results.push({
+        backendThreadId: sessionId,
+        cwd: decodedCwd,
+        title,
+        model,
+        lastActiveAt: mtimeMs,
+        sizeBytes: size,
+      })
+    } catch {
+      // 单文件出错跳过
+    }
+  }
+
+  log.info(
+    'scan from disk',
+    cwd ? `(cwd=${cwd})` : '(all projects)',
+    '→',
+    results.length,
+    'sessions',
+    warmupSkipped > 0 ? `(skipped ${warmupSkipped} warmup transcripts)` : '',
+  )
+  return results
+}
+
+/**
+ * Warmup Transcript: 列出磁盘上残留的预热 transcript（供启动清理删除）。
+ *
+ * 与 listClaudeSessionsFromDisk 正好互补——那个跳过的就是这个收集的。
+ */
+export async function listWarmupTranscripts(
+  cwd?: string,
+): Promise<Array<{ sessionId: string; filePath: string }>> {
+  const found: Array<{ sessionId: string; filePath: string }> = []
+  for (const { filePath, sessionId } of iterateJsonlFiles(cwd)) {
+    if (await isWarmupTranscript(filePath)) found.push({ sessionId, filePath })
+  }
+  return found
+}
+
+/** iterateJsonlFiles 吐出的单个会话文件 */
+interface JsonlFileEntry {
+  filePath: string
+  /** 文件名去掉 .jsonl —— claude 的 session id */
+  sessionId: string
+  /** 该文件所属项目目录对应的 cwd（全盘模式下是反推的，可能歧义） */
+  decodedCwd: string
+  mtimeMs: number
+  size: number
+}
+
+/**
+ * 遍历 ~/.claude/projects 下的会话 jsonl 文件。
+ *
+ * - 传 cwd：只扫 encodeCwdToProjectDir(cwd) 对应子目录
+ * - 不传 cwd：扫所有项目子目录（全盘模式，给「扫描导入」和启动清理用）
+ *
+ * 跳过非 .jsonl、隐藏文件、stat 失败的文件；子目录读不了就整个跳过。
+ * 抽成独立 generator 是因为"扫会话"和"扫预热残留"要走完全一样的目录遍历，
+ * 只有对每个文件的处理不同。
+ */
+function* iterateJsonlFiles(cwd?: string): Generator<JsonlFileEntry> {
   const projectsRoot = join(homedir(), '.claude', 'projects')
 
-  // 决定要扫的子目录列表：[{dir, cwd}]
   type Target = { dirName: string; decodedCwd: string }
   let targets: Target[]
   if (cwd) {
     // 单目录模式——cwd 是精确的，无歧义
-    const dirName = encodeCwdToProjectDir(cwd)
-    targets = [{ dirName, decodedCwd: cwd }]
+    targets = [{ dirName: encodeCwdToProjectDir(cwd), decodedCwd: cwd }]
   } else {
     // 全盘模式——枚举所有项目目录，cwd 是反推的（可能歧义）
     try {
-      const entries = readdirSync(projectsRoot, { withFileTypes: true })
-      targets = entries
+      targets = readdirSync(projectsRoot, { withFileTypes: true })
         .filter((e) => e.isDirectory() && !e.name.startsWith('.'))
         .map((e) => ({ dirName: e.name, decodedCwd: decodeProjectDirToCwd(e.name) }))
     } catch {
       // ~/.claude/projects 不存在（claude 从未运行过）
-      log.info('projects root not found, returning empty:', projectsRoot)
-      return []
+      log.info('projects root not found:', projectsRoot)
+      return
     }
   }
 
-  const results: ClaudeSessionOnDisk[] = []
   for (const { dirName, decodedCwd } of targets) {
     const dirPath = join(projectsRoot, dirName)
     let files: string[]
@@ -186,30 +256,18 @@ export async function listClaudeSessionsFromDisk(cwd?: string): Promise<ClaudeSe
       try {
         const stat = statSync(filePath)
         if (!stat.isFile()) continue
-        const sessionId = fileName.slice(0, -'.jsonl'.length)
-        const { title, model } = await readTitleAndModel(filePath)
-        results.push({
-          backendThreadId: sessionId,
-          cwd: decodedCwd,
-          title,
-          model,
-          lastActiveAt: stat.mtimeMs,
-          sizeBytes: stat.size,
-        })
+        yield {
+          filePath,
+          sessionId: fileName.slice(0, -'.jsonl'.length),
+          decodedCwd,
+          mtimeMs: stat.mtimeMs,
+          size: stat.size,
+        }
       } catch {
-        // 单文件出错跳过
+        // stat 失败——跳过这个文件
       }
     }
   }
-
-  log.info(
-    'scan from disk',
-    cwd ? `(cwd=${cwd})` : '(all projects)',
-    '→',
-    results.length,
-    'sessions',
-  )
-  return results
 }
 
 /** jsonl 文件里一行的解析结果（claudeReplayToMessages 需要的形态） */

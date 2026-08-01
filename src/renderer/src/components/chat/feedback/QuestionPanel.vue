@@ -17,7 +17,7 @@
     ask_user 一次只问一个问题（不像旧 AskUserQuestion 批量），所以这里无需分页。
   -->
   <div>
-    <div class="mx-auto max-w-3xl lg:max-w-screen-lg xl:max-w-[1280px] 2xl:max-w-[1440px] p-3">
+    <div :class="[chatContentWidthClass(navRailVisible), 'p-3']">
       <div class="rounded-2xl border border-border bg-background transition-colors overflow-hidden">
         <!-- header -->
         <div class="px-4 pt-3 pb-2 flex items-center gap-2">
@@ -113,12 +113,14 @@
 
 <script setup lang="ts">
 import { Button } from '@renderer/components/ui/button'
+import { chatContentWidthClass } from '@renderer/lib/chat-layout'
 import { useMessageStore } from '@renderer/stores/message'
 import type { AgentAnswer } from '@shared/backend/types'
 import { CheckIcon, MessageCircleQuestionIcon } from 'lucide-vue-next'
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 
 const messageStore = useMessageStore()
+defineProps<{ navRailVisible?: boolean }>()
 const pending = computed(() => messageStore.pendingAgentQuestion!)
 const question = computed(() => pending.value.question)
 const options = computed(() => question.value.options ?? [])

@@ -9,7 +9,7 @@
     悬浮按钮用 sticky 而不是 absolute——sticky 在滚动容器里会贴视口底部，
     不会随内容滚走（absolute 会，fixed 会脱离容器跑到窗口级别）。
   -->
-  <div ref="root" class="relative h-full min-h-0">
+  <div class="relative h-full min-h-0">
     <div ref="container" class="relative h-full min-h-0 overflow-y-auto" @scroll="onScroll">
       <div
         v-if="messageStore.loading"
@@ -20,13 +20,15 @@
         </div>
       </div>
       <!--
-      响应式宽度（两段式）：
+      响应式宽度：
+        侧轨显示      → 内容区总宽度减 40px，给左侧导航留出独立空间
+        侧轨隐藏      → 恢复 w-full
         小窗 <640px   → 跟随窗口（仅 px-6 边距）
         sm ≥640px     → 768px (max-w-3xl)
         lg ≥1024px    → 1024px (max-w-screen-lg)
         xl ≥1280px    → 1280px
         2xl ≥1536px   → 1440px（终极上限，超宽屏不会再变宽）
-      mx-auto 居中。Composer 用同样的 class 保持对齐。
+      mx-auto 居中。最大宽度与 Composer 保持一致；仅侧轨显示时额外扣除导航宽度。
     -->
       <div v-else :class="conversationClass">
         <component
@@ -147,6 +149,7 @@
 
 <script setup lang="ts">
 import { MESSAGE_ANCHOR_KEY, useMessageAnchors } from '@renderer/composables/useMessageAnchors'
+import { chatContentWidthClass } from '@renderer/lib/chat-layout'
 import type { DiffStats } from '@renderer/lib/diff-stats'
 import { isNavigableUserMessage } from '@renderer/lib/message-navigation'
 import { buildReviewFilesFromMessages, sumReviewStats, type ReviewFile } from '@renderer/lib/review'
@@ -155,7 +158,7 @@ import { useMessageStore } from '@renderer/stores/message'
 import { useWorkspaceStore } from '@renderer/stores/workspace'
 import type { NormalizedMessage } from '@shared/backend/types'
 import { AlertCircleIcon, ArrowDownIcon, Loader2Icon } from 'lucide-vue-next'
-import { computed, nextTick, onMounted, onUnmounted, provide, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, provide, ref, watch } from 'vue'
 
 import { getBackendConversationRenderer } from '../blocks/plugin-registry'
 import ChangesCard from '../changes/ChangesCard.vue'
@@ -168,6 +171,8 @@ import MessageNavRail from './MessageNavRail.vue'
 const props = defineProps<{
   /** 是否显示思考块（reasoning）。OFF 时 MessageItem 折叠 kind='reasoning' 的 textBlocks。 */
   showThinking?: boolean
+  /** ChatView 按中央聊天列实际宽度统一计算，Composer 与 MessageList 共用。 */
+  navRailVisible?: boolean
 }>()
 const showThinking = computed(() => props.showThinking ?? true)
 const workspaceStore = useWorkspaceStore()
@@ -177,7 +182,6 @@ const backendStore = useBackendStore()
 const cwd = computed(() => workspaceStore.currentWorkspace?.path ?? '')
 
 const messageStore = useMessageStore()
-const root = ref<HTMLElement | null>(null)
 const container = ref<HTMLElement | null>(null)
 const anchorApi = useMessageAnchors(
   container,
@@ -185,27 +189,25 @@ const anchorApi = useMessageAnchors(
 )
 provide(MESSAGE_ANCHOR_KEY, anchorApi)
 
-const MIN_WIDTH_FOR_RAIL = 640
-const rootWidth = ref(0)
 const userMessages = computed(() => messageStore.messages.filter(isNavigableUserMessage))
-const railVisible = computed(
-  () =>
-    !messageStore.loading &&
-    rootWidth.value >= MIN_WIDTH_FOR_RAIL &&
-    userMessages.value.length >= 2,
-)
+const railVisible = computed(() => props.navRailVisible ?? false)
 
 const backendConversationRenderer = computed(() =>
   getBackendConversationRenderer(backendStore.currentId),
 )
 const conversationClass = computed(() =>
   backendConversationRenderer.value
-    ? ['mx-auto flex w-full max-w-3xl flex-col py-4 pr-4', railVisible.value ? 'pl-10' : 'pl-4']
+    ? [
+        ...chatContentWidthClass(railVisible.value),
+        'flex flex-col py-4 pr-4',
+        railVisible.value ? 'pl-10' : 'pl-4',
+      ]
     : // 不用 flex gap——gap 会在每条消息之间留空白,打断 assistant 时间轴竖线。
       // 间距改由 MessageItem 内部控制:user 消息底部留呼吸空间(分隔对话轮次),
       // 连续 assistant 消息之间零间距,竖线才能连续不断。
       [
-        'mx-auto flex flex-col py-4 pr-6 max-w-3xl lg:max-w-screen-lg xl:max-w-[1280px] 2xl:max-w-[1440px]',
+        ...chatContentWidthClass(railVisible.value),
+        'flex flex-col py-4 pr-6',
         railVisible.value ? 'pl-10' : 'pl-6',
       ],
 )
@@ -363,23 +365,8 @@ watch(
 )
 
 // mount 时兜底滚一次——处理 v-if fresh mount 场景（watch immediate=false 漏掉）
-let resizeObserver: ResizeObserver | null = null
-
 onMounted(async () => {
-  if (root.value) {
-    rootWidth.value = root.value.clientWidth
-    resizeObserver = new ResizeObserver((entries) => {
-      const entry = entries[0]
-      if (entry) rootWidth.value = entry.contentRect.width
-    })
-    resizeObserver.observe(root.value)
-  }
   await nextTick()
   snapToBottom()
-})
-
-onUnmounted(() => {
-  resizeObserver?.disconnect()
-  resizeObserver = null
 })
 </script>

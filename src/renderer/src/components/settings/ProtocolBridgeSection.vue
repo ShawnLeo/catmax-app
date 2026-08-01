@@ -56,8 +56,8 @@
       <span v-if="status?.lastError" class="text-destructive ml-auto">{{ status.lastError }}</span>
     </div>
 
-    <!-- Provider 列表（始终可见） -->
-    <div class="flex flex-col gap-1.5">
+    <!-- 上游配置只在协议桥开启时显示，关闭时保持设置页简洁 -->
+    <div v-if="enabled" class="flex flex-col gap-1.5">
       <label class="text-[length:var(--ui-text-d3)] text-muted-foreground">上游配置</label>
       <div class="flex flex-col gap-1">
         <div
@@ -109,7 +109,7 @@
     <!-- 编辑区（选中 provider 时显示） -->
     <!-- 编辑区：只有点编辑/新增后才显示，右上角可关闭收起 -->
     <div
-      v-if="editingProvider"
+      v-if="enabled && editingProvider"
       class="flex flex-col gap-3 p-3 rounded-md border border-sidebar-border"
     >
       <!-- 卡片头：标题（当前/编辑中状态）+ 右上角关闭 -->

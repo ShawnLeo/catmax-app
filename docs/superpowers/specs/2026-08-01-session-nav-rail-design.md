@@ -30,7 +30,7 @@ MessageList root（relative，接收 ChatView 的 flex-1）
 └─ MessageNavRail（absolute left-0，z-index 高于消息）
 ```
 
-侧轨距聊天区最左边 5px，拥有 40px 透明交互宽度；横条本身默认约 8px、突出态约 24px。侧轨显示时，conversation 左侧 padding 至少为 40px，不能依赖现有 `px-4` / `px-6` 猜测可用空间：默认 renderer 使用 `pl-10 pr-6`，Codex renderer 使用 `pl-10 pr-4`。隐藏侧轨时恢复原 padding。
+侧轨距聊天区最左边 5px，拥有 40px 透明交互宽度；横条本身默认约 8px、突出态约 24px。侧轨显示时，conversation 使用 `w-[calc(100%-2.5rem)]` 从总宽度扣除 40px，并将左侧 padding 提高到 40px，不能依赖原有 `px-4` / `px-6` 猜测可用空间：默认 renderer 使用 `pl-10 pr-6`，Codex renderer 使用 `pl-10 pr-4`。隐藏侧轨时恢复 `w-full` 和原 padding。
 
 ## 显示条件
 
@@ -40,7 +40,9 @@ MessageList root（relative，接收 ChatView 的 flex-1）
 2. `MessageList` 实际布局宽度不小于 `MIN_WIDTH_FOR_RAIL = 640px`。
 3. 非历史加载状态。
 
-用 `ResizeObserver` 观察 `MessageList` 外层的实际宽度。这样侧栏或右侧面板改变聊天区宽度时，侧轨能即时隐藏或恢复。组件卸载时必须 `disconnect()`。
+用 `ChatView` 的 `ResizeObserver` 观察中央聊天列的实际宽度。这样侧栏或右侧面板改变聊天区宽度时，侧轨能即时隐藏或恢复；同一个 `navRailVisible` 同时传给 MessageList、Composer、权限面板和提问面板，保证上下宽度一致。组件卸载时必须 `disconnect()`。
+
+所有聊天表面统一使用 `chatContentWidthClass(navRailVisible)`：Claude 与 Codex 会话区、Composer 及两种反馈面板共享 `max-w-3xl lg:max-w-screen-lg xl:max-w-[1280px] 2xl:max-w-[1440px]`。这同时修复 Codex 过去只使用固定 `max-w-3xl`、宽屏下不会响应式扩展的问题。
 
 ## 可导航消息与预览文本
 
@@ -152,6 +154,7 @@ active 表示当前阅读段落，而不是可见面积最大的消息：
 | 文件                                                                 | 操作 | 职责                                                          |
 | -------------------------------------------------------------------- | ---- | ------------------------------------------------------------- |
 | `src/renderer/src/lib/message-navigation.ts`                         | 新建 | 统一过滤可导航消息并生成预览文本                              |
+| `src/renderer/src/lib/chat-layout.ts`                                | 新建 | 会话区、输入框和反馈面板共享响应式宽度规则                    |
 | `src/renderer/src/composables/useMessageAnchors.ts`                  | 新建 | provide/inject API、锚点 Map、scroll-spy、跳转、session reset |
 | `src/renderer/src/components/chat/messages/MessageNavRail.vue`       | 新建 | Rail、tooltip、鼠标与键盘交互                                 |
 | `src/renderer/src/components/chat/messages/MessageItem.vue`          | 修改 | 默认 renderer 的 user article 接入锚点指令                    |

@@ -74,11 +74,13 @@ import {
   sdkSystemSessionId,
   sdkUserToolResultToEvents,
 } from './sdk-mapping'
+import { WARMUP_PROMPT } from './warmup-transcript'
 
 const log = logger.domain('claude-adapter')
 const WARMUP_CACHE_TTL_MS = 4 * 60 * 1000
 const WARMUP_TIMEOUT_MS = 30_000
-const WARMUP_PROMPT = 'Warmup. Reply with exactly "ready" and do not use any tools.'
+/** dispose 等预热清理 transcript 的上限——退出路径，不能无限等（见 dispose） */
+const WARMUP_DISPOSE_GRACE_MS = 3_000
 
 /**
  * ask_user 工具的 system prompt 引导语——追加到 Claude Code 默认 system prompt 之后。
@@ -168,6 +170,15 @@ export class ClaudeAdapter implements AgentBackend {
    * 与任何 Catmax 用户会话无关；完成后对应的 Claude JSONL 会被删除。
    */
   private warmups = new Map<string, { promise: Promise<void>; warmedAt: number | null }>()
+  /**
+   * Warmup Transcript: 当前在跑的预热——dispose 时要中断它们，并等它们把自己的
+   * transcript 删干净。不这么做的话，退出时正在预热就会在磁盘上留下一份
+   * "Session warmup"，下次启动被扫进侧边栏。
+   *
+   * 与上面的 warmups 是两回事：那个按 cwd/model/effort 做 TTL 去重（完成后还留着
+   * 用于判断缓存是否新鲜），这个只装"此刻还没跑完的"，结束即移除。
+   */
+  private inFlightWarmups = new Map<string, { abort: AbortController; done: Promise<void> }>()
 
   constructor(opts: ClaudeAdapterOptions = {}) {
     this.opts = opts
@@ -207,6 +218,21 @@ export class ClaudeAdapter implements AgentBackend {
       log.info('dispose: aborted', turnIds.length, 'running turn(s)')
     }
     this.turnContexts.clear()
+
+    // Warmup Transcript: 中断在跑的预热，并等它们把自己的 transcript 删掉——
+    // 只 abort 不等的话，调用方（before-quit）紧接着就 app.exit(0)，
+    // runWarmup 的 finally 根本来不及执行，磁盘上照样留下一份残留。
+    const warmups = [...this.inFlightWarmups.values()]
+    if (warmups.length > 0) {
+      for (const w of warmups) w.abort.abort()
+      // 超时兜底：这是退出路径，卡在这里就是 app 关不掉。
+      // 真超时了也没关系——启动清理会收掉那份残留。
+      await Promise.race([
+        Promise.all(warmups.map((w) => w.done)),
+        new Promise((resolve) => setTimeout(resolve, WARMUP_DISPOSE_GRACE_MS)),
+      ])
+      log.info('dispose: aborted', warmups.length, 'in-flight warmup(s)')
+    }
   }
 
   getCapabilities(): BackendCapabilities {
@@ -306,6 +332,13 @@ export class ClaudeAdapter implements AgentBackend {
     const abortController = new AbortController()
     const timeout = setTimeout(() => abortController.abort(), WARMUP_TIMEOUT_MS)
     const askUser = createAskUserServer((_requestId, _question) => {})
+    // Warmup Transcript: 登记到 inFlightWarmups，让 dispose 能中断并等它清理完。
+    // done 是手动 resolve 的——函数拿不到自己返回的那个 promise。
+    let markDone: () => void = () => {}
+    const done = new Promise<void>((resolve) => {
+      markDone = resolve
+    })
+    this.inFlightWarmups.set(sessionId, { abort: abortController, done })
     log.info('warmup started', {
       sessionId,
       cwd: args.cwd,
@@ -379,6 +412,9 @@ export class ClaudeAdapter implements AgentBackend {
       } catch (error) {
         log.warn('warmup transcript cleanup failed:', { sessionId, cwd: args.cwd, error })
       }
+      // 放在最后：dispose 等的就是"transcript 已经删完"这个时刻
+      this.inFlightWarmups.delete(sessionId)
+      markDone()
     }
   }
 

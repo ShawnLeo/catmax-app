@@ -6,6 +6,7 @@ import { ctx } from './context'
 import { registerAllHandlers } from './ipc/register'
 import { bridgeManager } from './protocol/manager'
 import { logger } from './service/logger'
+import { cleanupWarmupTranscripts } from './service/warmup-cleanup'
 import { createMainWindow } from './window'
 
 const log = logger.domain('main')
@@ -53,6 +54,16 @@ void app.whenReady().then(async () => {
   log.info('database + settings ready')
 
   registerAllHandlers()
+
+  // Warmup Transcript: 清掉上次被强杀时留下的预热残留（文件 + 已入库的记录）。
+  // 必须在 createMainWindow 之前 await——渲染层 onMounted 里就会 reconcile，
+  // 晚一步的话那条 "Session warmup" 已经被读进侧边栏了。
+  // 失败不阻塞启动：扫描层本来就会跳过预热 transcript，清理只是顺手收垃圾。
+  try {
+    await cleanupWarmupTranscripts()
+  } catch (e) {
+    log.warn('warmup transcript cleanup failed:', e)
+  }
 
   createMainWindow()
 

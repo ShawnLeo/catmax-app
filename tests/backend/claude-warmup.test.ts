@@ -18,6 +18,7 @@ vi.mock('electron', () => ({
 }))
 
 const { ClaudeAdapter } = await import('@main/backend/claude/adapter')
+const { WARMUP_MARKER } = await import('@main/backend/claude/warmup-transcript')
 
 describe('ClaudeAdapter warmup', () => {
   beforeEach(() => {
@@ -35,7 +36,9 @@ describe('ClaudeAdapter warmup', () => {
       prompt: string
       options: { cwd: string; model: string; sessionId: string }
     }
-    expect(call.prompt).toBe('Warmup. Reply with exactly "ready" and do not use any tools.')
+    // Warmup Transcript: 断言自标记而不是措辞——措辞可以随便改，标记不行，
+    // 它是 isWarmupTranscript 认出残留 transcript 的依据（丢过一次，见那个模块的注释）
+    expect(call.prompt).toContain(WARMUP_MARKER)
     expect(call.options.cwd).toBe('/tmp/project')
     expect(call.options.model).toBe('sonnet')
     expect(call.options.sessionId).toMatch(/^[0-9a-f-]{36}$/)

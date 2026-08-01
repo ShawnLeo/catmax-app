@@ -14,12 +14,13 @@
     <!-- 主聊天区:用具体 min-width 而非 min-w-0,防止被右面板挤压到低于 250px。
          sidebar 折叠时宽度为 0,不占空间;展开时由 ResizeHandle clamp 在 [SIDEBAR_MIN, 容器一半],
          加上这里的 min-w 保证主聊天区 + sidebar 不会被右面板挤没。 -->
-    <div class="flex-1 flex flex-col min-w-[250px]">
+    <div ref="chatColumnRef" class="flex-1 flex flex-col min-w-[250px]">
       <RuntimeConfigBar />
 
       <MessageList
         v-if="messageStore.messages.length > 0"
         class="flex-1"
+        :nav-rail-visible="navRailVisible"
         :show-thinking="runtimeConfig.effort !== 'none'"
       />
       <div
@@ -64,14 +65,16 @@
         2. 权限确认（pendingApproval / pendingClaudePermission）→ PermissionPanel
         3. 都没有 → Composer 正常输入
       -->
-      <QuestionPanel v-if="messageStore.pendingAgentQuestion" />
+      <QuestionPanel v-if="messageStore.pendingAgentQuestion" :nav-rail-visible="navRailVisible" />
       <PermissionPanel
         v-else-if="messageStore.pendingApproval || messageStore.pendingClaudePermission"
+        :nav-rail-visible="navRailVisible"
       />
       <Composer
         v-else
         :disabled="!backendStore.isAvailable"
         :model-value="composerModelValue"
+        :nav-rail-visible="navRailVisible"
         @update:model-value="onComposerUpdate"
         @send="onSend"
       />
@@ -114,6 +117,8 @@ import RightPanel from '@renderer/components/panel/RightPanel.vue'
 import Sidebar from '@renderer/components/sidebar/Sidebar.vue'
 import ResizeHandle from '@renderer/components/ui/ResizeHandle.vue'
 import { useStreamMessage } from '@renderer/composables/useStreamMessage'
+import { MIN_WIDTH_FOR_MESSAGE_NAV_RAIL } from '@renderer/lib/chat-layout'
+import { isNavigableUserMessage } from '@renderer/lib/message-navigation'
 import { randomUUID } from '@renderer/lib/utils'
 import { useBackendStore } from '@renderer/stores/backend'
 import { useFilesStore } from '@renderer/stores/files'
@@ -164,8 +169,17 @@ const CHAT_AREA_MIN = 250
 // 底部终端面板可拖拽高度——min 保证终端至少能显示几行，max 不超过容器 70%（留空间给聊天区）
 const BOTTOM_PANEL_MIN = 120
 const containerRef = ref<HTMLElement | null>(null)
+const chatColumnRef = ref<HTMLElement | null>(null)
 const containerWidth = ref(Number.POSITIVE_INFINITY)
 const containerHeight = ref(Number.POSITIVE_INFINITY)
+const chatColumnWidth = ref(0)
+
+const navRailVisible = computed(
+  () =>
+    !messageStore.loading &&
+    chatColumnWidth.value >= MIN_WIDTH_FOR_MESSAGE_NAV_RAIL &&
+    messageStore.messages.filter(isNavigableUserMessage).length >= 2,
+)
 
 const sidebarMax = computed(() => Math.max(SIDEBAR_MIN, Math.floor(containerWidth.value / 2)))
 
@@ -206,11 +220,20 @@ onMounted(() => {
     containerHeight.value = containerRef.value.clientHeight
     resizeObserver = new ResizeObserver((entries) => {
       for (const entry of entries) {
-        containerWidth.value = entry.contentRect.width
-        containerHeight.value = entry.contentRect.height
+        if (entry.target === containerRef.value) {
+          containerWidth.value = entry.contentRect.width
+          containerHeight.value = entry.contentRect.height
+        }
+        if (entry.target === chatColumnRef.value) {
+          chatColumnWidth.value = entry.contentRect.width
+        }
       }
     })
     resizeObserver.observe(containerRef.value)
+    if (chatColumnRef.value) {
+      chatColumnWidth.value = chatColumnRef.value.clientWidth
+      resizeObserver.observe(chatColumnRef.value)
+    }
   }
 })
 onUnmounted(() => {

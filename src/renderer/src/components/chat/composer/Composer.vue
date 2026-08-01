@@ -13,7 +13,7 @@
     保证输入框跟上方消息列表左右对齐。
   -->
   <div>
-    <div class="mx-auto max-w-3xl lg:max-w-screen-lg xl:max-w-[1280px] 2xl:max-w-[1440px] p-3">
+    <div :class="[chatContentWidthClass(navRailVisible), 'p-3']">
       <!-- 圆角输入容器(@container:作为容器查询的锚点,底部配置行根据此容器实际宽度
            折叠/展开,而不是根据视口宽度——这样右侧面板挤压时能正确响应)。
            注意：不加 overflow-hidden——否则 DropdownMenu/ThinkingSlider 的弹层
@@ -151,6 +151,7 @@ import PermissionShieldButton from '@renderer/components/chat/composer/Permissio
 import ThinkingSlider from '@renderer/components/chat/composer/ThinkingSlider.vue'
 import { Button } from '@renderer/components/ui/button'
 import { DropdownMenu } from '@renderer/components/ui/dropdown-menu'
+import { chatContentWidthClass } from '@renderer/lib/chat-layout'
 import { useBackendStore } from '@renderer/stores/backend'
 import { useChatInputStore } from '@renderer/stores/chat-input'
 import { useMessageStore } from '@renderer/stores/message'
@@ -168,6 +169,7 @@ interface RuntimeConfigValue {
 const props = defineProps<{
   disabled?: boolean
   modelValue: RuntimeConfigValue
+  navRailVisible?: boolean
 }>()
 const emit = defineEmits<{
   send: [text: string, attachments: ContextBlock[]]
