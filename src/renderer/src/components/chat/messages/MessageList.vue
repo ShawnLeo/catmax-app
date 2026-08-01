@@ -15,7 +15,7 @@
       class="flex items-center justify-center h-full text-muted-foreground"
     >
       <div class="text-center">
-        <div class="animate-pulse text-sm">加载历史中...</div>
+        <div class="animate-pulse text-[length:var(--chat-text-u1)]">加载历史中...</div>
       </div>
     </div>
     <!--
@@ -77,7 +77,9 @@
             <span
               class="absolute w-2 h-2 rounded-full -left-[6px] top-1.5 bg-success animate-pulse"
             />
-            <div class="flex items-center gap-2 text-[13px] text-muted-foreground">
+            <div
+              class="flex items-center gap-2 text-[length:var(--chat-text-base)] text-muted-foreground"
+            >
               <Loader2Icon class="w-3.5 h-3.5 flex-shrink-0 animate-spin" />
               <span>正在思考</span>
               <LoadingDots class="text-muted-foreground" :dot-size="4" :duration="1.6" />
@@ -89,13 +91,13 @@
       <!-- 错误提示（codex/claude 调 API 失败时 messageStore.lastError 会被设置） -->
       <div
         v-if="messageStore.lastError"
-        class="rounded-md border border-destructive/30 bg-destructive/5 px-4 py-3 text-sm text-destructive whitespace-pre-wrap"
+        class="rounded-md border border-destructive/30 bg-destructive/5 px-4 py-3 text-[length:var(--chat-text-u1)] text-destructive whitespace-pre-wrap"
       >
         <div class="flex items-start gap-2">
           <AlertCircleIcon class="w-4 h-4 flex-shrink-0 mt-0.5" />
           <div class="flex-1 min-w-0">
             <div class="font-medium mb-1">出错了</div>
-            <div class="text-xs">{{ messageStore.lastError }}</div>
+            <div class="text-[length:var(--chat-text-d1)]">{{ messageStore.lastError }}</div>
           </div>
         </div>
       </div>

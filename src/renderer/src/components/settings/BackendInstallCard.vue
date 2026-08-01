@@ -4,8 +4,8 @@
     <div class="flex items-start gap-2">
       <BackendIcon :backend="backendId" class="w-4 h-4 mt-0.5 shrink-0" />
       <div class="flex flex-col gap-1 min-w-0">
-        <span class="text-sm font-medium">未检测到 {{ backendId }}</span>
-        <span class="text-xs text-muted-foreground leading-relaxed">
+        <span class="text-[length:var(--ui-text-base)] font-medium">未检测到 {{ backendId }}</span>
+        <span class="text-[length:var(--ui-text-d3)] text-muted-foreground leading-relaxed">
           {{ backendId }} 需要单独安装。可以让 catmax 直接下载官方发布版（下载约 130MB，解压后约
           350MB），装到应用自己的目录，不会污染系统 PATH。
         </span>
@@ -14,7 +14,7 @@
 
     <!-- 安装中：阶段文案 + 进度条 + 取消 -->
     <div v-if="installing" class="flex flex-col gap-2">
-      <div class="flex items-center justify-between text-xs">
+      <div class="flex items-center justify-between text-[length:var(--ui-text-d3)]">
         <span class="text-muted-foreground">{{ phaseLabel }}</span>
         <span v-if="downloadLabel" class="text-muted-foreground tabular-nums">
           {{ downloadLabel }}
@@ -46,19 +46,19 @@
     <!-- 失败/取消提示。成功不显示——装好后卡片本身就消失了 -->
     <div
       v-if="failureMessage"
-      class="text-xs px-3 py-2 rounded-md bg-destructive/5 text-destructive"
+      class="text-[length:var(--ui-text-d3)] px-3 py-2 rounded-md bg-destructive/5 text-destructive"
     >
       {{ failureMessage }}
     </div>
     <div
       v-else-if="progress?.phase === 'cancelled'"
-      class="text-xs px-3 py-2 rounded-md bg-muted text-muted-foreground"
+      class="text-[length:var(--ui-text-d3)] px-3 py-2 rounded-md bg-muted text-muted-foreground"
     >
       已取消安装。
     </div>
 
     <!-- 手动安装命令：一键安装失败时的兜底 -->
-    <div v-if="showManual" class="flex flex-col gap-2 text-xs">
+    <div v-if="showManual" class="flex flex-col gap-2 text-[length:var(--ui-text-d3)]">
       <p class="text-muted-foreground">在终端里跑其中一条，装完回来点「刷新」：</p>
       <div v-for="cmd in manualCommands" :key="cmd.label" class="flex items-center gap-2">
         <code class="flex-1 px-2 py-1.5 rounded bg-muted font-mono truncate">{{

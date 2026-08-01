@@ -1,5 +1,7 @@
 <template>
-  <div class="text-xs text-destructive">内容块渲染失败：{{ block.type }}</div>
+  <div class="text-[length:var(--chat-text-d1)] text-destructive">
+    内容块渲染失败：{{ block.type }}
+  </div>
 </template>
 
 <script setup lang="ts">

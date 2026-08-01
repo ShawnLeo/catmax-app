@@ -22,13 +22,39 @@
         class="flex-1"
         :show-thinking="runtimeConfig.effort !== 'none'"
       />
-      <div v-else class="flex-1 flex items-center justify-center text-muted-foreground">
-        <div class="text-center">
-          <p class="text-lg font-medium text-foreground">开始新对话</p>
-          <p class="text-sm mt-2">
-            在工作区 {{ workspaceStore.currentWorkspace?.name }} 里发条消息
+      <div
+        v-else
+        class="new-session flex-1 flex items-center justify-center px-6 text-muted-foreground"
+      >
+        <div class="relative z-10 flex max-w-md flex-col items-center text-center">
+          <CatmaxLogo variant="plain" class="mb-7 h-28 w-28" />
+
+          <p class="text-[length:var(--ui-text-u3)] font-semibold tracking-tight text-foreground">
+            开始一段新对话
           </p>
-          <p class="text-xs mt-1">使用 {{ backendStore.currentId }} 后端</p>
+          <p class="mt-2 max-w-sm text-[length:var(--ui-text-base)] leading-relaxed">
+            告诉我你想构建、修改或了解什么，我们可以从这里开始。
+          </p>
+
+          <div
+            class="mt-5 flex items-center justify-center gap-3 text-[length:var(--ui-text-d3)] text-muted-foreground"
+          >
+            <span>
+              工作区
+              <span class="ml-1 inline-flex items-center gap-1.5 font-medium text-foreground/80">
+                <HouseIcon class="h-3.5 w-3.5" />
+                {{ workspaceStore.currentWorkspace?.name ?? '当前工作区' }}
+              </span>
+            </span>
+            <span class="h-3 w-px bg-border" aria-hidden="true" />
+            <span>
+              后端
+              <span class="ml-1 inline-flex items-center gap-1.5 font-medium text-foreground/80">
+                <BackendIcon :backend="backendStore.currentId" class="h-3.5 w-3.5" />
+                {{ backendDisplayName }}
+              </span>
+            </span>
+          </div>
         </div>
       </div>
 
@@ -82,6 +108,8 @@ import QuestionPanel from '@renderer/components/chat/feedback/QuestionPanel.vue'
 import BottomTerminalPanel from '@renderer/components/chat/layout/BottomTerminalPanel.vue'
 import RuntimeConfigBar from '@renderer/components/chat/layout/RuntimeConfigBar.vue'
 import MessageList from '@renderer/components/chat/messages/MessageList.vue'
+import BackendIcon from '@renderer/components/icons/BackendIcon.vue'
+import CatmaxLogo from '@renderer/components/icons/CatmaxLogo.vue'
 import RightPanel from '@renderer/components/panel/RightPanel.vue'
 import Sidebar from '@renderer/components/sidebar/Sidebar.vue'
 import ResizeHandle from '@renderer/components/ui/ResizeHandle.vue'
@@ -104,6 +132,7 @@ import type {
 } from '@shared/backend/types'
 import type { BackendId } from '@shared/constants'
 import type { RuntimeConfigSnapshot } from '@shared/ipc/session'
+import { HouseIcon } from 'lucide-vue-next'
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 
@@ -117,6 +146,12 @@ const gitStore = useGitStore()
 const uiStore = useUiStore()
 const settingsStore = useSettingsStore()
 useStreamMessage()
+
+const backendDisplayName = computed(() => {
+  if (backendStore.currentId === 'claude') return 'Claude'
+  if (backendStore.currentId === 'codex') return 'Codex'
+  return backendStore.currentId
+})
 
 // 侧栏可拖拽宽度--min 为当前默认宽度，max 为容器一半（即最大 1:1 与聊天区同宽）
 const SIDEBAR_MIN = 280
@@ -136,16 +171,10 @@ const sidebarMax = computed(() => Math.max(SIDEBAR_MIN, Math.floor(containerWidt
 
 // File Preview Layout: 右侧拖拽目标是“预览 + 文件树”的组合宽度。
 const filePreviewOpen = computed(
-  () =>
-    uiStore.rightPanelTab === 'files' &&
-    filesStore.previewTabs.length > 0 &&
-    uiStore.filePreviewVisible,
+  () => uiStore.rightPanelTab === 'files' && filesStore.previewTabs.length > 0,
 )
 const fileTreeOpen = computed(
-  () =>
-    uiStore.rightPanelTab !== 'files' ||
-    uiStore.fileTreeVisible ||
-    filesStore.previewTabs.length === 0,
+  () => uiStore.rightPanelTab !== 'files' || uiStore.fileTreeVisible || !filePreviewOpen.value,
 )
 const rightPanelCurrent = computed(() => {
   if (filePreviewOpen.value && fileTreeOpen.value) {
@@ -658,3 +687,26 @@ async function onSend(text: string, attachments: ContextBlock[]): Promise<void> 
   await window.api.backend.startTurn(startArgs)
 }
 </script>
+
+<style scoped>
+/* New Session Welcome: 克制的中心光晕把品牌 Logo 融入空状态，不制造厚重卡片边界。 */
+.new-session {
+  position: relative;
+  overflow: hidden;
+}
+
+.new-session::before {
+  position: absolute;
+  width: min(520px, 72%);
+  aspect-ratio: 1;
+  border-radius: 9999px;
+  background: radial-gradient(
+    circle,
+    color-mix(in oklch, var(--foreground) 5%, transparent) 0,
+    color-mix(in oklch, var(--foreground) 2%, transparent) 42%,
+    transparent 72%
+  );
+  content: '';
+  pointer-events: none;
+}
+</style>

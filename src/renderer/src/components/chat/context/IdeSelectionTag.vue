@@ -6,7 +6,9 @@
     哪几行。不展示代码内容、不支持展开——catmax 当前不需要展开预览（点击行为已移除），
     保持 chip 轻量。代码内容 agent 侧会自己读文件。
   -->
-  <div class="inline-flex items-center gap-1.5 text-muted-foreground text-[12px] font-mono">
+  <div
+    class="inline-flex items-center gap-1.5 text-muted-foreground text-[length:var(--chat-text-d1)] font-mono"
+  >
     <TextSelectIcon class="w-3 h-3 flex-shrink-0" />
     <span class="truncate max-w-[400px]" :title="data.filePath">{{ label }}</span>
   </div>

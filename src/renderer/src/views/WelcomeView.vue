@@ -15,9 +15,9 @@
     <!-- 主体：居中内容 -->
     <div class="flex-1 flex flex-col items-center justify-center gap-6 p-8">
       <div class="flex flex-col items-center gap-4">
-        <CatmaxLogo variant="badge" class="w-20 h-20 rounded-[22%] shadow-lg" />
+        <CatmaxLogo variant="plain" class="w-20 h-20" />
         <div class="text-center">
-          <h1 class="text-3xl font-bold text-foreground">Catmax</h1>
+          <h1 class="text-[length:var(--ui-text-display)] font-bold text-foreground">Catmax</h1>
           <p class="mt-2 text-muted-foreground">选择一个本地文件夹作为工作区</p>
         </div>
       </div>
@@ -27,7 +27,9 @@
       </Button>
 
       <div v-if="workspaceStore.workspaces.length > 0" class="w-full max-w-md">
-        <h2 class="text-sm font-medium text-muted-foreground mb-2">最近工作区</h2>
+        <h2 class="text-[length:var(--ui-text-base)] font-medium text-muted-foreground mb-2">
+          最近工作区
+        </h2>
         <!-- 高度按窗口比例限制，超出滚动；列表后端已按 last_opened_at DESC 排序，
              这里只取最近 20 个。 -->
         <div class="flex flex-col gap-1 max-h-[40vh] overflow-y-auto pr-1">
@@ -38,7 +40,9 @@
             @click="openWorkspace(ws.id)"
           >
             <div class="font-medium text-foreground">{{ ws.name }}</div>
-            <div class="text-xs text-muted-foreground font-mono truncate">{{ ws.path }}</div>
+            <div class="text-[length:var(--ui-text-d3)] text-muted-foreground font-mono truncate">
+              {{ ws.path }}
+            </div>
           </button>
         </div>
       </div>

@@ -28,7 +28,7 @@
           :title="
             tab.isTransient ? `${fileName(tab.relativePath)}（预览，双击常驻）` : tab.relativePath
           "
-          class="h-full min-w-0 flex-1 flex items-center gap-1.5 pl-2.5 pr-1 text-xs"
+          class="h-full min-w-0 flex-1 flex items-center gap-1.5 pl-2.5 pr-1 text-[length:var(--ui-text-d3)]"
           @click="filesStore.selectPreview(tab.relativePath)"
         >
           <FileTypeIcon
@@ -57,6 +57,16 @@
         </button>
       </div>
       <div class="min-w-4 flex-1 border-b border-transparent" />
+      <button
+        v-if="showFileTreeButton"
+        type="button"
+        class="sticky right-0 w-9 shrink-0 grid place-items-center border-l border-border bg-card text-muted-foreground hover:bg-muted/50 hover:text-foreground"
+        title="打开文件树"
+        aria-label="打开文件树"
+        @click="emit('showFileTree')"
+      >
+        <PanelRightIcon class="w-3.5 h-3.5" />
+      </button>
     </div>
 
     <!-- File Preview Tabs Context Menu: 右键 tab 弹出关闭操作。
@@ -102,7 +112,7 @@
     <!-- File Preview Toolbar: 显示活动路径，并提供刷新与外部编辑器入口。 -->
     <div class="h-10 flex items-center gap-1.5 px-2.5 border-b border-border/70 bg-card/70">
       <FileTypeIcon v-if="preview" :name="preview.name" class="w-[18px] h-[18px] shrink-0" />
-      <div class="min-w-0 flex-1 text-xs truncate" :title="fullPath">
+      <div class="min-w-0 flex-1 text-[length:var(--ui-text-d3)] truncate" :title="fullPath">
         <template v-if="isOutsideWorkspace">
           <!-- Outside Workspace: 工作区外文件直接显示完整路径，文件名高亮 -->
           <span v-if="parentPath" class="text-muted-foreground">{{ parentPath }}/</span>
@@ -153,7 +163,7 @@
 
     <div
       v-if="filesStore.previewLoading"
-      class="flex-1 grid place-items-center text-xs text-muted-foreground"
+      class="flex-1 grid place-items-center text-[length:var(--ui-text-d3)] text-muted-foreground"
     >
       <div class="flex flex-col items-center gap-2">
         <LoaderCircleIcon class="w-5 h-5 animate-spin" />
@@ -164,8 +174,10 @@
     <div v-else-if="filesStore.previewError" class="flex-1 grid place-items-center p-6 text-center">
       <div class="flex flex-col items-center gap-2">
         <CircleAlertIcon class="w-7 h-7 text-danger" />
-        <div class="text-sm font-medium">无法预览文件</div>
-        <div class="text-xs text-muted-foreground break-all">{{ filesStore.previewError }}</div>
+        <div class="text-[length:var(--ui-text-base)] font-medium">无法预览文件</div>
+        <div class="text-[length:var(--ui-text-d3)] text-muted-foreground break-all">
+          {{ filesStore.previewError }}
+        </div>
       </div>
     </div>
 
@@ -176,7 +188,7 @@
           v-if="preview.kind === 'markdown' && preview.content && markdownMode === 'preview'"
           :text="preview.content"
           compact
-          class="p-5 text-[13px]"
+          class="p-5 text-[length:var(--ui-text-d2)]"
         />
 
         <div
@@ -186,13 +198,13 @@
           class="min-w-max"
         >
           <pre
-            class="file-code-preview text-[12px] font-mono py-3 pr-3 text-foreground select-text"
+            class="file-code-preview text-[length:var(--code-text-d1)] font-mono py-3 pr-3 text-foreground select-text"
             @mouseup="onSelectionChange"
           ><code v-html="highlighted" /></pre>
         </div>
 
         <div v-else-if="preview.kind === 'table' && preview.content" class="p-3 min-w-max">
-          <table class="border-collapse text-[11px] font-mono">
+          <table class="border-collapse text-[length:var(--ui-text-d4)] font-mono">
             <tbody>
               <tr v-for="(row, rowIndex) in tableRows" :key="rowIndex">
                 <td
@@ -251,7 +263,7 @@
 
         <div v-else-if="preview.kind === 'text' && preview.content !== null" class="min-w-max">
           <pre
-            class="file-code-preview text-[12px] font-mono py-3 pr-3 text-foreground select-text"
+            class="file-code-preview text-[length:var(--code-text-d1)] font-mono py-3 pr-3 text-foreground select-text"
             @mouseup="onSelectionChange"
           ><code v-html="highlighted" /></pre>
         </div>
@@ -261,7 +273,7 @@
         <button
           v-if="selectionInfo"
           type="button"
-          class="sticky bottom-3 ml-auto mr-3 mb-3 flex items-center gap-1.5 px-2.5 py-1.5 rounded-md bg-primary text-primary-foreground text-xs shadow-lg hover:bg-primary/90"
+          class="sticky bottom-3 ml-auto mr-3 mb-3 flex items-center gap-1.5 px-2.5 py-1.5 rounded-md bg-primary text-primary-foreground text-[length:var(--ui-text-d3)] shadow-lg hover:bg-primary/90"
           @click="addToChat"
         >
           <PlusIcon class="w-3.5 h-3.5" />
@@ -271,12 +283,12 @@
 
       <div
         v-if="preview.truncated"
-        class="px-3 py-1.5 text-[10px] text-warning border-t border-border bg-warning/5"
+        class="px-3 py-1.5 text-[length:var(--ui-text-d5)] text-warning border-t border-border bg-warning/5"
       >
         文件较大，当前仅显示安全预览范围
       </div>
       <div
-        class="h-7 px-3 border-t border-border/70 flex items-center gap-2 text-[10px] text-muted-foreground"
+        class="h-7 px-3 border-t border-border/70 flex items-center gap-2 text-[length:var(--ui-text-d5)] text-muted-foreground"
       >
         <span>{{ kindLabel }}</span>
         <span>·</span>
@@ -300,6 +312,7 @@ import {
   CircleAlertIcon,
   ExternalLinkIcon,
   LoaderCircleIcon,
+  PanelRightIcon,
   PlusIcon,
   RefreshCwIcon,
   XCircleIcon,
@@ -309,6 +322,9 @@ import {
 import { computed, defineComponent, h, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 
 import FileTypeIcon from './FileTypeIcon.vue'
+
+defineProps<{ showFileTreeButton?: boolean }>()
+const emit = defineEmits<{ showFileTree: [] }>()
 
 const filesStore = useFilesStore()
 const workspaceStore = useWorkspaceStore()
@@ -381,10 +397,14 @@ const PreviewUnavailable = defineComponent<{ preview: FilePreview }>({
             name: props.preview.name,
             class: 'w-14 h-14 opacity-90',
           }),
-          h('div', { class: 'text-sm font-medium' }, labels[props.preview.kind]),
           h(
             'div',
-            { class: 'text-xs text-muted-foreground' },
+            { class: 'text-[length:var(--ui-text-base)] font-medium' },
+            labels[props.preview.kind],
+          ),
+          h(
+            'div',
+            { class: 'text-[length:var(--ui-text-d3)] text-muted-foreground' },
             '可使用右上角按钮在外部编辑器中打开',
           ),
         ]),
@@ -638,7 +658,7 @@ function fileName(relativePath: string): string {
 }
 
 .context-menu-item {
-  @apply w-full flex items-center gap-2.5 px-3 py-2 rounded text-sm text-left transition-colors text-popover-foreground hover:bg-accent hover:text-accent-foreground disabled:opacity-40 disabled:cursor-not-allowed;
+  @apply w-full flex items-center gap-2.5 px-3 py-2 rounded text-[length:var(--ui-text-base)] text-left transition-colors text-popover-foreground hover:bg-accent hover:text-accent-foreground disabled:opacity-40 disabled:cursor-not-allowed;
 }
 
 /* File Preview Tabs Active State: 底部内缩强调条与主 Tab 的下划线拉开层级，
@@ -655,7 +675,7 @@ function fileName(relativePath: string): string {
 }
 
 .markdown-mode {
-  @apply h-6 px-2 rounded text-[11px] text-muted-foreground hover:text-foreground transition-colors;
+  @apply h-6 px-2 rounded text-[length:var(--ui-text-d4)] text-muted-foreground hover:text-foreground transition-colors;
 }
 
 .markdown-mode-active {

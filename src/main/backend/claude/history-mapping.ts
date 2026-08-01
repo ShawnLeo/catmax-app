@@ -94,6 +94,72 @@ function isSystemSentinel(text: string): boolean {
   return false
 }
 
+const TASK_STATUS_FALLBACK: Record<'completed' | 'failed' | 'stopped', string> = {
+  completed: '后台任务已完成',
+  failed: '后台任务失败',
+  stopped: '后台任务已停止',
+}
+
+/**
+ * 在已产出的消息里按 tool_use_id 找工具块。
+ *
+ * 不能复用 pendingToolUseIds：后台任务的 Bash/Task 调用在启动那一刻就已经拿到
+ * tool_result（"Command running in background with ID: ..."）并被移出 pending，
+ * 而完成通知是几分钟后才到的。这里直接全量搜已产出的消息。
+ */
+function findToolBlock(
+  messages: NormalizedMessage[],
+  currentAssistant: NormalizedMessage | null,
+  toolUseId: string,
+): NonNullable<NormalizedMessage['toolBlocks']>[number] | undefined {
+  for (const msg of currentAssistant ? [...messages, currentAssistant] : messages) {
+    const found = msg.toolBlocks?.find((b) => b.id === toolUseId)
+    if (found) return found
+  }
+  return undefined
+}
+
+/** <task-notification> 里被解析出来的字段。 */
+interface TaskNotification {
+  taskId: string
+  toolUseId?: string
+  status: 'completed' | 'failed' | 'stopped'
+  summary?: string
+}
+
+function tagValue(text: string, tag: string): string | undefined {
+  const match = new RegExp(`<${tag}>([\\s\\S]*?)</${tag}>`).exec(text)
+  return match?.[1]?.trim() || undefined
+}
+
+/**
+ * 解析后台任务完成通知。
+ *
+ * SDK 用一条 role=user 的消息把后台任务的终态送回模型（jsonl 里 origin.kind
+ * 是 'task-notification'），文本是一段 XML。它是喂给模型的信封，不是用户说的话——
+ * 直接渲染就会在对话里冒出一个用户根本没发过的气泡，里面全是 task-id / 文件路径。
+ *
+ * SDK 自己的 skip_transcript 字段也写明这类消息"应从 inline transcript 隐藏，
+ * 但可以出现在任务面板里"。所以这里把它解析成结构化终态，回填到发起它的那个
+ * 工具卡片上（tool-use-id 正是为此而带），气泡本身丢弃。
+ */
+function parseTaskNotification(text: string): TaskNotification | null {
+  if (!text.includes('<task-notification>')) return null
+  const taskId = tagValue(text, 'task-id')
+  if (!taskId) return null
+  const rawStatus = tagValue(text, 'status')
+  const status: TaskNotification['status'] =
+    rawStatus === 'failed' ? 'failed' : rawStatus === 'stopped' ? 'stopped' : 'completed'
+  const toolUseId = tagValue(text, 'tool-use-id')
+  const summary = tagValue(text, 'summary')
+  return {
+    taskId,
+    ...(toolUseId ? { toolUseId } : {}),
+    status,
+    ...(summary ? { summary } : {}),
+  }
+}
+
 /**
  * 把一条 assistant jsonl 行的 content blocks 追加进目标 NormalizedMessage。
  *
@@ -249,6 +315,29 @@ export function claudeReplayToMessages(messages: ClaudeStreamMessage[]): Normali
         const compactSummary = extractCompactSummary(rawText)
         if (compactSummary !== null) {
           pendingCompactSummary = compactSummary
+          continue
+        }
+
+        // 后台任务完成通知：不是用户输入，不能成气泡。终态回填到发起它的工具卡片，
+        // 这样历史回放和实时流（background_task_updated 事件）看到的是同一个结果。
+        const notification = parseTaskNotification(rawText)
+        if (notification) {
+          lastWasCommandInvocation = false
+          if (notification.toolUseId) {
+            const tb = findToolBlock(result, currentAssistant, notification.toolUseId)
+            if (tb) {
+              tb.status = notification.status === 'completed' ? 'completed' : 'failed'
+              tb.output = {
+                ok: notification.status === 'completed',
+                summary: notification.summary ?? TASK_STATUS_FALLBACK[notification.status],
+              }
+              tb.taskStats = {
+                ...(tb.taskStats ?? {}),
+                status: notification.status,
+                ...(notification.summary ? { progressSummary: notification.summary } : {}),
+              }
+            }
+          }
           continue
         }
 

@@ -13,7 +13,7 @@
   -->
   <button
     type="button"
-    class="flex items-center gap-1.5 text-[13px] leading-tight hover:text-primary transition-colors"
+    class="flex items-center gap-1.5 text-[length:var(--chat-text-base)] leading-tight hover:text-primary transition-colors"
     :title="`在文件面板中预览 ${fullPath}`"
     @click="openPreview"
   >

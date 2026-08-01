@@ -28,8 +28,10 @@
               <ListChecksIcon class="size-4" />
             </div>
             <div class="min-w-0">
-              <h3 class="text-[15px] font-semibold text-foreground">计划已准备好</h3>
-              <p class="mt-0.5 text-xs text-muted-foreground">
+              <h3 class="text-[length:var(--chat-text-u2)] font-semibold text-foreground">
+                计划已准备好
+              </h3>
+              <p class="mt-0.5 text-[length:var(--chat-text-d1)] text-muted-foreground">
                 请检查下面的实施计划，然后决定是否开始执行。
               </p>
             </div>
@@ -39,9 +41,14 @@
             <MarkdownView
               v-if="request.plan"
               :text="request.plan"
-              class="px-5 py-4 text-[13px] text-foreground"
+              class="px-5 py-4 text-[length:var(--chat-text-base)] text-foreground"
             />
-            <p v-else class="px-5 py-4 text-sm italic text-muted-foreground">没有可显示的计划。</p>
+            <p
+              v-else
+              class="px-5 py-4 text-[length:var(--chat-text-u1)] italic text-muted-foreground"
+            >
+              没有可显示的计划。
+            </p>
           </div>
 
           <div class="flex items-center justify-end gap-2 border-t border-border/70 px-5 py-3">
@@ -57,12 +64,12 @@
           <!-- header -->
           <div class="px-4 pt-3 pb-2 flex items-center gap-2">
             <ShieldAlertIcon :class="['w-5 h-5 flex-shrink-0', riskColor]" />
-            <h3 class="text-base font-semibold flex-1 min-w-0 truncate">
+            <h3 class="text-[length:var(--chat-text-u3)] font-semibold flex-1 min-w-0 truncate">
               {{ request.title }}
             </h3>
             <span
               :class="[
-                'text-xs px-2 py-0.5 rounded-full whitespace-nowrap flex-shrink-0',
+                'text-[length:var(--chat-text-d1)] px-2 py-0.5 rounded-full whitespace-nowrap flex-shrink-0',
                 riskBadgeClass,
               ]"
             >
@@ -78,24 +85,27 @@
           >
             <span
               v-if="request.displayName"
-              class="text-xs font-medium px-1.5 py-0.5 rounded bg-muted text-foreground whitespace-nowrap"
+              class="text-[length:var(--chat-text-d1)] font-medium px-1.5 py-0.5 rounded bg-muted text-foreground whitespace-nowrap"
             >
               {{ request.displayName }}
             </span>
             <span
               v-else
-              class="text-xs font-medium px-1.5 py-0.5 rounded bg-muted text-foreground whitespace-nowrap"
+              class="text-[length:var(--chat-text-d1)] font-medium px-1.5 py-0.5 rounded bg-muted text-foreground whitespace-nowrap"
             >
               {{ kindLabel }}
             </span>
-            <span v-if="request.description" class="text-xs text-muted-foreground min-w-0 truncate">
+            <span
+              v-if="request.description"
+              class="text-[length:var(--chat-text-d1)] text-muted-foreground min-w-0 truncate"
+            >
               {{ request.description }}
             </span>
           </div>
 
           <!-- 为什么问：SDK decisionReason（如 "Path is outside allowed working directories"） -->
           <div v-if="request.decisionReason" class="px-4 pb-2">
-            <p class="text-[11px] text-muted-foreground italic">
+            <p class="text-[length:var(--chat-text-d2)] text-muted-foreground italic">
               {{ request.decisionReason }}
             </p>
           </div>
@@ -103,13 +113,15 @@
           <!-- body：要确认的命令 / diff / mcp 细节（原始 input，补充信息） -->
           <div v-if="request.detail" class="px-4 pb-3 max-h-72 overflow-y-auto">
             <pre
-              class="font-mono text-[12px] text-foreground bg-code-block p-3 rounded whitespace-pre-wrap overflow-x-auto"
+              class="font-mono text-[length:var(--chat-text-d1)] text-foreground bg-code-block p-3 rounded whitespace-pre-wrap overflow-x-auto"
               >{{ request.detail }}</pre>
           </div>
 
           <!-- footer -->
           <div class="px-4 py-2.5 border-t border-border flex items-center justify-between gap-2">
-            <span class="text-xs text-muted-foreground truncate">{{ sourceLabel }}</span>
+            <span class="text-[length:var(--chat-text-d1)] text-muted-foreground truncate">{{
+              sourceLabel
+            }}</span>
             <div class="flex gap-2 flex-shrink-0">
               <Button variant="outline" size="sm" @click="onReject">拒绝（Esc）</Button>
               <Button

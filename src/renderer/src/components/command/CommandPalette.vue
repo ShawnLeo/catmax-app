@@ -14,13 +14,14 @@
           ref="inputEl"
           v-model="query"
           placeholder="输入命令名或关键词..."
-          class="flex-1 bg-transparent text-sm focus:outline-none text-foreground placeholder:text-muted-foreground"
+          class="flex-1 bg-transparent text-[length:var(--ui-text-base)] focus:outline-none text-foreground placeholder:text-muted-foreground"
           @keydown.esc="close"
           @keydown.enter="runSelected"
           @keydown.arrow-down="selectNext"
           @keydown.arrow-up="selectPrev"
         />
-        <kbd class="text-xs text-muted-foreground px-1.5 py-0.5 border border-border rounded"
+        <kbd
+          class="text-[length:var(--ui-text-d3)] text-muted-foreground px-1.5 py-0.5 border border-border rounded"
           >ESC</kbd
         >
       </div>
@@ -37,13 +38,21 @@
           @click="run(cmd)"
         >
           <div class="flex-1 min-w-0">
-            <div class="text-sm text-foreground truncate">{{ cmd.title }}</div>
-            <div v-if="cmd.category" class="text-xs text-muted-foreground">{{ cmd.category }}</div>
+            <div class="text-[length:var(--ui-text-base)] text-foreground truncate">
+              {{ cmd.title }}
+            </div>
+            <div v-if="cmd.category" class="text-[length:var(--ui-text-d3)] text-muted-foreground">
+              {{ cmd.category }}
+            </div>
           </div>
-          <kbd v-if="cmd.shortcut" class="text-xs text-muted-foreground">{{ cmd.shortcut }}</kbd>
+          <kbd v-if="cmd.shortcut" class="text-[length:var(--ui-text-d3)] text-muted-foreground">{{
+            cmd.shortcut
+          }}</kbd>
         </button>
       </div>
-      <div v-else class="py-8 text-center text-sm text-muted-foreground">没有匹配的命令</div>
+      <div v-else class="py-8 text-center text-[length:var(--ui-text-base)] text-muted-foreground">
+        没有匹配的命令
+      </div>
     </div>
   </div>
 </template>

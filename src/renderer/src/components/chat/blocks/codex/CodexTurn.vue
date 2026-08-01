@@ -4,7 +4,7 @@
     <button
       v-if="running || sections.processBlocks.length"
       type="button"
-      class="flex w-full items-center gap-1.5 border-b border-border/70 pb-2 text-left text-[13px] text-muted-foreground hover:text-foreground"
+      class="flex w-full items-center gap-1.5 border-b border-border/70 pb-2 text-left text-[length:var(--chat-text-base)] text-muted-foreground hover:text-foreground"
       :aria-expanded="open"
       @click="open = !open"
     >
@@ -47,7 +47,7 @@
     <!-- Codex Turn Thinking: 始终跟在当前已输出内容之后，保持为回合最末状态。 -->
     <div
       v-if="running"
-      class="flex items-center gap-2 pt-3 text-[13px] text-muted-foreground"
+      class="flex items-center gap-2 pt-3 text-[length:var(--chat-text-base)] text-muted-foreground"
       role="status"
       aria-live="polite"
     >

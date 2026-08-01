@@ -4,7 +4,13 @@
  */
 import { z } from 'zod'
 
-import { DEFAULT_FONT_SIZE, DEFAULT_THEME_MODE, EDITOR_IDS } from './constants'
+import {
+  DEFAULT_CHAT_FONT_SIZE,
+  DEFAULT_CODE_FONT_SIZE,
+  DEFAULT_FONT_SIZE,
+  DEFAULT_THEME_MODE,
+  EDITOR_IDS,
+} from './constants'
 
 export const themeModeSchema = z.enum(['light', 'dark', 'system'])
 export type ThemeMode = z.infer<typeof themeModeSchema>
@@ -19,8 +25,10 @@ export const themeSettingsSchema = z.object({
   mode: themeModeSchema.default(DEFAULT_THEME_MODE),
   fontFamily: fontFamilySchema.default({ sans: null, chat: null, mono: null }),
   fontSize: z.number().int().min(11).max(20).default(DEFAULT_FONT_SIZE),
-  chatFontSize: z.number().int().min(11).max(20).default(15),
-  codeFontSize: z.number().int().min(10).max(18).default(13),
+  // 聊天区正文基准字号，驱动 --chat-font-size 及其派生刻度（themes.css）。
+  // 默认 13 = 该字段被真正接上之前，聊天组件里写死的那个基准，保证新装用户观感不变。
+  chatFontSize: z.number().int().min(11).max(20).default(DEFAULT_CHAT_FONT_SIZE),
+  codeFontSize: z.number().int().min(10).max(18).default(DEFAULT_CODE_FONT_SIZE),
 })
 export type ThemeSettings = z.infer<typeof themeSettingsSchema>
 

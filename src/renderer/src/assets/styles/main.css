@@ -68,7 +68,8 @@ body {
   font-family: var(--font-sans);
   background-color: var(--background);
   color: var(--foreground);
-  font-size: 14px;
+  /* 界面正文基准，跟随 settings.theme.fontSize（见 themes.css 的界面字号刻度） */
+  font-size: var(--ui-text-base);
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   overflow: hidden;

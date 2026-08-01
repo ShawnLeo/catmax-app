@@ -13,7 +13,7 @@
     <div class="flex-1 h-px bg-border/60" />
     <div
       :class="[
-        'inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[13px] font-medium border',
+        'inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[length:var(--chat-text-base)] font-medium border',
         state === 'pending'
           ? 'text-muted-foreground border-border bg-muted/50 animate-pulse'
           : 'text-muted-foreground/80 border-border/60 bg-transparent',

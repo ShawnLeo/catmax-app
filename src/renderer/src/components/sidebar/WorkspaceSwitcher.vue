@@ -3,9 +3,7 @@
     侧栏顶部：窗口控制按钮 + 工作区切换（简化样式）。
     整条作为窗口拖拽区，交互元素（按钮）单独标记 no-drag。
   -->
-  <div
-    class="h-12 flex items-center gap-2 px-3 border-b border-sidebar-border relative window-drag-region"
-  >
+  <div class="h-12 flex items-center gap-2 px-3 relative window-drag-region">
     <!-- 窗口控制按钮（macOS 红绿灯 / Windows 标准按钮） -->
     <TitleBarControls />
 
@@ -16,7 +14,9 @@
       @click="showPicker = !showPicker"
     >
       <CatmaxLogo variant="plain" class="w-5 h-5 flex-shrink-0 text-foreground" />
-      <span class="flex-1 min-w-0 text-sm font-medium text-foreground truncate">
+      <span
+        class="flex-1 min-w-0 text-[length:var(--ui-text-base)] font-medium text-foreground truncate"
+      >
         {{ workspaceStore.currentWorkspace?.name ?? '选择工作区' }}
       </span>
       <ChevronDownIcon class="w-4 h-4 flex-shrink-0 text-muted-foreground" />
@@ -43,13 +43,17 @@
           >
             <FolderIcon class="w-4 h-4 flex-shrink-0 text-muted-foreground" />
             <div class="flex-1 min-w-0">
-              <div class="text-sm font-medium truncate">{{ ws.name }}</div>
-              <div class="text-xs text-muted-foreground truncate font-mono">{{ ws.path }}</div>
+              <div class="text-[length:var(--ui-text-base)] font-medium truncate">
+                {{ ws.name }}
+              </div>
+              <div class="text-[length:var(--ui-text-d3)] text-muted-foreground truncate font-mono">
+                {{ ws.path }}
+              </div>
             </div>
           </button>
         </div>
         <button
-          class="w-full flex items-center gap-2 px-3 py-2 border-t border-border hover:bg-muted text-left text-sm cursor-pointer"
+          class="w-full flex items-center gap-2 px-3 py-2 border-t border-border hover:bg-muted text-left text-[length:var(--ui-text-base)] cursor-pointer"
           @click="addWorkspace"
         >
           <PlusIcon class="w-4 h-4" />

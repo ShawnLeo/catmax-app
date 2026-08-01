@@ -49,6 +49,9 @@ export const IPC = {
   BACKEND_START_TURN: 'backend.startTurn',
   BACKEND_INTERRUPT_TURN: 'backend.interruptTurn',
   BACKEND_STEER_TURN: 'backend.steerTurn',
+  // Background Tasks Panel: 单条后台任务的停止 + 输出尾部读取
+  BACKEND_STOP_BACKGROUND_TASK: 'backend.stopBackgroundTask',
+  BACKEND_READ_BACKGROUND_TASK_OUTPUT: 'backend.readBackgroundTaskOutput',
   BACKEND_LIST_TURN_RUNS: 'backend.listTurnRuns',
   BACKEND_RESPOND_APPROVAL: 'backend.respondApproval',
   BACKEND_RESPOND_QUESTION: 'backend.respondQuestion',
@@ -125,8 +128,15 @@ export const MAX_TEXT_PREVIEW_BYTES = 256 * 1024
 
 /** 默认设置 */
 export const DEFAULT_THEME_MODE = 'system' as const
-export const DEFAULT_FONT_SIZE = 14
-export const DEFAULT_CHAT_FONT_SIZE = 15
+/*
+ * 三条字号基准的默认值。themes.css 里 --ui-font-size / --chat-font-size /
+ * --code-font-size 的兜底值必须与这里一致——那是设置加载完成前的一瞬间用的。
+ */
+/** 界面：侧边栏 / 面板 / 设置页 / 命令面板 */
+export const DEFAULT_FONT_SIZE = 15
+/** 对话正文与 Markdown（含标题） */
+export const DEFAULT_CHAT_FONT_SIZE = 13
+/** 等宽区域：代码块 / diff / 终端 / 文件预览 */
 export const DEFAULT_CODE_FONT_SIZE = 13
 
 /** 默认编辑器 */

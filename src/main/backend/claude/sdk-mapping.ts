@@ -23,7 +23,7 @@ import type {
   SDKSystemMessage,
   SDKUserMessage,
 } from '@anthropic-ai/claude-agent-sdk'
-import type { TokenUsage, ToolCallInfo, TurnEvent } from '@shared/backend/types'
+import type { NormalizedMessage, TokenUsage, ToolCallInfo, TurnEvent } from '@shared/backend/types'
 
 import { toolResultToOutput, toolUseResultToStats, toolUseToInfo } from './mapping'
 
@@ -100,6 +100,87 @@ export function* sdkAssistantToEvents(
         break
     }
   }
+}
+
+/**
+ * 子 Agent 内部消息 → 事件。
+ *
+ * 与 sdkAssistantToEvents 的区别不只是加个前缀：主对话流是 delta 累积的
+ * （text_delta 逐 token 追加），而子 Agent 走的是完整消息转发，没有 partial 流，
+ * 所以这里产出的是成型的 NormalizedMessage，由 renderer 按 id 合并。
+ *
+ * 返回空数组表示这条消息没有可渲染内容（例如只有 SDK 内部块），调用方直接丢弃。
+ */
+export function sdkSubagentToEvents(
+  msg: SDKAssistantMessage | SDKUserMessage,
+  turnId: string,
+  parentToolUseId: string,
+): TurnEvent[] {
+  const events: TurnEvent[] = []
+  const content = (msg.message as { content: unknown }).content
+  if (!Array.isArray(content)) return events
+
+  if (msg.type === 'user') {
+    // 子 Agent 内部的工具结果——回填到它自己的工具块上。
+    for (const block of content) {
+      if (typeof block !== 'object' || block === null) continue
+      if ((block as { type?: string }).type !== 'tool_result') continue
+      const result = block as SdkToolResultBlock
+      events.push({
+        type: 'subagent_tool_result',
+        turnId,
+        parentToolUseId,
+        toolUseId: result.tool_use_id,
+        output: toolResultToOutput(sdkToToolResult(result)),
+      })
+    }
+    return events
+  }
+
+  const textBlocks: NonNullable<NormalizedMessage['textBlocks']> = []
+  const toolBlocks: NonNullable<NormalizedMessage['toolBlocks']> = []
+  for (const block of content as SdkContentBlock[]) {
+    switch (block.type) {
+      case 'text': {
+        const text = (block as { text: string }).text
+        if (text) textBlocks.push({ id: sdkBlockId(block), text, kind: 'text' })
+        break
+      }
+      case 'thinking': {
+        const text = (block as { thinking: string }).thinking
+        if (text) textBlocks.push({ id: sdkBlockId(block), text, kind: 'reasoning' })
+        break
+      }
+      case 'tool_use': {
+        const toolUse = block as unknown as SdkToolUseBlock
+        toolBlocks.push({
+          id: toolUse.id,
+          info: toolUseToInfo(sdkToToolUse(toolUse)),
+          status: 'running',
+          startedAt: Date.now(),
+        })
+        break
+      }
+      default:
+        break
+    }
+  }
+  if (textBlocks.length === 0 && toolBlocks.length === 0) return events
+
+  events.push({
+    type: 'subagent_message',
+    turnId,
+    parentToolUseId,
+    message: {
+      id: msg.message.id,
+      role: 'assistant',
+      turnId,
+      textBlocks,
+      toolBlocks,
+      createdAt: Date.now(),
+    },
+  })
+  return events
 }
 
 /**

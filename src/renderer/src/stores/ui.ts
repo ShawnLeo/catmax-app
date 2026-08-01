@@ -19,7 +19,7 @@ function normalizePanelSize(size: number): number {
  */
 const REVIEW_PANEL_MIN_WIDTH = 760
 
-export type RightPanelTab = 'git' | 'files' | 'review'
+export type RightPanelTab = 'git' | 'files' | 'review' | 'tasks'
 /** Review Diff Mode: 统一(单列 +/- 穿插) 或 拆分(左右双列) */
 export type ReviewDiffMode = 'unified' | 'split'
 
@@ -45,11 +45,16 @@ export const useUiStore = defineStore('ui', () => {
   // 列表里展开的文件 path 集合——多文件可同时展开查看 diff
   const reviewExpandedPaths = ref<Set<string>>(new Set())
 
+  // ===== 后台任务 tab 状态 =====
+  // Background Tasks Focus: 从消息流的工具卡片点「在后台面板查看」时的跳转目标。
+  // 只放 taskId，任务数据仍在 message store——这里存的是"面板该把哪一条展开并滚到眼前"。
+  // TasksPanel 消费后置回 null，否则用户手动收起后下次打开面板又会被强行展开。
+  const focusedBackgroundTaskId = ref<string | null>(null)
+
   const sidebarWidth = ref(DEFAULT_SIDEBAR_WIDTH)
   const rightPanelWidth = ref(DEFAULT_RIGHT_PANEL_WIDTH)
   // File Preview Layout: 预览宽度与文件树宽度分开保存，拖动组合面板时互不覆盖。
   const filePreviewWidth = ref(DEFAULT_FILE_PREVIEW_WIDTH)
-  const filePreviewVisible = ref(true)
   const fileTreeVisible = ref(true)
   const bottomPanelHeight = ref(DEFAULT_BOTTOM_PANEL_HEIGHT)
 
@@ -80,14 +85,7 @@ export const useUiStore = defineStore('ui', () => {
     filePreviewWidth.value = width
   }
 
-  function setFilePreviewVisible(visible: boolean): void {
-    // Files 面板至少保留一侧，避免关闭详情和文件树后失去恢复入口之外的内容上下文。
-    if (!visible && !fileTreeVisible.value) return
-    filePreviewVisible.value = visible
-  }
-
   function setFileTreeVisible(visible: boolean): void {
-    if (!visible && !filePreviewVisible.value) return
     fileTreeVisible.value = visible
   }
 
@@ -237,6 +235,17 @@ export const useUiStore = defineStore('ui', () => {
     rightPanelTab.value = tab
   }
 
+  /** 打开后台面板并定位到某条任务（工具卡片的「在后台面板查看」入口）。 */
+  function focusBackgroundTask(taskId: string): void {
+    focusedBackgroundTaskId.value = taskId
+    showRightPanel('tasks')
+  }
+
+  /** TasksPanel 消费完跳转目标后调用，避免下次打开面板时又被强行展开。 */
+  function clearBackgroundTaskFocus(): void {
+    focusedBackgroundTaskId.value = null
+  }
+
   function toggleBottomPanel(): void {
     bottomPanelVisible.value = !bottomPanelVisible.value
   }
@@ -267,10 +276,10 @@ export const useUiStore = defineStore('ui', () => {
     reviewTreeWidth,
     reviewTreeVisible,
     reviewExpandedPaths,
+    focusedBackgroundTaskId,
     sidebarWidth,
     rightPanelWidth,
     filePreviewWidth,
-    filePreviewVisible,
     fileTreeVisible,
     bottomPanelHeight,
     panelDragging,
@@ -279,7 +288,6 @@ export const useUiStore = defineStore('ui', () => {
     setSidebarWidth,
     setRightPanelWidth,
     setFilePreviewWidth,
-    setFilePreviewVisible,
     setFileTreeVisible,
     setBottomPanelHeight,
     toggleSidebar,
@@ -299,6 +307,8 @@ export const useUiStore = defineStore('ui', () => {
     collapseAllReviewFiles,
     clearReview,
     setRightPanelTab,
+    focusBackgroundTask,
+    clearBackgroundTaskFocus,
     toggleBottomPanel,
     openCommandPalette,
     closeCommandPalette,

@@ -3,7 +3,7 @@
     <!-- 当前工作区不存在时 -->
     <div
       v-if="!workspaceStore.currentWorkspace"
-      class="text-center text-xs text-muted-foreground py-8"
+      class="text-center text-[length:var(--ui-text-d3)] text-muted-foreground py-8"
     >
       请先选择工作区
     </div>
@@ -12,7 +12,7 @@
       <!-- 会话操作：主按钮保持强视觉层级，导入和刷新作为紧凑的次级操作 -->
       <div class="mb-2 flex items-center gap-1 rounded-lg bg-sidebar-accent/70 p-1">
         <button
-          class="group flex min-w-0 flex-1 items-center gap-2 rounded-md px-1.5 py-1 text-sm font-medium text-sidebar-foreground transition-colors hover:bg-background/40 cursor-pointer"
+          class="group flex min-w-0 flex-1 items-center gap-2 rounded-md px-1.5 py-1 text-[length:var(--ui-text-base)] font-medium text-sidebar-foreground transition-colors hover:bg-background/40 cursor-pointer"
           @click="newSession"
         >
           <span
@@ -61,7 +61,7 @@
         <!-- 空状态 -->
         <div
           v-if="sessionStore.sessions.length === 0"
-          class="text-center text-xs text-muted-foreground py-8"
+          class="text-center text-[length:var(--ui-text-d3)] text-muted-foreground py-8"
         >
           暂无会话
         </div>

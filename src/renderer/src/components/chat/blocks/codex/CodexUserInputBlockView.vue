@@ -21,14 +21,14 @@
     />
     <span
       v-else
-      class="flex h-full w-full flex-col items-center justify-center gap-1 px-1 text-[10px] text-muted-foreground"
+      class="flex h-full w-full flex-col items-center justify-center gap-1 px-1 text-[length:var(--chat-text-d3)] text-muted-foreground"
     >
       <ImageIcon class="h-4 w-4" />
       <span class="w-full truncate">{{ imageLoading ? '加载中' : label }}</span>
     </span>
     <span
       v-if="imageSrc && !imageFailed"
-      class="pointer-events-none absolute inset-x-0 bottom-0 truncate bg-black/55 px-1.5 py-0.5 text-left text-[10px] text-white opacity-0 transition-opacity group-hover:opacity-100"
+      class="pointer-events-none absolute inset-x-0 bottom-0 truncate bg-black/55 px-1.5 py-0.5 text-left text-[length:var(--chat-text-d3)] text-white opacity-0 transition-opacity group-hover:opacity-100"
     >
       {{ label }}
     </span>
@@ -37,7 +37,7 @@
   <button
     v-else
     type="button"
-    class="inline-flex max-w-[280px] items-center gap-1.5 rounded-md border border-border/70 bg-muted/60 px-2 py-1 text-xs text-muted-foreground transition-colors"
+    class="inline-flex max-w-[280px] items-center gap-1.5 rounded-md border border-border/70 bg-muted/60 px-2 py-1 text-[length:var(--chat-text-d1)] text-muted-foreground transition-colors"
     :class="clickable ? 'cursor-pointer hover:text-foreground' : 'cursor-default'"
     :title="title"
     @click="openInput"

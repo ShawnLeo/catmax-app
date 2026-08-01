@@ -306,15 +306,31 @@ export async function readHistoryFromJsonl(
 
 /**
  * 推算子 Agent 的 jsonl 文件路径。
- *   ~/.claude/projects/<encoded-cwd>/subagents/agent-<agentId>.jsonl
+ *   ~/.claude/projects/<encoded-cwd>/<sessionId>/subagents/agent-<agentId>.jsonl
  *
  * claude CLI 把每个子 Agent（Task 工具调用）的完整会话写到这个文件，格式跟外层
  * session jsonl 一致（type: user/assistant，message.content 是 text/tool_use/tool_result）。
  * 调用方拿到后可以直接复用 claudeReplayToMessages 转 NormalizedMessage[]。
+ *
+ * 子 Agent 目录挂在**发起它的 session** 下，而调用方（工具卡片 / 后台面板）手上
+ * 只有 agentId。agentId 全局唯一，所以这里扫一层 session 目录去找，而不是要求
+ * 调用方一路把 sessionId 传下来。找不到时退回不带 sessionId 的老路径——早期
+ * 版本用的就是那个布局。
  */
 export function resolveSubagentJsonlPath(agentId: string, cwd: string): string {
   const projectDir = encodeCwdToProjectDir(cwd)
-  return join(homedir(), '.claude', 'projects', projectDir, 'subagents', `agent-${agentId}.jsonl`)
+  const projectRoot = join(homedir(), '.claude', 'projects', projectDir)
+  const fileName = `agent-${agentId}.jsonl`
+  try {
+    for (const entry of readdirSync(projectRoot, { withFileTypes: true })) {
+      if (!entry.isDirectory()) continue
+      const candidate = join(projectRoot, entry.name, 'subagents', fileName)
+      if (existsSync(candidate)) return candidate
+    }
+  } catch {
+    // 项目目录不存在（该 cwd 还没跑过 claude）——落到下面的兜底路径，由调用方处理"文件不存在"
+  }
+  return join(projectRoot, 'subagents', fileName)
 }
 
 /**

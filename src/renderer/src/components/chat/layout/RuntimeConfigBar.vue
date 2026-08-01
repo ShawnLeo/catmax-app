@@ -17,7 +17,7 @@
     </button>
 
     <!-- 会话标题 -->
-    <h1 class="text-sm font-medium text-foreground truncate">
+    <h1 class="text-[length:var(--chat-text-u1)] font-medium text-foreground truncate">
       {{ sessionStore.currentSession?.title ?? '新会话' }}
     </h1>
 
@@ -35,6 +35,39 @@
       @click="uiStore.toggleBottomPanel()"
     >
       <PanelBottomIcon class="w-4 h-4" />
+    </button>
+
+    <!--
+      Background Tasks Indicator: 后台任务的常驻入口。
+      只在有任务时出现——它的全部意义是回答"我刚让它去后台干的事怎么样了"，
+      而那件事发生时用户通常已经滚到别处，消息流里的卡片指望不上。
+    -->
+    <button
+      v-if="messageStore.backgroundTasks.length > 0"
+      class="p-1.5 rounded-md hover:bg-muted transition-colors inline-flex items-center gap-1"
+      :class="
+        messageStore.runningBackgroundTaskCount > 0
+          ? 'text-primary'
+          : 'text-muted-foreground hover:text-foreground'
+      "
+      :title="
+        messageStore.runningBackgroundTaskCount > 0
+          ? `${messageStore.runningBackgroundTaskCount} 个后台任务运行中`
+          : '查看后台任务'
+      "
+      @click="uiStore.showRightPanel('tasks')"
+    >
+      <LoaderCircleIcon
+        v-if="messageStore.runningBackgroundTaskCount > 0"
+        class="w-4 h-4 animate-spin"
+      />
+      <ListTodoIcon v-else class="w-4 h-4" />
+      <span
+        v-if="messageStore.runningBackgroundTaskCount > 0"
+        class="text-[length:var(--chat-text-d2)] font-medium"
+      >
+        {{ messageStore.runningBackgroundTaskCount }}
+      </span>
     </button>
 
     <!-- 右侧切换按钮 -->
@@ -55,12 +88,20 @@
 
 <script setup lang="ts">
 import TitleBarControls from '@renderer/components/TitleBarControls.vue'
+import { useMessageStore } from '@renderer/stores/message'
 import { useSessionStore } from '@renderer/stores/session'
 import { useUiStore } from '@renderer/stores/ui'
-import { PanelBottomIcon, PanelLeftIcon, PanelRightIcon } from 'lucide-vue-next'
+import {
+  ListTodoIcon,
+  LoaderCircleIcon,
+  PanelBottomIcon,
+  PanelLeftIcon,
+  PanelRightIcon,
+} from 'lucide-vue-next'
 
 const sessionStore = useSessionStore()
 const uiStore = useUiStore()
+const messageStore = useMessageStore()
 </script>
 
 <style scoped>

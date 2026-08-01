@@ -144,6 +144,10 @@ export function toolUseToInfo(block: ToolUseContent): ToolCallInfo {
         },
       }
 
+    // 子 Agent 工具在现行 Claude Code 里叫 `Agent`；`Task` 是旧名，历史会话里还有，
+    // 两个都要认。只认 `Task` 的话新会话会落到 default 分支 → kind 不是 'task'，
+    // TaskCard 根本不渲染，调用子 Agent 的 prompt 也就无从显示。
+    case 'Agent':
     case 'Task':
       return {
         kind: 'task',
@@ -154,6 +158,9 @@ export function toolUseToInfo(block: ToolUseContent): ToolCallInfo {
         task: {
           description: typeof input?.description === 'string' ? input.description : '',
           prompt: typeof input?.prompt === 'string' ? input.prompt : '',
+          ...(typeof input?.subagent_type === 'string'
+            ? { subagentType: input.subagent_type }
+            : {}),
         },
       }
 
@@ -220,6 +227,24 @@ export function toolUseToInfo(block: ToolUseContent): ToolCallInfo {
   }
 }
 
+/**
+ * harness 信封说明：`[harness: ... ]` + 空行，正文从空行之后开始。
+ *
+ * 子 Agent 的输出被判定为"指令形状"时，harness 会在回传给上层模型的正文前插一段
+ * 方括号说明（控制标签已中和、残留指令按"发现"处理而非执行）。那是写给模型的
+ * 免疫声明，对用户是纯噪音——而且它出现在最显眼的开头，把真正的报告顶下去。
+ *
+ * `[^\]]*` 里的字符类包含换行，所以多行信封也能整体匹配；非贪婪到第一个 `]`
+ * 即止，正文里后续的方括号不受影响。结尾吃掉空白是因为正文有时紧跟在同一行
+ * （`…to you.] I now have…`），有时隔一个空行。
+ */
+const HARNESS_ENVELOPE_RE = /^\[harness:[^\]]*\]\s*/
+
+/** 剥掉 harness 信封说明，只留子 Agent 的实际输出。 */
+export function stripHarnessEnvelope(text: string): string {
+  return text.replace(HARNESS_ENVELOPE_RE, '')
+}
+
 /** 把 claude 的 tool_result 内容块映射到 ToolOutput */
 export function toolResultToOutput(block: ToolResultContent): ToolOutput {
   const isError = block.is_error === true
@@ -236,6 +261,8 @@ export function toolResultToOutput(block: ToolResultContent): ToolOutput {
       )
       .join('\n')
   }
+  // 子 Agent 的 tool_result 正文可能被 harness 加了信封说明，展示前先剥掉。
+  if (output !== undefined) output = stripHarnessEnvelope(output)
 
   return {
     ok: !isError,

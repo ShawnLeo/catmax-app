@@ -12,15 +12,23 @@
 
     Codex 后端的专属实现见 `../codex/MarkdownView.vue`（初始等价，可独立演化）。
   -->
-  <div v-if="rendered === undefined" class="animate-pulse text-muted-foreground text-sm select-none">
+  <div
+    v-if="rendered === undefined"
+    class="animate-pulse text-muted-foreground text-[length:var(--chat-text-u1)] select-none"
+  >
     <!--
       同步渲染未命中（markdown 管线还在初始化）的极短占位。
       预热完成后几乎不会出现；出现也只是首启那一瞬，比空白好——告诉用户内容正在来。
     -->
     …
   </div>
-  <div v-else ref="container" :class="['markdown-body', { 'markdown-body-compact': compact }]" @click="onClick"
-    v-html="rendered" />
+  <div
+    v-else
+    ref="container"
+    :class="['markdown-body', { 'markdown-body-compact': compact }]"
+    @click="onClick"
+    v-html="rendered"
+  />
 </template>
 
 <script setup lang="ts">
@@ -159,7 +167,7 @@ function markFileReference(element: HTMLElement, reference: string): void {
 /* ============ 整体排版基准 ============ */
 /* 聊天正文采用紧凑排版（接近编辑器/终端密度），不是文档那种松散呼吸空间。 */
 .markdown-body {
-  @apply text-[15px] leading-snug;
+  @apply text-[length:var(--chat-text-u1)] leading-snug;
   overflow-wrap: anywhere;
 }
 
@@ -189,24 +197,24 @@ function markFileReference(element: HTMLElement, reference: string): void {
  * 标题上方 margin 压到 8-12px——聊天回复里标题作为分节符,
  * 不需要文档那么大的呼吸空间,否则模块之间看着像断开了 */
 .markdown-body :deep(h1) {
-  @apply text-xl font-semibold;
+  @apply text-[length:var(--chat-text-u7)] font-semibold;
 }
 
 .markdown-body :deep(h2) {
-  @apply text-lg font-semibold;
+  @apply text-[length:var(--chat-text-u5)] font-semibold;
 }
 
 .markdown-body :deep(h3) {
-  @apply text-base font-semibold;
+  @apply text-[length:var(--chat-text-u3)] font-semibold;
 }
 
 .markdown-body :deep(h4) {
-  @apply text-[15px] font-semibold;
+  @apply text-[length:var(--chat-text-u2)] font-semibold;
 }
 
 .markdown-body :deep(h5),
 .markdown-body :deep(h6) {
-  @apply text-sm font-semibold text-muted-foreground;
+  @apply text-[length:var(--chat-text-u1)] font-semibold text-muted-foreground;
 }
 
 /* ============ 段落 / 首尾间距归零 ============ */
@@ -224,78 +232,25 @@ function markFileReference(element: HTMLElement, reference: string): void {
 }
 
 /* ============ 列表 ============
- * markdown-it 在 <li> 之间、以及宽松式列表(<p> 包裹)的 li 内部,都会输出
- * 空白文本节点 "\n"。这些节点继承 ul/ol 的 line-height,凭空撑出 ~20px 空白
- * (li 之间 + li 内部 p 前后都有),导致列表严重松散。
- *
- * 消除方案:ul/ol 设 line-height:0 让空白节点高度归零。
- *
- * 副作用:line-height:0 会让 ol 的原生数字标记(::marker)与文字错位——
- * marker 的高度计算依赖 li 的行框,而 li 在 line-height:0 的 ol 内行框被压缩。
- * 彻底解法:关闭原生 marker,用 CSS counter + li::before 自画数字。
- * 自画的数字是 li 内部的真实 inline 元素,跟随 li 第一行 line box,与文字天然对齐。 */
+ * MarkdownView 外层没有 white-space: pre-wrap，因此 markdown-it 输出的标签间换行会
+ * 按普通 HTML 空白折叠，不会生成额外行框。让列表保持正常行高，兼容 tight list 的
+ * 纯文本 li 与 loose list 的 li > p，避免用负 margin 补偿时把首项抬到前一段上。 */
 .markdown-body :deep(ul) {
-  @apply my-1 list-none pl-6;
-  line-height: 0;
+  @apply my-1 list-disc pl-6;
 }
 
 .markdown-body :deep(ol) {
-  @apply my-1 list-none pl-6;
-  line-height: 0;
-  /* counter-reset 在 ol 上,每个 ol 独立计数 */
-  counter-reset: md-list-item;
+  @apply my-1 list-decimal pl-6;
 }
 
 .markdown-body :deep(li) {
   @apply my-px leading-[1.4];
-  position: relative;
-  /* li 自己保持正常 line-height——纯文本 li(无 <p>/<code> 包裹的内容)靠它撑高度。
-   * 早期版本曾给 li 设 line-height:0 消除内部 "\n" 空白节点,但那会让纯文本 li
-   * 高度归零、文字消失重叠(li > * 只恢复元素子节点,纯文本节点继承 0)。
-   * li 之间的空白由 ul/ol 的 line-height:0 消除;li 内部 <p> 前后的空白
-   * 通过下面的 li > p { margin-top: 0 } + 负 margin 抵消。 */
 }
 
-/* li 内部段落归零 margin + 用负 margin-top 抵消前导 "\n" 空白节点的行高
- * (空白节点继承 li 的 line-height 21px,会把 <p> 往下推,导致自画数字与 <p>
- * 第一行错位)。margin-top: -1.4em 精确抵消一个行高(li line-height=1.4,font-size=15px,
- * -1.4em = -21px)。用 !important 确保覆盖 Tailwind preflight 的 p 默认 margin。 */
+/* loose list 的段落由 li 间距统一控制，避免全局 p 的纵向 margin 放大列表间距。 */
 .markdown-body :deep(li > p) {
-  margin-top: -1.4em !important;
+  margin-top: 0 !important;
   margin-bottom: 0 !important;
-}
-
-/* 自画列表标记,绕过原生 ::marker(它受 line-height:0 影响会错位)。
- * ul 用圆点,ol 用 counter 数字。标记绝对定位到 li 左侧,垂直居中对齐第一行。 */
-.markdown-body :deep(ul > li)::before {
-  content: '';
-  position: absolute;
-  left: -1.25rem;
-  top: 0.55rem;
-  width: 0.3rem;
-  height: 0.3rem;
-  border-radius: 50%;
-  background-color: currentColor;
-  opacity: 0.6;
-}
-
-.markdown-body :deep(ol > li) {
-  /* 自增 counter */
-  counter-increment: md-list-item;
-}
-
-.markdown-body :deep(ol > li)::before {
-  content: counter(md-list-item) '.';
-  position: absolute;
-  left: -1.5rem;
-  top: 0;
-  /* line-height 与 li 第一行一致(21px),让数字在该行高内垂直居中,
-   * 与 li 第一行文字基线对齐。top:0 对齐 li 顶部 = 第一行顶部。 */
-  line-height: 1.4;
-  width: 1.25rem;
-  text-align: right;
-  font-variant-numeric: tabular-nums;
-  font-weight: 500;
 }
 
 /* li 内嵌套的子列表留一点间距 */
@@ -316,7 +271,7 @@ function markFileReference(element: HTMLElement, reference: string): void {
 
 /* ============ 表格（GFM） ============ */
 .markdown-body :deep(table) {
-  @apply my-2 w-full border-collapse text-sm overflow-hidden;
+  @apply my-2 w-full border-collapse text-[length:var(--chat-text-u1)] overflow-hidden;
 }
 
 .markdown-body :deep(thead) {
@@ -346,7 +301,7 @@ function markFileReference(element: HTMLElement, reference: string): void {
 }
 
 .markdown-body :deep(.code-block-header) {
-  @apply flex items-center justify-between px-3 py-1 border-b border-border/50 text-xs text-muted-foreground;
+  @apply flex items-center justify-between px-3 py-1 border-b border-border/50 text-[length:var(--chat-text-d1)] text-muted-foreground;
   background-color: var(--code-block-background);
 }
 
@@ -359,9 +314,10 @@ function markFileReference(element: HTMLElement, reference: string): void {
  * 这里用 ::-webkit-scrollbar 强制常驻细滚动条，跟 VS Code 行为一致。
  */
 .markdown-body :deep(.code-block-wrapper pre) {
-  /* 字号对齐工具卡片（ToolCallCard 的 pre 也是 text-[12px]）——
-     默认继承外层正文 15px 会让代码块看着比工具框代码大很多，不协调。 */
-  @apply my-0 p-3 rounded-none border-0 text-[12px];
+  /* 围栏代码块归**代码字号**（settings.theme.codeFontSize），不跟对话正文走：
+     它和 ToolCallCard 的 pre、文件预览、diff 是同一类等宽内容，同一档才协调。
+     行内 code 反而留在对话刻度上——它嵌在句子里，跟着周围文字才不突兀。 */
+  @apply my-0 p-3 rounded-none border-0 text-[length:var(--code-text-d1)];
   overflow-x: auto;
 }
 
@@ -396,7 +352,7 @@ function markFileReference(element: HTMLElement, reference: string): void {
  * padding 压到 1px——inline code 常出现在列表/段落行内,上下 padding 大了
  * 会撑高整行 line-height,让密集含 code 的列表显得松散。 */
 .markdown-body :deep(:not(pre) > code) {
-  @apply font-mono text-[13px] bg-muted px-1 py-px rounded;
+  @apply font-mono text-[length:var(--chat-text-base)] bg-muted px-1 py-px rounded;
 }
 
 /* File Reference: 中性灰底胶囊，等宽字体，视觉与 inline code 同源；

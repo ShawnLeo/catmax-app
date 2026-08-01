@@ -50,7 +50,7 @@
           <PanelLeftIcon class="h-4 w-4" />
         </button>
 
-        <span class="min-w-0 flex-1 truncate text-xs text-muted-foreground">
+        <span class="min-w-0 flex-1 truncate text-[length:var(--ui-text-d3)] text-muted-foreground">
           {{ uiStore.reviewFiles.length }} 个文件变更 ·
           <span class="font-mono tabular-nums">
             <span class="text-emerald-500">+{{ uiStore.reviewStats.additions }}</span>
@@ -75,7 +75,7 @@
           <button
             type="button"
             :class="[
-              'h-7 px-2.5 text-xs transition-colors',
+              'h-7 px-2.5 text-[length:var(--ui-text-d3)] transition-colors',
               uiStore.reviewDiffMode === 'unified'
                 ? 'bg-primary/10 text-foreground'
                 : 'text-muted-foreground hover:bg-muted hover:text-foreground',
@@ -88,7 +88,7 @@
           <button
             type="button"
             :class="[
-              'h-7 px-2.5 text-xs transition-colors',
+              'h-7 px-2.5 text-[length:var(--ui-text-d3)] transition-colors',
               uiStore.reviewDiffMode === 'split'
                 ? 'bg-primary/10 text-foreground'
                 : 'text-muted-foreground hover:bg-muted hover:text-foreground',

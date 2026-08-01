@@ -39,10 +39,10 @@
     </div>
 
     <div class="flex-1 min-w-0">
-      <div class="text-sm text-foreground truncate">
+      <div class="text-[length:var(--ui-text-base)] text-foreground truncate">
         {{ session.title || '(新会话)' }}
       </div>
-      <div class="text-xs text-muted-foreground">
+      <div class="text-[length:var(--ui-text-d3)] text-muted-foreground">
         {{ formatRelativeTime(session.lastActiveAt) }}
       </div>
     </div>

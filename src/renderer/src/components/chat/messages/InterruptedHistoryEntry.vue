@@ -14,7 +14,7 @@
   <div class="flex items-center gap-2.5 my-3 select-none">
     <div class="flex-1 h-px bg-border/40" />
     <div
-      class="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] text-muted-foreground/80 border border-border/40 bg-transparent"
+      class="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[length:var(--chat-text-d2)] text-muted-foreground/80 border border-border/40 bg-transparent"
     >
       <CircleSlashIcon class="w-3 h-3" />
       <span>{{ label }}</span>

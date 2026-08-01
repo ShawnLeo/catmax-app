@@ -14,20 +14,20 @@
     语法高亮：用 lowlight 包自带的 highlighter 实例（基于 highlight.js，纯 JS 无 wasm，
     不会触发 CSP 问题）。已注册了 100+ 种语言，直接用。
   -->
-  <div v-if="diffFile" class="diff-view-wrapper text-[12px]">
+  <div v-if="diffFile" class="diff-view-wrapper text-[length:var(--code-text-d1)]">
     <DiffView
       :diff-file="diffFile"
       :diff-view-mode="diffModeEnum"
       :diff-view-theme="theme"
       :diff-view-highlight="true"
-      :diff-view-font-size="12"
+      :diff-view-font-size="diffFontSize"
       :register-highlighter="lowlightHighlighter"
     />
   </div>
   <!-- fallback：diffFile 构建失败（数据残缺等极端情况） -->
   <pre
     v-else
-    class="font-mono text-[12px] bg-terminal text-foreground/80 p-3 overflow-x-auto whitespace-pre-wrap"
+    class="font-mono text-[length:var(--code-text-d1)] bg-terminal text-foreground/80 p-3 overflow-x-auto whitespace-pre-wrap"
     >{{ fallbackText }}</pre>
 </template>
 
@@ -41,7 +41,9 @@ import {
   parseUnifiedDiffHunks,
   parseV4Patch,
 } from '@renderer/lib/codex-patch'
+import { useSettingsStore } from '@renderer/stores/settings'
 import type { ToolEditInfo } from '@shared/backend/types'
+import { DEFAULT_CODE_FONT_SIZE } from '@shared/constants'
 import '@git-diff-view/vue/styles/diff-view.css'
 import { computed, onMounted, onUnmounted, ref, shallowRef, watch } from 'vue'
 
@@ -49,6 +51,18 @@ const props = withDefaults(
   defineProps<{ edit: ToolEditInfo; mode?: 'unified' | 'split' }>(),
   // 默认 unified：向后兼容现有 ToolCallCard 的调用（不传 mode 时行为不变）
   { mode: 'unified' },
+)
+
+/**
+ * diff 正文字号。
+ *
+ * 底层 DiffView 只收数字 prop（它要拿字号算行高和虚拟滚动的行位置），读不到
+ * CSS 变量，所以这里从 settings 取——和外层 wrapper 的 --code-text-d1 同一档，
+ * 都是「代码字号 - 1」。两边必须一致，否则行号列和内容列会错位。
+ */
+const settingsStore = useSettingsStore()
+const diffFontSize = computed(
+  () => (settingsStore.settings?.theme.codeFontSize ?? DEFAULT_CODE_FONT_SIZE) - 1,
 )
 
 // mode prop → DiffModeEnum。Split 用库的通用 Split（GitHub 风），SplitGitHub/SplitGitLab 是其变体。

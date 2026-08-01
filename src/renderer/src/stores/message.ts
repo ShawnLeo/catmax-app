@@ -6,6 +6,7 @@ import type {
 } from '@shared/backend/blocks'
 import type {
   AgentQuestion,
+  BackgroundTaskSnapshot,
   ContextBlock,
   NormalizedMessage,
   TokenUsage,
@@ -64,6 +65,22 @@ interface SessionState {
   /** compact 是否已完成（compactTurnId 非 null 时才有意义） */
   compactDone: boolean
   /**
+   * Background Tasks Panel: 该 session 的后台任务全表（taskId → 快照）。
+   *
+   * 和 tool_call 卡片上的任务状态是同源不同用：卡片按 toolUseId 挂在消息流里，
+   * 只有带 toolUseId 的任务能显示，且会随消息滚走；这张表按 taskId 收全部任务，
+   * 供右栏面板列表和数量徽标使用——用户发完消息就滚到别处，正是这时候最需要
+   * 一个不随消息流移动的地方看"后台到底在干什么"。
+   */
+  backgroundTasks: Map<string, BackgroundTaskSnapshot>
+  /**
+   * Subagent Live Transcript: 发起子 Agent 的 tool_use id → 该子 Agent 的内部消息。
+   *
+   * 与 TaskCard 原有的"展开子会话"不同：那条路读的是子 Agent 结束后落盘的 jsonl，
+   * 只能事后回放；这张表由 SDK 转发的实时消息填充，运行中就能看到过程。
+   */
+  subagentMessages: Map<string, NormalizedMessage[]>
+  /**
    * 是否有"未读"的后台 turn 完成——侧边栏小蓝点的来源。
    *
    * 置 true：turn 在后台跑完（turn_completed），且当时用户不在看这个 session。
@@ -90,6 +107,8 @@ function createEmptySessionState(): SessionState {
     lastUsage: null,
     compactTurnId: null,
     compactDone: false,
+    backgroundTasks: new Map(),
+    subagentMessages: new Map(),
     unreadActivity: false,
   }
 }
@@ -174,6 +193,53 @@ export const useMessageStore = defineStore('message', () => {
 
   const lastError = computed(() => cur().lastError)
   const lastUsage = computed(() => cur().lastUsage)
+
+  /**
+   * Background Tasks Panel: 当前 session 的后台任务列表。
+   * 运行中的排在前面，其余按开始时间倒序——面板上最该被看到的永远在顶部。
+   */
+  const backgroundTasks = computed<BackgroundTaskSnapshot[]>(() => {
+    const list = [...cur().backgroundTasks.values()]
+    return list.sort((a, b) => {
+      const aRunning = a.status === 'running' ? 0 : 1
+      const bRunning = b.status === 'running' ? 0 : 1
+      if (aRunning !== bRunning) return aRunning - bRunning
+      return (b.startedAt ?? 0) - (a.startedAt ?? 0)
+    })
+  })
+
+  /** 运行中的后台任务数——右栏 tab 徽标和顶栏指示器的数据源。 */
+  const runningBackgroundTaskCount = computed(
+    () => backgroundTasks.value.filter((task) => task.status === 'running').length,
+  )
+
+  /** Subagent Live Transcript: 取某个子 Agent 的实时内部消息（没有则空数组）。 */
+  function subagentMessagesFor(toolUseId: string): NormalizedMessage[] {
+    return cur().subagentMessages.get(toolUseId) ?? []
+  }
+
+  /**
+   * 按发起它的 tool_use id 找后台任务。
+   *
+   * 消息流里的工具卡片只认得自己的 tool_use id，而任务表以 taskId 为主键——
+   * "在后台面板查看"这个跳转需要这一层换算。找不到说明该任务不在本次运行的
+   * 实时表里（历史回放的会话没有任务快照），调用方据此隐藏入口。
+   */
+  function backgroundTaskByToolUseId(toolUseId: string): BackgroundTaskSnapshot | undefined {
+    for (const task of cur().backgroundTasks.values()) {
+      if (task.toolUseId === toolUseId) return task
+    }
+    return undefined
+  }
+
+  /** 停止单个后台任务。真正的状态变更由 SDK 的 task_notification 回写，这里不乐观更新。 */
+  async function stopBackgroundTask(taskId: string): Promise<void> {
+    try {
+      await window.api.backend.stopBackgroundTask({ taskId })
+    } catch (e) {
+      console.error('Failed to stop background task:', e)
+    }
+  }
   /**
    * 当前 session 的 compact 分隔线状态：
    *   - null：没有 compact（从未发过 /compact，或历史回放的会话没记录）
@@ -365,6 +431,13 @@ export const useMessageStore = defineStore('message', () => {
         break
       }
       case 'background_task_updated': {
+        // 先无条件进全表——面板和徽标要看到所有任务，包括没有 toolUseId 的
+        // （background_tasks_changed 的 level 信号就不带 toolUseId）。
+        // 合并而非覆盖：不同来源的消息各自只带一部分字段（例如 outputFile 只在
+        // 启动时和终态出现），直接替换会把先前拿到的字段抹掉。
+        const prev = s.backgroundTasks.get(event.task.taskId)
+        s.backgroundTasks.set(event.task.taskId, prev ? { ...prev, ...event.task } : event.task)
+
         const itemId = event.task.toolUseId
         if (!itemId) break
         const msg = findMessageByItemId(s, event.turnId, itemId)
@@ -395,6 +468,35 @@ export const useMessageStore = defineStore('message', () => {
           toolBlock.status = toolStatus
           toolBlock.taskStats = event.task.stats
           if (event.task.status !== 'running') toolBlock.output = output
+        }
+        break
+      }
+      case 'subagent_message': {
+        const list = s.subagentMessages.get(event.parentToolUseId) ?? []
+        // 同一条 API 消息可能分多次到达（文本先、工具后），按 id 合并而非追加，
+        // 否则同一轮会在嵌套 transcript 里裂成两条。
+        const index = list.findIndex((m) => m.id === event.message.id)
+        if (index === -1) list.push(event.message)
+        else {
+          const existing = list[index]!
+          list[index] = {
+            ...existing,
+            textBlocks: [...(existing.textBlocks ?? []), ...(event.message.textBlocks ?? [])],
+            toolBlocks: [...(existing.toolBlocks ?? []), ...(event.message.toolBlocks ?? [])],
+          }
+        }
+        s.subagentMessages.set(event.parentToolUseId, [...list])
+        break
+      }
+      case 'subagent_tool_result': {
+        const list = s.subagentMessages.get(event.parentToolUseId)
+        if (!list) break
+        for (const msg of list) {
+          const block = msg.toolBlocks?.find((b) => b.id === event.toolUseId)
+          if (!block) continue
+          block.status = event.output.ok ? 'completed' : 'failed'
+          block.output = event.output
+          break
         }
         break
       }
@@ -456,6 +558,20 @@ export const useMessageStore = defineStore('message', () => {
         // 这里防止面板卡住（比如 turn 因各种原因提前结束时）。
         s.pendingClaudePermission = null
         s.pendingAgentQuestion = null
+        // Background Tasks Panel: turn 正常结束时协调器已确认所有任务终止，
+        // 但 error/interrupted 结束会直接掐断 SDK query，任务不会再有终态通知。
+        // 不扫这一遍，面板里那条任务就永远转圈，顶栏徽标也永远下不去。
+        if (event.status === 'error' || event.status === 'interrupted') {
+          for (const [taskId, task] of s.backgroundTasks) {
+            if (task.status !== 'running') continue
+            s.backgroundTasks.set(taskId, {
+              ...task,
+              status: 'stopped',
+              summary: task.summary ?? '回合结束，后台任务已中断',
+              stats: { ...task.stats, status: 'stopped' },
+            })
+          }
+        }
         clearCompletedTextItems(s, event.turnId)
         break
       }
@@ -799,6 +915,8 @@ export const useMessageStore = defineStore('message', () => {
     lastError,
     lastUsage,
     compactState,
+    backgroundTasks,
+    runningBackgroundTaskCount,
     loading,
     // session 管理
     currentSessionId,
@@ -819,6 +937,9 @@ export const useMessageStore = defineStore('message', () => {
     setLoading,
     setError,
     setErrorForSession,
+    stopBackgroundTask,
+    subagentMessagesFor,
+    backgroundTaskByToolUseId,
   }
 })
 

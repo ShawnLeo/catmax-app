@@ -2,8 +2,8 @@
   <section class="flex flex-col gap-4">
     <header class="flex items-center justify-between">
       <div>
-        <h2 class="text-lg font-semibold text-foreground">工作区</h2>
-        <p class="text-sm text-muted-foreground">管理已添加的工作区</p>
+        <h2 class="text-[length:var(--ui-text-u3)] font-semibold text-foreground">工作区</h2>
+        <p class="text-[length:var(--ui-text-base)] text-muted-foreground">管理已添加的工作区</p>
       </div>
       <Button size="sm" @click="addWorkspace">添加</Button>
     </header>
@@ -15,8 +15,12 @@
         class="flex items-center justify-between p-3 rounded-md hover:bg-muted"
       >
         <div class="min-w-0 flex-1">
-          <div class="font-medium text-foreground text-sm">{{ ws.name }}</div>
-          <div class="text-xs text-muted-foreground font-mono truncate">{{ ws.path }}</div>
+          <div class="font-medium text-foreground text-[length:var(--ui-text-base)]">
+            {{ ws.name }}
+          </div>
+          <div class="text-[length:var(--ui-text-d3)] text-muted-foreground font-mono truncate">
+            {{ ws.path }}
+          </div>
         </div>
         <div class="flex items-center gap-1">
           <Button variant="ghost" size="sm" @click="renameWorkspace(ws.id, ws.name)">重命名</Button>
@@ -33,7 +37,7 @@
 
       <div
         v-if="workspaceStore.workspaces.length === 0"
-        class="text-center py-8 text-sm text-muted-foreground"
+        class="text-center py-8 text-[length:var(--ui-text-base)] text-muted-foreground"
       >
         暂无工作区
       </div>

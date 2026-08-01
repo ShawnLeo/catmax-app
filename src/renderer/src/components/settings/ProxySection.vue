@@ -1,8 +1,8 @@
 <template>
   <section class="flex flex-col gap-4">
     <header>
-      <h2 class="text-lg font-semibold text-foreground">网络代理</h2>
-      <p class="text-sm text-muted-foreground">
+      <h2 class="text-[length:var(--ui-text-u3)] font-semibold text-foreground">网络代理</h2>
+      <p class="text-[length:var(--ui-text-base)] text-muted-foreground">
         为后端 CLI（codex / claude）注入 HTTPS_PROXY 环境变量。 macOS
         系统代理不会自动传给命令行工具，需要在这里显式配置。
       </p>
@@ -10,10 +10,13 @@
 
     <!-- 启用开关 -->
     <div class="flex items-center justify-between">
-      <label class="text-sm font-medium">启用代理</label>
+      <label class="text-[length:var(--ui-text-base)] font-medium">启用代理</label>
       <div class="flex items-center gap-2">
         <span
-          :class="['text-xs font-medium', proxy.enabled ? 'text-success' : 'text-muted-foreground']"
+          :class="[
+            'text-[length:var(--ui-text-d3)] font-medium',
+            proxy.enabled ? 'text-success' : 'text-muted-foreground',
+          ]"
         >
           {{ proxy.enabled ? '已开启' : '已关闭' }}
         </span>
@@ -41,7 +44,9 @@
 
     <!-- 代理 URL -->
     <div class="flex items-center justify-between gap-3">
-      <label class="text-sm font-medium whitespace-nowrap">代理 URL</label>
+      <label class="text-[length:var(--ui-text-base)] font-medium whitespace-nowrap"
+        >代理 URL</label
+      >
       <Input
         :model-value="proxy.url ?? ''"
         placeholder="http://127.0.0.1:7890"
@@ -53,7 +58,9 @@
 
     <!-- bypass -->
     <div class="flex items-center justify-between gap-3">
-      <label class="text-sm font-medium whitespace-nowrap">不走代理的域名</label>
+      <label class="text-[length:var(--ui-text-base)] font-medium whitespace-nowrap"
+        >不走代理的域名</label
+      >
       <Input
         :model-value="proxy.bypass ?? ''"
         placeholder="localhost,127.0.0.1,*.local"
@@ -82,7 +89,7 @@
     <div
       v-if="statusMessage"
       :class="[
-        'text-xs px-3 py-2 rounded-md',
+        'text-[length:var(--ui-text-d3)] px-3 py-2 rounded-md',
         statusKind === 'error'
           ? 'bg-destructive/5 text-destructive'
           : statusKind === 'success'
@@ -94,7 +101,9 @@
     </div>
 
     <!-- 重要提示 -->
-    <div class="text-xs text-muted-foreground space-y-1 px-3 py-2 bg-muted/30 rounded-md">
+    <div
+      class="text-[length:var(--ui-text-d3)] text-muted-foreground space-y-1 px-3 py-2 bg-muted/30 rounded-md"
+    >
       <p>⚠️ 改了代理设置后：</p>
       <ul class="list-disc ml-5 space-y-0.5">
         <li>新发起的 turn 会用新代理（claude 是 per-turn process，立即生效）</li>

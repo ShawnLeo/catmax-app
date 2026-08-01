@@ -5,10 +5,10 @@
       <div class="flex items-center gap-2 mb-2">
         <FileTypeIcon name="src" is-directory expanded class="w-[18px] h-[18px] flex-shrink-0" />
         <div class="min-w-0 flex-1">
-          <div class="text-[13px] font-medium truncate">
+          <div class="text-[length:var(--ui-text-d2)] font-medium truncate">
             {{ workspaceStore.currentWorkspace?.name ?? 'Files' }}
           </div>
-          <div class="text-[10px] text-muted-foreground truncate">
+          <div class="text-[length:var(--ui-text-d5)] text-muted-foreground truncate">
             {{ workspaceStore.currentWorkspace?.path }}
           </div>
         </div>
@@ -33,7 +33,7 @@
         <input
           v-model="query"
           type="search"
-          class="w-full h-7 rounded-md border border-border bg-background/70 pl-7 pr-7 text-xs outline-none placeholder:text-muted-foreground focus:border-primary/60 focus:ring-1 focus:ring-primary/20"
+          class="w-full h-7 rounded-md border border-border bg-background/70 pl-7 pr-7 text-[length:var(--ui-text-d3)] outline-none placeholder:text-muted-foreground focus:border-primary/60 focus:ring-1 focus:ring-primary/20"
           placeholder="搜索工作区文件"
           spellcheck="false"
         />
@@ -50,7 +50,7 @@
 
       <div
         v-if="filesStore.requiresRestart"
-        class="mt-2 rounded border border-warning/35 bg-warning/8 px-2 py-1.5 text-[10px] leading-4 text-warning"
+        class="mt-2 rounded border border-warning/35 bg-warning/8 px-2 py-1.5 text-[length:var(--ui-text-d5)] leading-4 text-warning"
       >
         主进程仍是旧版本：文件树已兼容，重启应用后可使用完整搜索与媒体预览。
       </div>
@@ -60,7 +60,7 @@
     <div class="flex-1 overflow-y-auto py-1.5 px-1">
       <div
         v-if="!workspaceStore.currentWorkspace"
-        class="h-full grid place-items-center px-6 text-center text-xs text-muted-foreground"
+        class="h-full grid place-items-center px-6 text-center text-[length:var(--ui-text-d3)] text-muted-foreground"
       >
         请先选择工作区
       </div>
@@ -88,8 +88,8 @@
             class="w-4 h-4 flex-shrink-0"
           />
           <span class="min-w-0 flex-1">
-            <span class="block text-[12px] truncate">{{ entry.name }}</span>
-            <span class="block text-[10px] text-muted-foreground truncate">
+            <span class="block text-[length:var(--ui-text-d3)] truncate">{{ entry.name }}</span>
+            <span class="block text-[length:var(--ui-text-d5)] text-muted-foreground truncate">
               {{ parentPath(entry.relativePath) }}
             </span>
           </span>
@@ -122,7 +122,7 @@
     </div>
 
     <div
-      class="h-7 px-3 border-t border-border/60 flex items-center text-[10px] text-muted-foreground"
+      class="h-7 px-3 border-t border-border/60 flex items-center text-[length:var(--ui-text-d5)] text-muted-foreground"
     >
       <span v-if="query.trim()">{{ filesStore.searchResults.length }} 个结果</span>
       <span v-else>{{ rootEntries.length }} 个顶层项目</span>
@@ -133,7 +133,6 @@
 
 <script setup lang="ts">
 import { useFilesStore } from '@renderer/stores/files'
-import { useUiStore } from '@renderer/stores/ui'
 import { useWorkspaceStore } from '@renderer/stores/workspace'
 import type { DirEntry } from '@shared/ipc/fs'
 import {
@@ -153,7 +152,6 @@ import FileTypeIcon from './FileTypeIcon.vue'
 
 const workspaceStore = useWorkspaceStore()
 const filesStore = useFilesStore()
-const uiStore = useUiStore()
 const query = ref('')
 const refreshing = ref(false)
 let searchTimer: ReturnType<typeof setTimeout> | null = null
@@ -218,7 +216,6 @@ async function openSearchResult(entry: DirEntry): Promise<void> {
     query.value = ''
     await filesStore.toggleDirectory(workspaceId, entry)
   } else {
-    uiStore.setFilePreviewVisible(true)
     await filesStore.previewFile(workspaceId, entry.relativePath)
   }
 }
@@ -237,6 +234,6 @@ function parentPath(path: string): string {
 }
 
 .file-state {
-  @apply min-h-28 flex flex-col items-center justify-center gap-2 text-xs text-muted-foreground;
+  @apply min-h-28 flex flex-col items-center justify-center gap-2 text-[length:var(--ui-text-d3)] text-muted-foreground;
 }
 </style>

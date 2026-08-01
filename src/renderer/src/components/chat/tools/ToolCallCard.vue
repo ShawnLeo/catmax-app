@@ -2,13 +2,12 @@
   <!--
     工具调用卡片：Claude Code 风极简样式。
 
-    三态交互（跟 Claude Code 一致）：
-      - collapsed（收起）：只显示 header 一行
-      - preview（默认）：展开 + 内容限高 max-h-40（约 10 行内滚动）
-      - expanded（全展）：内容不限高，看完整输出
-    点 header 在 preview ↔ expanded 之间切换；右下角小按钮可单独 collapse。
+    两态交互：
+      - collapsed（默认收起）：只显示 header 一行
+      - expanded（展开）：显示完整内容，不限高
+    点 header 在 collapsed ↔ expanded 之间切换。
 
-    header: [icon] [Type]  [path/command]      [●] [⌄]
+    header: [icon] [Type]  [path/command]      [⌄]
   -->
   <div
     :class="[
@@ -18,7 +17,7 @@
         : 'border-border/60 bg-transparent hover:bg-muted/40',
     ]"
   >
-    <!-- 标题行：点击在 preview ↔ expanded 之间切换 -->
+    <!-- 标题行：点击在 collapsed ↔ expanded 之间切换 -->
     <button
       class="w-full flex items-center gap-2 px-3 py-1.5 text-left cursor-pointer"
       @click="toggleExpand"
@@ -27,10 +26,12 @@
         :is="iconForKind(tool.info.kind)"
         class="w-3.5 h-3.5 text-muted-foreground flex-shrink-0"
       />
-      <span class="text-[12px] font-medium text-foreground flex-shrink-0">{{ typeName }}</span>
+      <span class="text-[length:var(--chat-text-d1)] font-medium text-foreground flex-shrink-0">{{
+        typeName
+      }}</span>
       <span
         :class="[
-          'text-[12px] text-muted-foreground font-mono truncate flex-1 min-w-0',
+          'text-[length:var(--chat-text-d1)] text-muted-foreground font-mono truncate flex-1 min-w-0',
           isFileTool ? 'hover:text-primary hover:underline' : '',
         ]"
         :title="displayPathTooltip"
@@ -38,19 +39,18 @@
         >{{ displayPath }}</span
       >
 
-      <!-- 箭头：preview 不旋转；expanded 旋转 180 -->
+      <!-- 箭头：collapsed 不旋转；expanded 旋转 180 -->
       <ChevronDownIcon
         :class="[
           'w-3.5 h-3.5 text-muted-foreground transition-transform flex-shrink-0',
           mode === 'expanded' ? 'rotate-180' : '',
         ]"
-        :title="mode === 'expanded' ? '点击限高预览' : '点击全展开'"
+        :title="mode === 'expanded' ? '点击收起' : '点击展开'"
       />
     </button>
 
     <!--
-      内容区：preview 模式限高（max-h ≈ 10rem = 160px），expanded 模式不限高。
-      max-h 用 inline style——Tailwind v4 的 max-h-40 在动态 :class 里 JIT 可能扫不到。
+      内容区：只在 expanded 模式渲染。collapsed 模式只显示 header 一行。
 
       渲染优先级（互斥，第一个匹配的胜出）：
         1. control：控制流工具（EnterPlanMode/ExitPlanMode/TodoWrite）
@@ -59,9 +59,9 @@
         4. detail：fallback 显示原始 input JSON（但跳过 "{}" 空对象）
     -->
     <div
-      v-if="mode !== 'collapsed'"
+      v-if="mode === 'expanded'"
       class="border-t border-border/40 overflow-y-auto"
-      :style="mode === 'preview' ? 'max-height: 10rem;' : 'max-height: none;'"
+      style="max-height: 60vh"
     >
       <!-- 控制流工具：专门的渲染组件 -->
       <component
@@ -78,19 +78,15 @@
         <MarkdownView
           v-if="tool.output?.output"
           :text="tool.output.output"
-          class="text-[13px] text-foreground/90 border-t border-border/40 p-3"
+          class="text-[length:var(--chat-text-base)] text-foreground/90 border-t border-border/40 p-3"
         />
       </div>
 
-      <!-- Task 工具：子 agent 摘要 + 运行计时/完成统计 -->
-      <TaskCard
-        v-else-if="tool.info.task"
-        :task="tool.info.task"
-        :tool="tool"
-        :cwd="cwd"
-        :show-thinking="showThinking ?? true"
-        class="p-3"
-      />
+      <!--
+        Task 工具：调用提示词 + 一行状态统计。
+        子 Agent 的执行过程不在这里——它在右侧「后台」面板，卡片上有跳转入口。
+      -->
+      <TaskCard v-else-if="tool.info.task" :task="tool.info.task" :tool="tool" class="p-3" />
 
       <!-- 文件编辑：DiffView 渲染结构化 diff -->
       <DiffView v-else-if="tool.info.edit" :edit="tool.info.edit" />
@@ -102,7 +98,7 @@
       -->
       <pre
         v-else-if="tool.info.kind === 'shell_command' && tool.output?.output"
-        class="font-mono text-[12px] bg-terminal text-foreground/80 p-3 overflow-x-auto whitespace-pre-wrap"
+        class="font-mono text-[length:var(--code-text-d1)] bg-terminal text-foreground/80 p-3 overflow-x-auto whitespace-pre-wrap"
         >{{ tool.output.output }}</pre>
 
       <!--
@@ -111,11 +107,11 @@
       -->
       <pre
         v-else-if="tool.output?.output"
-        class="font-mono text-[12px] bg-terminal text-foreground/80 p-3 overflow-x-auto whitespace-pre-wrap"
+        class="font-mono text-[length:var(--code-text-d1)] bg-terminal text-foreground/80 p-3 overflow-x-auto whitespace-pre-wrap"
         >{{ tool.output.output }}</pre>
       <pre
         v-else-if="tool.info.detail && tool.info.detail !== '{}'"
-        class="font-mono text-[12px] bg-terminal text-foreground p-3 overflow-x-auto whitespace-pre-wrap"
+        class="font-mono text-[length:var(--code-text-d1)] bg-terminal text-foreground p-3 overflow-x-auto whitespace-pre-wrap"
         >{{ tool.info.detail }}</pre>
     </div>
   </div>
@@ -149,25 +145,27 @@ import WebCard from './web/WebCard.vue'
 
 const props = defineProps<{
   tool: NonNullable<NormalizedMessage['toolBlocks']>[number]
-  /** 工作区目录--子 agent 读 jsonl 需要 */
-  cwd: string
-  /** 是否显示思考块（透传给子 agent） */
+  /**
+   * 块渲染器的公共入参，由 ToolCallBlockView 统一透传。
+   * 本组件当前没有需要它们的子渲染器（子 Agent 过程已挪到右侧「后台」面板），
+   * 保留签名是为了让各块渲染器的调用形状保持一致。
+   */
+  cwd?: string
   showThinking?: boolean
 }>()
 const filesStore = useFilesStore()
 const workspaceStore = useWorkspaceStore()
 
 /**
- * 三态：collapsed / preview / expanded
+ * 两态：collapsed / expanded
  *
- * 默认 preview——内容展开但限高 max-h-40（约 10 行内滚动）。
- * 点 header 在 preview ↔ expanded 切换。
- * （未来如果需要 collapsed 态，再加单独的收起按钮。）
+ * 默认 collapsed——只显示 header 一行，内容收起。
+ * 点 header 在 collapsed ↔ expanded 切换。
  */
-const mode = ref<'collapsed' | 'preview' | 'expanded'>('preview')
+const mode = ref<'collapsed' | 'expanded'>('collapsed')
 
 function toggleExpand(): void {
-  mode.value = mode.value === 'expanded' ? 'preview' : 'expanded'
+  mode.value = mode.value === 'expanded' ? 'collapsed' : 'expanded'
 }
 
 /** kind → icon 映射。加新 kind 在这里加 case。

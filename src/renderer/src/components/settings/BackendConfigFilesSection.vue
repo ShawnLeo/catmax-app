@@ -7,8 +7,8 @@
   -->
   <section class="flex flex-col gap-3">
     <header>
-      <h2 class="text-lg font-semibold text-foreground">后端配置文件</h2>
-      <p class="text-sm text-muted-foreground">
+      <h2 class="text-[length:var(--ui-text-u3)] font-semibold text-foreground">后端配置文件</h2>
+      <p class="text-[length:var(--ui-text-base)] text-muted-foreground">
         保存前会校验语法，并把旧内容备份到 catmax 数据目录（保留最近 10 份）。
         下方显示的是上面选中的「默认后端」的配置文件——切换默认后端会显示该后端的文件。 注意区分每个
         tab 的影响范围：改后端自己的文件会连命令行一起生效，改 catmax 覆盖配置只影响本应用。
@@ -23,7 +23,7 @@
         type="button"
         :title="file.path"
         :class="[
-          'flex items-center gap-2 px-3 py-2 rounded-md border text-sm transition-colors cursor-pointer',
+          'flex items-center gap-2 px-3 py-2 rounded-md border text-[length:var(--ui-text-base)] transition-colors cursor-pointer',
           activeId === file.id
             ? 'border-foreground bg-foreground text-background shadow-sm'
             : 'border-sidebar-border text-muted-foreground hover:text-foreground hover:bg-muted',
@@ -38,7 +38,7 @@
         <span
           v-if="file.location === 'catmax-userdata'"
           :class="[
-            'text-[10px] leading-none px-1.5 py-0.5 rounded',
+            'text-[length:var(--ui-text-d5)] leading-none px-1.5 py-0.5 rounded',
             activeId === file.id
               ? 'bg-background/20 text-background'
               : 'bg-muted text-muted-foreground',
@@ -47,22 +47,28 @@
           仅本应用
         </span>
         <LockIcon v-if="file.sensitive" class="w-3 h-3 opacity-60" />
-        <span v-if="!file.exists" class="text-xs opacity-60">未创建</span>
-        <span v-else-if="isDirty(file.id)" class="text-xs text-amber-600 dark:text-amber-400">
+        <span v-if="!file.exists" class="text-[length:var(--ui-text-d3)] opacity-60">未创建</span>
+        <span
+          v-else-if="isDirty(file.id)"
+          class="text-[length:var(--ui-text-d3)] text-amber-600 dark:text-amber-400"
+        >
           ●
         </span>
       </button>
     </div>
 
     <!-- 白名单里没有这个后端的文件（比如后续新加的后端还没登记） -->
-    <p v-else class="text-xs text-muted-foreground px-3 py-2 bg-muted/30 rounded-md">
+    <p
+      v-else
+      class="text-[length:var(--ui-text-d3)] text-muted-foreground px-3 py-2 bg-muted/30 rounded-md"
+    >
       catmax 还没有登记 {{ props.backendId }} 的本地配置文件。
     </p>
 
     <!-- tab 凭空少一个会让人以为是 bug，说清楚是桥藏的、怎么恢复 -->
     <p
       v-if="hiddenByBridge.length > 0 && files.length > 0"
-      class="text-xs text-muted-foreground px-3 py-2 bg-muted/30 rounded-md"
+      class="text-[length:var(--ui-text-d3)] text-muted-foreground px-3 py-2 bg-muted/30 rounded-md"
     >
       协议桥已开启，codex 走桥的临时 token、不再读
       <code>auth.json</code>，所以这个 tab 暂时隐藏。上游的 API key
@@ -71,7 +77,7 @@
 
     <template v-if="activeFile">
       <!-- 路径行：绝对路径 + 在文件夹中显示 + 重新加载 + 文档 -->
-      <div class="flex items-center gap-2 text-xs text-muted-foreground">
+      <div class="flex items-center gap-2 text-[length:var(--ui-text-d3)] text-muted-foreground">
         <code class="flex-1 truncate font-mono" :title="activeFile.path">{{
           activeFile.path
         }}</code>
@@ -94,7 +100,7 @@
       <!-- 影响范围横幅：两类文件字段重叠，必须让用户先看清自己在改哪一份 -->
       <div
         :class="[
-          'text-xs px-3 py-2 rounded-md border',
+          'text-[length:var(--ui-text-d3)] px-3 py-2 rounded-md border',
           activeFile.location === 'catmax-userdata'
             ? 'border-sidebar-border bg-muted/30 text-muted-foreground'
             : 'border-amber-500/30 bg-amber-500/5 text-amber-700 dark:text-amber-400',
@@ -110,18 +116,20 @@
         </template>
       </div>
 
-      <p class="text-xs text-muted-foreground">{{ activeFile.description }}</p>
+      <p class="text-[length:var(--ui-text-d3)] text-muted-foreground">
+        {{ activeFile.description }}
+      </p>
 
       <!-- 敏感文件门禁：含明文密钥（codex auth.json / catmax 覆盖配置的 env 块），默认不渲染内容，点开才读 -->
       <div
         v-if="activeFile.sensitive && !revealed"
         class="flex flex-col items-start gap-2 p-4 rounded-md border border-dashed border-sidebar-border"
       >
-        <div class="flex items-center gap-2 text-sm text-foreground">
+        <div class="flex items-center gap-2 text-[length:var(--ui-text-base)] text-foreground">
           <LockIcon class="w-4 h-4" />
           这个文件可能含明文凭证
         </div>
-        <p class="text-xs text-muted-foreground">
+        <p class="text-[length:var(--ui-text-d3)] text-muted-foreground">
           点开才会读取并显示内容。写盘时强制 0600 权限。
           <template v-if="activeFile.id === 'codex.auth'">
             改坏会导致 codex 需要重新登录（<code>codex login</code>）。
@@ -144,24 +152,30 @@
           autocapitalize="off"
           rows="16"
           :disabled="loading"
-          class="w-full font-mono text-xs leading-relaxed p-3 rounded-md border border-sidebar-border bg-background text-foreground resize-y focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:opacity-50"
+          class="w-full font-mono text-[length:var(--ui-text-d3)] leading-relaxed p-3 rounded-md border border-sidebar-border bg-background text-foreground resize-y focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:opacity-50"
           :placeholder="loading ? '读取中…' : ''"
           @keydown.meta.s.prevent="save()"
           @keydown.ctrl.s.prevent="save()"
         />
 
         <!-- 语法校验状态：错误时给出行列，避免用户对着一坨报错找位置 -->
-        <div v-if="syntax && !syntax.ok" class="text-xs text-destructive whitespace-pre-wrap">
+        <div
+          v-if="syntax && !syntax.ok"
+          class="text-[length:var(--ui-text-d3)] text-destructive whitespace-pre-wrap"
+        >
           {{ formatLocation(syntax) }}{{ syntax.message }}
         </div>
-        <div v-else-if="syntax?.ok && isDirty(activeFile.id)" class="text-xs text-success">
+        <div
+          v-else-if="syntax?.ok && isDirty(activeFile.id)"
+          class="text-[length:var(--ui-text-d3)] text-success"
+        >
           语法校验通过
         </div>
 
         <!-- 冲突提示：编辑期间文件被后端或外部工具改过，让用户选，不闷头覆盖 -->
         <div
           v-if="conflict"
-          class="flex flex-col gap-2 text-xs px-3 py-2 rounded-md bg-amber-500/10 text-amber-700 dark:text-amber-400"
+          class="flex flex-col gap-2 text-[length:var(--ui-text-d3)] px-3 py-2 rounded-md bg-amber-500/10 text-amber-700 dark:text-amber-400"
         >
           <span>文件在你编辑期间被外部修改过（可能是后端自己写的）。</span>
           <div class="flex gap-2">
@@ -186,12 +200,17 @@
           >
             放弃修改
           </Button>
-          <span v-if="statusMessage" :class="['text-xs ml-auto', statusClass]">
+          <span
+            v-if="statusMessage"
+            :class="['text-[length:var(--ui-text-d3)] ml-auto', statusClass]"
+          >
             {{ statusMessage }}
           </span>
         </div>
 
-        <div class="text-xs text-muted-foreground px-3 py-2 bg-muted/30 rounded-md space-y-1">
+        <div
+          class="text-[length:var(--ui-text-d3)] text-muted-foreground px-3 py-2 bg-muted/30 rounded-md space-y-1"
+        >
           <p>💡 保存后的生效范围：</p>
           <ul class="list-disc ml-5 space-y-0.5">
             <li v-if="props.backendId === 'codex'">
@@ -221,7 +240,7 @@
 
     <div
       v-else-if="loadError"
-      class="text-xs px-3 py-2 rounded-md bg-destructive/5 text-destructive"
+      class="text-[length:var(--ui-text-d3)] px-3 py-2 rounded-md bg-destructive/5 text-destructive"
     >
       {{ loadError }}
     </div>

@@ -1,8 +1,8 @@
 <template>
   <section class="flex flex-col gap-4">
     <header>
-      <h2 class="text-lg font-semibold text-foreground">默认后端</h2>
-      <p class="text-sm text-muted-foreground">
+      <h2 class="text-[length:var(--ui-text-u3)] font-semibold text-foreground">默认后端</h2>
+      <p class="text-[length:var(--ui-text-base)] text-muted-foreground">
         新建会话时默认使用的后端。点击历史会话时会自动切换到该会话所属后端。
       </p>
     </header>
@@ -16,7 +16,7 @@
         :disabled="!isBackendAvailable(id)"
         :title="backendTooltip(id)"
         :class="[
-          'flex items-center gap-2 px-3 py-2 rounded-md border text-sm capitalize transition-colors',
+          'flex items-center gap-2 px-3 py-2 rounded-md border text-[length:var(--ui-text-base)] capitalize transition-colors',
           defaultBackend === id
             ? 'border-foreground bg-foreground text-background shadow-sm'
             : 'border-sidebar-border text-muted-foreground hover:text-foreground hover:bg-muted',
@@ -43,55 +43,74 @@
     <div class="h-px bg-sidebar-border my-1" />
 
     <header>
-      <h2 class="text-lg font-semibold text-foreground">默认运行时配置</h2>
-      <p class="text-sm text-muted-foreground">
+      <h2 class="text-[length:var(--ui-text-u3)] font-semibold text-foreground">默认运行时配置</h2>
+      <p class="text-[length:var(--ui-text-base)] text-muted-foreground">
         新建会话时，若没有"上次使用"记录，用这里的默认值兜底。已有 last-used 时优先用 last-used。
         下方显示的是上面选中的「默认后端」对应的配置——切换默认后端会显示该后端的配置。
       </p>
     </header>
 
     <!-- 当前选中后端的运行时配置——切到 codex/claude 显示对应配置 -->
-    <div class="flex flex-col gap-3 p-3 rounded-md border border-sidebar-border max-w-md">
+    <div class="flex flex-col gap-3 p-3 rounded-md border border-sidebar-border">
       <div class="flex items-center gap-2">
         <BackendIcon :backend="defaultBackend" class="w-4 h-4" />
-        <span class="text-sm font-medium capitalize">{{ defaultBackend }}</span>
+        <span class="text-[length:var(--ui-text-base)] font-medium capitalize">{{
+          defaultBackend
+        }}</span>
         <span
           v-if="backendStore.modelsByBackend[defaultBackend]?.length === 0"
-          class="text-xs text-amber-600 dark:text-amber-400 ml-auto"
+          class="text-[length:var(--ui-text-d3)] text-amber-600 dark:text-amber-400 ml-auto"
         >
           模型列表为空（后端未就绪）
         </span>
       </div>
 
-      <!-- 默认模型——从当前 backend 的模型列表动态拿 -->
-      <div class="flex flex-col gap-1.5">
-        <label class="text-xs text-muted-foreground">默认模型</label>
-        <DropdownMenu
-          :model-value="defaultRuntimeConfig[defaultBackend]?.model ?? null"
-          :options="modelOptionsFor(defaultBackend)"
-          :placeholder="'(后端默认)'"
-          @update:model-value="(v) => updateRuntimeDefault(defaultBackend, 'model', v)"
-        />
-      </div>
+      <!-- 三个下拉横排：模型名可能较长占两份宽，effort/permission 各一份 -->
+      <div class="grid grid-cols-1 sm:grid-cols-4 gap-3">
+        <!-- 默认模型——从当前 backend 的模型列表动态拿 -->
+        <div class="flex flex-col gap-1.5 sm:col-span-2">
+          <div class="flex items-center gap-1">
+            <label class="text-[length:var(--ui-text-d3)] text-muted-foreground">默认模型</label>
+            <button
+              type="button"
+              class="text-muted-foreground/60 hover:text-foreground transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+              :disabled="refreshing"
+              title="刷新模型列表"
+              @click="onRefreshModels"
+            >
+              <RefreshCwIcon class="w-3 h-3" :class="refreshing ? 'animate-spin' : ''" />
+            </button>
+          </div>
+          <DropdownMenu
+            :model-value="defaultRuntimeConfig[defaultBackend]?.model ?? null"
+            :options="modelOptionsFor(defaultBackend)"
+            :placeholder="'(后端默认)'"
+            full-width
+            @update:model-value="(v) => updateRuntimeDefault(defaultBackend, 'model', v)"
+          />
+        </div>
 
-      <!-- 默认思考强度——从当前 backend capabilities 读支持的档位 -->
-      <div class="flex flex-col gap-1.5">
-        <label class="text-xs text-muted-foreground">默认思考强度</label>
-        <DropdownMenu
-          :model-value="defaultRuntimeConfig[defaultBackend]?.effort ?? 'medium'"
-          :options="effortOptionsFor(defaultBackend)"
-          @update:model-value="(v) => updateRuntimeDefault(defaultBackend, 'effort', v)"
-        />
-      </div>
+        <!-- 默认思考强度——从当前 backend capabilities 读支持的档位 -->
+        <div class="flex flex-col gap-1.5">
+          <label class="text-[length:var(--ui-text-d3)] text-muted-foreground">默认思考强度</label>
+          <DropdownMenu
+            :model-value="defaultRuntimeConfig[defaultBackend]?.effort ?? 'medium'"
+            :options="effortOptionsFor(defaultBackend)"
+            full-width
+            @update:model-value="(v) => updateRuntimeDefault(defaultBackend, 'effort', v)"
+          />
+        </div>
 
-      <!-- 默认权限模式——从当前 backend capabilities 读支持的档位 -->
-      <div class="flex flex-col gap-1.5">
-        <label class="text-xs text-muted-foreground">默认权限模式</label>
-        <DropdownMenu
-          :model-value="defaultRuntimeConfig[defaultBackend]?.permissionMode ?? 'default'"
-          :options="permissionOptionsFor(defaultBackend)"
-          @update:model-value="(v) => updateRuntimeDefault(defaultBackend, 'permissionMode', v)"
-        />
+        <!-- 默认权限模式——从当前 backend capabilities 读支持的档位 -->
+        <div class="flex flex-col gap-1.5">
+          <label class="text-[length:var(--ui-text-d3)] text-muted-foreground">默认权限模式</label>
+          <DropdownMenu
+            :model-value="defaultRuntimeConfig[defaultBackend]?.permissionMode ?? 'default'"
+            :options="permissionOptionsFor(defaultBackend)"
+            full-width
+            @update:model-value="(v) => updateRuntimeDefault(defaultBackend, 'permissionMode', v)"
+          />
+        </div>
       </div>
     </div>
 
@@ -112,79 +131,67 @@
 
     <div class="h-px bg-sidebar-border my-1" />
 
-    <header>
-      <h2 class="text-lg font-semibold text-foreground">后端 CLI 路径</h2>
-      <p class="text-sm text-muted-foreground">
-        指定 codex / claude 可执行文件的路径。留空则从系统 PATH 自动查找。
-      </p>
-    </header>
+    <!--
+      后端 CLI 路径：仅默认后端为 codex 时显示。
+      claude 已迁移到 Agent SDK（@anthropic-ai/claude-agent-sdk），SDK 内部自带 claude 二进制，
+      不再需要用户手动配置 CLI 路径。
+    -->
+    <template v-if="defaultBackend === 'codex'">
+      <header>
+        <h2 class="text-[length:var(--ui-text-u3)] font-semibold text-foreground">后端 CLI 路径</h2>
+        <p class="text-[length:var(--ui-text-base)] text-muted-foreground">
+          指定 codex 可执行文件的路径。留空则从系统 PATH 自动查找。
+        </p>
+      </header>
 
-    <!-- codex -->
-    <div class="flex flex-col gap-2">
-      <label class="text-sm font-medium">codex 路径</label>
-      <div class="flex items-center gap-2">
-        <Input
-          :model-value="backendPaths.codex ?? ''"
-          placeholder="(使用 PATH 中的 codex)"
-          class="flex-1"
-          @update:model-value="(v: string | number) => updatePath('codex', String(v))"
-        />
-        <Button
-          variant="outline"
-          size="sm"
-          :disabled="picking === 'codex'"
-          @click="pickFile('codex')"
-        >
-          {{ picking === 'codex' ? '...' : '浏览' }}
-        </Button>
+      <!-- codex -->
+      <div class="flex flex-col gap-2">
+        <label class="text-[length:var(--ui-text-base)] font-medium">codex 路径</label>
+        <div class="flex items-center gap-2">
+          <Input
+            :model-value="backendPaths.codex ?? ''"
+            placeholder="(使用 PATH 中的 codex)"
+            class="flex-1"
+            @update:model-value="(v: string | number) => updatePath('codex', String(v))"
+          />
+          <Button
+            variant="outline"
+            size="sm"
+            :disabled="picking === 'codex'"
+            @click="pickFile('codex')"
+          >
+            {{ picking === 'codex' ? '...' : '浏览' }}
+          </Button>
+        </div>
       </div>
-    </div>
 
-    <!-- claude -->
-    <div class="flex flex-col gap-2">
-      <label class="text-sm font-medium">claude 路径</label>
-      <div class="flex items-center gap-2">
-        <Input
-          :model-value="backendPaths.claude ?? ''"
-          placeholder="(使用 PATH 中的 claude)"
-          class="flex-1"
-          @update:model-value="(v: string | number) => updatePath('claude', String(v))"
-        />
-        <Button
-          variant="outline"
-          size="sm"
-          :disabled="picking === 'claude'"
-          @click="pickFile('claude')"
-        >
-          {{ picking === 'claude' ? '...' : '浏览' }}
-        </Button>
+      <!-- 状态提示 -->
+      <div
+        v-if="statusMessage"
+        :class="[
+          'text-[length:var(--ui-text-d3)] px-3 py-2 rounded-md',
+          statusKind === 'error'
+            ? 'bg-destructive/5 text-destructive'
+            : statusKind === 'success'
+              ? 'bg-success/5 text-success'
+              : 'bg-muted text-muted-foreground',
+        ]"
+      >
+        {{ statusMessage }}
       </div>
-    </div>
 
-    <!-- 状态提示 -->
-    <div
-      v-if="statusMessage"
-      :class="[
-        'text-xs px-3 py-2 rounded-md',
-        statusKind === 'error'
-          ? 'bg-destructive/5 text-destructive'
-          : statusKind === 'success'
-            ? 'bg-success/5 text-success'
-            : 'bg-muted text-muted-foreground',
-      ]"
-    >
-      {{ statusMessage }}
-    </div>
-
-    <!-- 重要提示 -->
-    <div class="text-xs text-muted-foreground space-y-1 px-3 py-2 bg-muted/30 rounded-md">
-      <p>💡 改了路径后会：</p>
-      <ul class="list-disc ml-5 space-y-0.5">
-        <li>立即应用到 adapter（不重启 catmax）</li>
-        <li>自动清掉模型缓存，下次拉取会用新 binary 的 model/list</li>
-        <li>codex 是 long-running 进程，已有进程不会重启——切走 codex 再切回来才会重新 spawn</li>
-      </ul>
-    </div>
+      <!-- 重要提示 -->
+      <div
+        class="text-[length:var(--ui-text-d3)] text-muted-foreground space-y-1 px-3 py-2 bg-muted/30 rounded-md"
+      >
+        <p>💡 改了路径后会：</p>
+        <ul class="list-disc ml-5 space-y-0.5">
+          <li>立即应用到 adapter（不重启 catmax）</li>
+          <li>自动清掉模型缓存，下次拉取会用新 binary 的 model/list</li>
+          <li>codex 是 long-running 进程，已有进程不会重启——切走 codex 再切回来才会重新 spawn</li>
+        </ul>
+      </div>
+    </template>
   </section>
 </template>
 
@@ -202,6 +209,7 @@ import { useSettingsStore } from '@renderer/stores/settings'
 import { isInstallableBackend } from '@shared/backend/install'
 import type { EffortLevel, PermissionMode } from '@shared/backend/types'
 import type { BackendId } from '@shared/constants'
+import { RefreshCwIcon } from 'lucide-vue-next'
 import { computed, onMounted, ref } from 'vue'
 
 const settings = useSettingsStore()
@@ -230,6 +238,22 @@ const missingBackendIds = computed(() =>
 )
 
 const defaultBackend = computed(() => settings.settings?.defaultBackend ?? 'codex')
+
+/**
+ * 刷新当前默认后端的模型列表。
+ * 用 refreshModelsFor(id) 而非 refreshModels()——后者只刷"当前激活"后端，
+ * 而设置页里 defaultBackend 不一定等于激活的那个（用户可能在 claude 激活时给 codex 配默认模型）。
+ */
+const refreshing = ref(false)
+async function onRefreshModels(): Promise<void> {
+  if (refreshing.value) return
+  refreshing.value = true
+  try {
+    await backendStore.refreshModelsFor(defaultBackend.value)
+  } finally {
+    refreshing.value = false
+  }
+}
 
 // 默认运行时配置——按 backend 分别配（codex / claude 各一组 model/effort/permissionMode）
 const defaultRuntimeConfig = computed(

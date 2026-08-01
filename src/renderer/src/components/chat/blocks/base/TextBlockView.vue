@@ -6,7 +6,10 @@
     会被保留成匿名行框，凭空多撑出一行行高，叠加 margin 后段落间距过大。
     pre-wrap 仅给纯文本分支（用户消息）用——保留换行+折行。
   -->
-  <div v-if="block.text.trim()" class="leading-relaxed text-[15px] break-words">
+  <div
+    v-if="block.text.trim()"
+    class="leading-relaxed text-[length:var(--chat-text-u2)] break-words"
+  >
     <MarkdownView v-if="messageRole === 'assistant'" :text="block.text" />
     <div v-else class="whitespace-pre-wrap">{{ block.text }}</div>
   </div>

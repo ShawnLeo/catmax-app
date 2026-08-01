@@ -12,15 +12,23 @@
 
     Base 实现见 `../base/MarkdownView.vue`（服务 Claude 及跨后端共用场景）。
   -->
-  <div v-if="rendered === undefined" class="animate-pulse text-muted-foreground text-sm select-none">
+  <div
+    v-if="rendered === undefined"
+    class="animate-pulse text-muted-foreground text-[length:var(--chat-text-u1)] select-none"
+  >
     <!--
       同步渲染未命中（markdown 管线还在初始化）的极短占位。
       预热完成后几乎不会出现；出现也只是首启那一瞬，比空白好——告诉用户内容正在来。
     -->
     …
   </div>
-  <div v-else ref="container" :class="['markdown-body', { 'markdown-body-compact': compact }]" @click="onClick"
-    v-html="rendered" />
+  <div
+    v-else
+    ref="container"
+    :class="['markdown-body', { 'markdown-body-compact': compact }]"
+    @click="onClick"
+    v-html="rendered"
+  />
 </template>
 
 <script setup lang="ts">
@@ -158,7 +166,7 @@ function markFileReference(element: HTMLElement, reference: string): void {
 
 /* ============ 整体排版基准 ============ */
 .markdown-body {
-  @apply text-[15px] leading-relaxed;
+  @apply text-[length:var(--chat-text-u2)] leading-relaxed;
   overflow-wrap: anywhere;
 }
 
@@ -186,24 +194,24 @@ function markFileReference(element: HTMLElement, reference: string): void {
 
 /* ============ 标题层级（h1-h6 字号梯度） ============ */
 .markdown-body :deep(h1) {
-  @apply text-2xl font-semibold;
+  @apply text-[length:var(--chat-text-u11)] font-semibold;
 }
 
 .markdown-body :deep(h2) {
-  @apply text-xl font-semibold;
+  @apply text-[length:var(--chat-text-u7)] font-semibold;
 }
 
 .markdown-body :deep(h3) {
-  @apply text-lg font-semibold;
+  @apply text-[length:var(--chat-text-u5)] font-semibold;
 }
 
 .markdown-body :deep(h4) {
-  @apply text-base font-semibold;
+  @apply text-[length:var(--chat-text-u3)] font-semibold;
 }
 
 .markdown-body :deep(h5),
 .markdown-body :deep(h6) {
-  @apply text-sm font-semibold text-muted-foreground;
+  @apply text-[length:var(--chat-text-u1)] font-semibold text-muted-foreground;
 }
 
 /* ============ 段落 / 首尾间距归零 ============ */
@@ -249,7 +257,7 @@ function markFileReference(element: HTMLElement, reference: string): void {
 
 /* ============ 表格（GFM） ============ */
 .markdown-body :deep(table) {
-  @apply my-3 w-full border-collapse text-sm overflow-hidden;
+  @apply my-3 w-full border-collapse text-[length:var(--chat-text-u1)] overflow-hidden;
 }
 
 .markdown-body :deep(thead) {
@@ -279,7 +287,7 @@ function markFileReference(element: HTMLElement, reference: string): void {
 }
 
 .markdown-body :deep(.code-block-header) {
-  @apply flex items-center justify-between px-3 py-1 border-b border-border/50 text-xs text-muted-foreground;
+  @apply flex items-center justify-between px-3 py-1 border-b border-border/50 text-[length:var(--chat-text-d1)] text-muted-foreground;
   background-color: var(--code-block-background);
 }
 
@@ -292,9 +300,10 @@ function markFileReference(element: HTMLElement, reference: string): void {
  * 这里用 ::-webkit-scrollbar 强制常驻细滚动条，跟 VS Code 行为一致。
  */
 .markdown-body :deep(.code-block-wrapper pre) {
-  /* 字号对齐工具卡片（ToolCallCard 的 pre 也是 text-[12px]）——
-     默认继承外层正文 15px 会让代码块看着比工具框代码大很多，不协调。 */
-  @apply my-0 p-3 rounded-none border-0 text-[12px];
+  /* 围栏代码块归**代码字号**（settings.theme.codeFontSize），不跟对话正文走：
+     它和 ToolCallCard 的 pre、文件预览、diff 是同一类等宽内容，同一档才协调。
+     行内 code 反而留在对话刻度上——它嵌在句子里，跟着周围文字才不突兀。 */
+  @apply my-0 p-3 rounded-none border-0 text-[length:var(--code-text-d1)];
   overflow-x: auto;
 }
 
@@ -327,7 +336,7 @@ function markFileReference(element: HTMLElement, reference: string): void {
 
 /* inline code（不在 pre 里的 `code`） */
 .markdown-body :deep(:not(pre) > code) {
-  @apply font-mono text-[13px] bg-muted px-1 py-0.5 rounded;
+  @apply font-mono text-[length:var(--chat-text-base)] bg-muted px-1 py-0.5 rounded;
 }
 
 /* File Reference: 中性灰底胶囊，等宽字体，视觉与 inline code 同源；

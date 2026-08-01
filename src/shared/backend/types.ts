@@ -183,6 +183,8 @@ export interface ToolTaskInfo {
   description: string
   /** 给子 agent 的完整 prompt（可能很长，前端截断展示） */
   prompt: string
+  /** 子 Agent 类型（Agent 工具入参 subagent_type），启动时即可知，不必等完成统计。 */
+  subagentType?: string
   /**
    * 子 Agent 完成统计（agentId / 耗时 / token / 工具分类计数）。
    * 实时流路径由 messageStore 从 tool_call_completed.taskStats 合并；
@@ -237,6 +239,25 @@ export interface BackgroundTaskSnapshot {
   status: 'running' | 'completed' | 'failed' | 'stopped'
   description?: string
   summary?: string
+  /**
+   * SDK 的任务类型标签（'shell' / 'subagent' / 'monitor' / 'workflow' / ...）。
+   *
+   * Background Tasks Panel: 决定任务的图标与"进度"从哪来——shell 任务 SDK 不给
+   * task_progress，唯一的进度是 outputFile 里的命令输出；subagent 则相反。
+   */
+  taskType?: string
+  /**
+   * 后台任务输出文件的绝对路径（shell 任务是命令的 stdout/stderr 落盘）。
+   *
+   * SDK 只在终态的 task_notification 里给 output_file，但 shell 任务恰恰是在
+   * *运行中* 才需要它。启动时 Bash 的 tool_result 文本里带同一路径，
+   * parseBackgroundOutputFile 把它捞出来，面板才能在任务跑完前 tail 输出。
+   */
+  outputFile?: string
+  /** 首次观测到该任务的时间（Unix ms），面板用来显示"已运行 N 秒"。 */
+  startedAt?: number
+  /** task_updated 带来的错误原文（SDK 只在这一个消息里给）。 */
+  error?: string
   stats: ToolTaskStats
 }
 
@@ -434,6 +455,30 @@ export type TurnEvent =
       task: BackgroundTaskSnapshot
     }
   | {
+      /**
+       * 子 Agent 内部对话的实时增量。
+       *
+       * SDK 默认只转发子 Agent 的 tool_use/tool_result（够做心跳计数，不够渲染过程）；
+       * 开了 forwardSubagentText 后文本/思考也会转发，全都带 parent_tool_use_id。
+       * 这些消息**不能**进主对话流——它们是子 Agent 的内部过程，混进去会让主对话
+       * 突然冒出一堆用户没发起过的工具卡片。统一走这个事件挂到发起它的卡片下面。
+       */
+      type: 'subagent_message'
+      turnId: string
+      /** 发起该子 Agent 的 tool_use id——UI 用它决定挂到哪张卡片。 */
+      parentToolUseId: string
+      /** 按 id 合并（同一条 API 消息可能分多次到达），不是无脑追加。 */
+      message: NormalizedMessage
+    }
+  | {
+      /** 子 Agent 内部工具调用的结果回填。 */
+      type: 'subagent_tool_result'
+      turnId: string
+      parentToolUseId: string
+      toolUseId: string
+      output: ToolOutput
+    }
+  | {
       type: 'approval_requested'
       turnId: string
       requestId: string
@@ -571,6 +616,13 @@ export interface AgentBackend {
   /** 响应 agent 的问题（ask_user 工具）。claude 实现；codex 无此能力可不实现。 */
   respondQuestion?(args: { turnId: string; requestId: string; answer: AgentAnswer }): Promise<void>
   steer?(turnId: string, prompt: string): Promise<void>
+  /**
+   * 单独停止一个后台任务（不影响所在 turn 的其他任务，也不中断整个 turn）。
+   *
+   * 与 interrupt 的区别：interrupt 停掉整个 turn 连带它的全部后台任务；
+   * 这里是后台任务面板上单条任务的"停止"按钮。claude 实现；codex 无后台任务概念。
+   */
+  stopBackgroundTask?(taskId: string): Promise<void>
   /** 运行中热切换 model/effort/permissionMode（仅 supportsHotSwap 的 backend 实现） */
   updateTurnConfig?(turnId: string, config: TurnConfigUpdate): Promise<void>
 

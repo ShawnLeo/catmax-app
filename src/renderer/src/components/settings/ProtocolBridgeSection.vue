@@ -3,15 +3,20 @@
   <section class="flex flex-col gap-3">
     <header class="flex items-start justify-between gap-4">
       <div>
-        <h2 class="text-lg font-semibold text-foreground">协议转换桥</h2>
-        <p class="text-sm text-muted-foreground">
+        <h2 class="text-[length:var(--ui-text-u3)] font-semibold text-foreground">协议转换桥</h2>
+        <p class="text-[length:var(--ui-text-base)] text-muted-foreground">
           codex 从 0.96 起只支持 Responses 协议。开启后 catmax 在本机起一个只听 127.0.0.1
           的转换服务，对 codex 装成 Responses
           端点，对上游说上游的协议。可保存多个上游配置，同时只启用一个。
         </p>
       </div>
       <div class="mt-1 flex shrink-0 items-center gap-2">
-        <span :class="['text-xs font-medium', enabled ? 'text-success' : 'text-muted-foreground']">
+        <span
+          :class="[
+            'text-[length:var(--ui-text-d3)] font-medium',
+            enabled ? 'text-success' : 'text-muted-foreground',
+          ]"
+        >
           {{ enabled ? '已开启' : '已关闭' }}
         </span>
         <button
@@ -37,7 +42,10 @@
     </header>
 
     <!-- 运行状态（仅 enabled 显示） -->
-    <div v-if="enabled" class="flex items-center gap-2 text-xs px-3 py-2 rounded-md bg-muted/30">
+    <div
+      v-if="enabled"
+      class="flex items-center gap-2 text-[length:var(--ui-text-d3)] px-3 py-2 rounded-md bg-muted/30"
+    >
       <span
         :class="['w-1.5 h-1.5 rounded-full', status?.running ? 'bg-success' : 'bg-destructive']"
       />
@@ -50,13 +58,13 @@
 
     <!-- Provider 列表（始终可见） -->
     <div class="flex flex-col gap-1.5">
-      <label class="text-xs text-muted-foreground">上游配置</label>
+      <label class="text-[length:var(--ui-text-d3)] text-muted-foreground">上游配置</label>
       <div class="flex flex-col gap-1">
         <div
           v-for="p in providerList"
           :key="p.id"
           :class="[
-            'flex items-center gap-2 px-3 py-2 rounded-md border text-sm cursor-pointer transition-colors',
+            'flex items-center gap-2 px-3 py-2 rounded-md border text-[length:var(--ui-text-base)] cursor-pointer transition-colors',
             p.id === bridge.currentProviderId
               ? 'border-foreground bg-muted/40'
               : 'border-sidebar-border hover:bg-muted/20',
@@ -70,13 +78,19 @@
             aria-label="当前启用"
           />
           <span class="flex-1 truncate">{{ p.name || p.baseUrl || '(未命名)' }}</span>
-          <span v-if="p.id === bridge.currentProviderId" class="text-xs text-success">当前</span>
-          <span v-if="p.modelListMode === 'manual'" class="text-xs text-muted-foreground"
+          <span
+            v-if="p.id === bridge.currentProviderId"
+            class="text-[length:var(--ui-text-d3)] text-success"
+            >当前</span
+          >
+          <span
+            v-if="p.modelListMode === 'manual'"
+            class="text-[length:var(--ui-text-d3)] text-muted-foreground"
             >手动</span
           >
           <button
             type="button"
-            class="text-xs text-muted-foreground hover:text-destructive px-1"
+            class="text-[length:var(--ui-text-d3)] text-muted-foreground hover:text-destructive px-1"
             title="删除"
             @click.stop="deleteProvider(p.id)"
           >
@@ -100,15 +114,18 @@
     >
       <!-- 卡片头：标题（当前/编辑中状态）+ 右上角关闭 -->
       <div class="flex items-center gap-2">
-        <span class="text-sm font-medium truncate">
+        <span class="text-[length:var(--ui-text-base)] font-medium truncate">
           {{ editingProvider.name || editingProvider.baseUrl || '(未命名)' }}
         </span>
-        <span v-if="editingProvider.id === bridge.currentProviderId" class="text-xs text-success">
+        <span
+          v-if="editingProvider.id === bridge.currentProviderId"
+          class="text-[length:var(--ui-text-d3)] text-success"
+        >
           当前启用
         </span>
         <button
           type="button"
-          class="ml-auto text-muted-foreground hover:text-foreground text-lg leading-none px-1"
+          class="ml-auto text-muted-foreground hover:text-foreground text-[length:var(--ui-text-u3)] leading-none px-1"
           title="关闭编辑区"
           aria-label="关闭编辑区"
           @click="closeEditing"
@@ -119,7 +136,7 @@
 
       <!-- 名称 -->
       <div class="flex flex-col gap-1.5">
-        <label class="text-xs text-muted-foreground">名称</label>
+        <label class="text-[length:var(--ui-text-d3)] text-muted-foreground">名称</label>
         <Input
           :model-value="editingProvider.name"
           placeholder="我的 DeepSeek"
@@ -131,7 +148,9 @@
 
       <!-- 上游地址 -->
       <div class="flex flex-col gap-1.5">
-        <label class="text-xs text-muted-foreground">上游地址（base URL）</label>
+        <label class="text-[length:var(--ui-text-d3)] text-muted-foreground"
+          >上游地址（base URL）</label
+        >
         <Input
           :model-value="editingProvider.baseUrl"
           placeholder="https://api.deepseek.com/anthropic"
@@ -143,7 +162,7 @@
 
       <!-- 兜底模型名 -->
       <div class="flex flex-col gap-1.5">
-        <label class="text-xs text-muted-foreground">兜底模型名</label>
+        <label class="text-[length:var(--ui-text-d3)] text-muted-foreground">兜底模型名</label>
         <Input
           :model-value="editingProvider.model ?? ''"
           placeholder="deepseek-v4-pro"
@@ -151,19 +170,21 @@
             (v: string | number) => patchProvider(editingProvider!.id, { model: String(v) || null })
           "
         />
-        <p class="text-xs text-muted-foreground">codex 发来的模型名不在上游列表里时用它顶上。</p>
+        <p class="text-[length:var(--ui-text-d3)] text-muted-foreground">
+          codex 发来的模型名不在上游列表里时用它顶上。
+        </p>
       </div>
 
       <!-- 模型列表来源 -->
       <div class="flex flex-col gap-2">
-        <label class="text-xs text-muted-foreground">模型列表来源</label>
+        <label class="text-[length:var(--ui-text-d3)] text-muted-foreground">模型列表来源</label>
         <div class="flex gap-2">
           <button
             v-for="option in modelListModes"
             :key="option.value"
             type="button"
             :class="[
-              'px-3 py-1.5 rounded-md border text-xs transition-colors cursor-pointer',
+              'px-3 py-1.5 rounded-md border text-[length:var(--ui-text-d3)] transition-colors cursor-pointer',
               editingProvider.modelListMode === option.value
                 ? 'border-foreground bg-foreground text-background shadow-sm'
                 : 'border-sidebar-border text-muted-foreground hover:text-foreground',
@@ -176,7 +197,7 @@
 
         <!-- auto: modelsUrl + 拉取按钮 -->
         <template v-if="editingProvider.modelListMode === 'auto'">
-          <details class="text-xs">
+          <details class="text-[length:var(--ui-text-d3)]">
             <summary class="cursor-pointer text-muted-foreground hover:text-foreground">
               模型列表地址（留空自动推断）
             </summary>
@@ -201,11 +222,17 @@
               {{ loadingModels ? '拉取中…' : '拉取上游模型列表' }}
             </Button>
             <!-- 桥开着却没填 key：点了只会卡住（回退 codex），提前提示 -->
-            <span v-if="enabled && !editingCredentialReady" class="text-xs text-muted-foreground">
+            <span
+              v-if="enabled && !editingCredentialReady"
+              class="text-[length:var(--ui-text-d3)] text-muted-foreground"
+            >
               先填写 API key 才能拉取上游模型
             </span>
             <!-- 桥没开：拉的是 codex 自己的目录（合法），但提示用户想拉上游得先开桥 -->
-            <span v-else-if="!enabled" class="text-xs text-muted-foreground">
+            <span
+              v-else-if="!enabled"
+              class="text-[length:var(--ui-text-d3)] text-muted-foreground"
+            >
               开启协议转换桥后拉取的是上游模型；当前拉取的是 codex 自带目录
             </span>
           </div>
@@ -215,7 +242,7 @@
               :key="model.id"
               type="button"
               :class="[
-                'px-2 py-0.5 rounded border text-xs transition-colors cursor-pointer',
+                'px-2 py-0.5 rounded border text-[length:var(--ui-text-d3)] transition-colors cursor-pointer',
                 editingProvider.model === model.id
                   ? 'border-foreground bg-foreground text-background shadow-sm'
                   : 'border-sidebar-border text-muted-foreground hover:text-foreground',
@@ -225,7 +252,9 @@
               {{ model.id }}
             </button>
           </div>
-          <p v-else-if="modelsError" class="text-xs text-destructive">{{ modelsError }}</p>
+          <p v-else-if="modelsError" class="text-[length:var(--ui-text-d3)] text-destructive">
+            {{ modelsError }}
+          </p>
         </template>
 
         <!-- manual: 手填列表 -->
@@ -252,7 +281,7 @@
               :key="id"
               type="button"
               :class="[
-                'px-2 py-0.5 rounded border text-xs transition-colors cursor-pointer',
+                'px-2 py-0.5 rounded border text-[length:var(--ui-text-d3)] transition-colors cursor-pointer',
                 editingProvider.model === id
                   ? 'border-foreground bg-foreground text-background shadow-sm'
                   : 'border-sidebar-border text-muted-foreground hover:text-foreground',
@@ -262,7 +291,7 @@
               {{ id }} <span class="ml-1 opacity-60" @click.stop="removeManualModel(id)">×</span>
             </button>
           </div>
-          <p class="text-xs text-muted-foreground">
+          <p class="text-[length:var(--ui-text-d3)] text-muted-foreground">
             手动录入的模型会显示在 codex 下拉框里，codex 选用时原样透传给上游。
           </p>
         </template>
@@ -270,14 +299,14 @@
 
       <!-- 凭证 -->
       <div class="flex flex-col gap-2">
-        <label class="text-xs text-muted-foreground">API key 来源</label>
+        <label class="text-[length:var(--ui-text-d3)] text-muted-foreground">API key 来源</label>
         <div class="flex gap-2">
           <button
             v-for="option in credentialSources"
             :key="option.value"
             type="button"
             :class="[
-              'px-3 py-1.5 rounded-md border text-xs transition-colors cursor-pointer',
+              'px-3 py-1.5 rounded-md border text-[length:var(--ui-text-d3)] transition-colors cursor-pointer',
               editingProvider.credentialSource === option.value
                 ? 'border-foreground bg-foreground text-background shadow-sm'
                 : 'border-sidebar-border text-muted-foreground hover:text-foreground',
@@ -296,7 +325,7 @@
                 patchProvider(editingProvider!.id, { credentialEnvVar: String(v) })
             "
           />
-          <p class="text-xs text-muted-foreground">
+          <p class="text-[length:var(--ui-text-d3)] text-muted-foreground">
             catmax 只记住变量名，值在每次请求时从进程环境读取——不落盘。
           </p>
         </template>
@@ -322,7 +351,7 @@
               清除
             </Button>
           </div>
-          <p class="text-xs text-muted-foreground">
+          <p class="text-[length:var(--ui-text-d3)] text-muted-foreground">
             存在 catmax 数据目录下权限 0600 的单独文件里（不进 settings.json），界面不会再回显。
           </p>
         </template>
@@ -335,14 +364,17 @@
         </Button>
         <span
           v-if="testResult"
-          :class="['text-xs', testResult.ok ? 'text-success' : 'text-destructive']"
+          :class="[
+            'text-[length:var(--ui-text-d3)]',
+            testResult.ok ? 'text-success' : 'text-destructive',
+          ]"
         >
           {{ testResult.message }}
         </span>
       </div>
 
       <!-- 上游能力 -->
-      <details class="text-xs">
+      <details class="text-[length:var(--ui-text-d3)]">
         <summary class="cursor-pointer text-muted-foreground hover:text-foreground">
           上游能力（影响转换时的降级策略）
         </summary>

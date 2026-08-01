@@ -66,6 +66,12 @@ export const api = {
       IPC.BACKEND_INTERRUPT_TURN,
     ),
     steerTurn: requestMain<BackendHandlers, 'backend.steerTurn'>(IPC.BACKEND_STEER_TURN),
+    stopBackgroundTask: requestMain<BackendHandlers, 'backend.stopBackgroundTask'>(
+      IPC.BACKEND_STOP_BACKGROUND_TASK,
+    ),
+    readBackgroundTaskOutput: requestMain<BackendHandlers, 'backend.readBackgroundTaskOutput'>(
+      IPC.BACKEND_READ_BACKGROUND_TASK_OUTPUT,
+    ),
     listTurnRuns: requestMain<BackendHandlers, 'backend.listTurnRuns'>(IPC.BACKEND_LIST_TURN_RUNS),
     respondApproval: requestMain<BackendHandlers, 'backend.respondApproval'>(
       IPC.BACKEND_RESPOND_APPROVAL,

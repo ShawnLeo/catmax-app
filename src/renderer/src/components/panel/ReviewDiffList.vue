@@ -22,7 +22,7 @@
       <button
         type="button"
         :class="[
-          'flex w-full cursor-pointer items-center gap-2 px-3 py-2 text-left text-[13px] transition-colors',
+          'flex w-full cursor-pointer items-center gap-2 px-3 py-2 text-left text-[length:var(--ui-text-d2)] transition-colors',
           uiStore.reviewSelectedPath === file.path
             ? 'bg-primary/5 text-foreground'
             : 'text-foreground/85 hover:bg-muted/50',
@@ -37,8 +37,10 @@
           ]"
         />
         <FileTypeIcon :name="fileName(file.path)" class="h-4 w-4 flex-shrink-0" />
-        <span class="min-w-0 flex-1 truncate font-mono text-[12px]">{{ file.path }}</span>
-        <span class="flex-shrink-0 font-mono text-[11px] tabular-nums">
+        <span class="min-w-0 flex-1 truncate font-mono text-[length:var(--ui-text-d3)]">{{
+          file.path
+        }}</span>
+        <span class="flex-shrink-0 font-mono text-[length:var(--ui-text-d4)] tabular-nums">
           <span class="text-emerald-500">+{{ file.stats.additions }}</span>
           <span class="ml-1.5 text-red-500">-{{ file.stats.deletions }}</span>
         </span>
@@ -53,7 +55,7 @@
           :key="file.path + uiStore.reviewDiffMode"
         />
         <!-- 有统计但无行级 diff（二进制/超大文件/流式未完成） -->
-        <div v-else class="py-4 text-center text-xs text-muted-foreground">
+        <div v-else class="py-4 text-center text-[length:var(--ui-text-d3)] text-muted-foreground">
           此文件无行级差异 ·
           <span class="text-emerald-500">+{{ file.stats.additions }}</span>
           <span class="ml-1.5 text-red-500">-{{ file.stats.deletions }}</span>
@@ -64,7 +66,7 @@
     <!-- 空态 -->
     <div
       v-if="uiStore.reviewFiles.length === 0"
-      class="flex h-full flex-col items-center justify-center gap-2 py-12 text-sm text-muted-foreground"
+      class="flex h-full flex-col items-center justify-center gap-2 py-12 text-[length:var(--ui-text-base)] text-muted-foreground"
     >
       <FileDiffIcon class="h-8 w-8 opacity-40" />
       <p>暂无变更文件</p>

@@ -10,7 +10,7 @@
   -->
   <button
     type="button"
-    class="inline-flex items-center gap-1.5 my-0.5 px-1.5 py-0.5 rounded text-muted-foreground text-[12px] hover:text-foreground hover:bg-foreground/5 transition-colors font-mono cursor-pointer"
+    class="inline-flex items-center gap-1.5 my-0.5 px-1.5 py-0.5 rounded text-muted-foreground text-[length:var(--chat-text-d1)] hover:text-foreground hover:bg-foreground/5 transition-colors font-mono cursor-pointer"
     :title="`在文件面板中预览：${data.filePath}`"
     @click="openPreview"
   >

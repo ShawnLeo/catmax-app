@@ -12,12 +12,13 @@
     - placement='top' 时弹层向上展开（给 trigger 贴近窗口底部的场景用，如 Composer）
     - triggerLabel：未传时显示当前选中项的 label；都没有时显示 placeholder
   -->
-  <div ref="rootEl" class="relative inline-block">
+  <div ref="rootEl" :class="['relative', fullWidth ? 'block' : 'inline-block']">
     <button
       type="button"
       :title="title"
       :disabled="disabled"
-      class="flex items-center gap-2 px-3 py-2 rounded-md text-sm transition-colors bg-secondary text-secondary-foreground hover:bg-accent hover:text-accent-foreground disabled:opacity-50 disabled:cursor-not-allowed focus:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+      class="flex items-center gap-2 px-3 py-2 rounded-md text-[length:var(--ui-text-base)] transition-colors bg-secondary text-secondary-foreground hover:bg-accent hover:text-accent-foreground disabled:opacity-50 disabled:cursor-not-allowed focus:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+      :class="fullWidth ? 'w-full' : ''"
       :style="triggerStyle"
       @click="onTriggerClick"
     >
@@ -42,7 +43,7 @@
         type="button"
         :disabled="opt.disabled"
         :title="opt.title"
-        class="w-full flex items-center gap-2.5 px-3 py-2 rounded text-sm text-left transition-colors text-popover-foreground hover:bg-accent hover:text-accent-foreground disabled:opacity-40 disabled:cursor-not-allowed"
+        class="w-full flex items-center gap-2.5 px-3 py-2 rounded text-[length:var(--ui-text-base)] text-left transition-colors text-popover-foreground hover:bg-accent hover:text-accent-foreground disabled:opacity-40 disabled:cursor-not-allowed"
         :class="opt.value === modelValue ? 'bg-accent/60 text-accent-foreground' : ''"
         @click="onSelect(opt.value)"
       >
@@ -93,11 +94,14 @@ const props = withDefaults(
      * 用于"模型名长度差异大但不想让按钮被撑得跳来跳去"这类场景。
      */
     triggerWidth?: number
+    /** trigger 撑满父容器宽度（root + button 均 w-full）。表单栅格场景用。 */
+    fullWidth?: boolean
   }>(),
   {
     align: 'left',
     placement: 'bottom',
     disabled: false,
+    fullWidth: false,
   },
 )
 const emit = defineEmits<{

@@ -314,4 +314,236 @@ describe('message store Claude background tasks', () => {
       taskStats: { status: 'stopped' },
     })
   })
+
+  describe('后台任务全表', () => {
+    test('没有 toolUseId 的任务也进表（level 信号不带它）', () => {
+      const store = useMessageStore()
+      store.setCurrentSession('session-1')
+      // background_tasks_changed 只带 task_id，如果因为缺 toolUseId 就丢弃，
+      // 面板和徽标将永远看不到这类任务。
+      store.applyEvent('session-1', {
+        type: 'background_task_updated',
+        turnId: 'turn-1',
+        task: {
+          taskId: 'task-a',
+          status: 'running',
+          description: '打包 macOS 应用',
+          stats: { status: 'running' },
+        },
+      })
+
+      expect(store.backgroundTasks).toHaveLength(1)
+      expect(store.backgroundTasks[0]).toMatchObject({ taskId: 'task-a', status: 'running' })
+      expect(store.runningBackgroundTaskCount).toBe(1)
+    })
+
+    test('后续事件合并而非覆盖，已拿到的 outputFile 不被抹掉', () => {
+      const store = useMessageStore()
+      store.setCurrentSession('session-1')
+      store.applyEvent('session-1', {
+        type: 'background_task_updated',
+        turnId: 'turn-1',
+        task: {
+          taskId: 'task-a',
+          status: 'running',
+          taskType: 'shell',
+          outputFile: '/tmp/s/tasks/task-a.output',
+          startedAt: 1000,
+          stats: { status: 'running' },
+        },
+      })
+      // 终态若不带 outputFile（例如来自 task_updated），面板不该因此失去输出。
+      store.applyEvent('session-1', {
+        type: 'background_task_updated',
+        turnId: 'turn-1',
+        task: {
+          taskId: 'task-a',
+          status: 'completed',
+          summary: '打包完成',
+          stats: { status: 'completed' },
+        },
+      })
+
+      expect(store.backgroundTasks).toHaveLength(1)
+      expect(store.backgroundTasks[0]).toMatchObject({
+        status: 'completed',
+        summary: '打包完成',
+        taskType: 'shell',
+        outputFile: '/tmp/s/tasks/task-a.output',
+      })
+      expect(store.runningBackgroundTaskCount).toBe(0)
+    })
+
+    test('运行中的排在已完成的前面', () => {
+      const store = useMessageStore()
+      store.setCurrentSession('session-1')
+      store.applyEvent('session-1', {
+        type: 'background_task_updated',
+        turnId: 'turn-1',
+        task: {
+          taskId: 'done',
+          status: 'completed',
+          startedAt: 5000,
+          stats: { status: 'completed' },
+        },
+      })
+      store.applyEvent('session-1', {
+        type: 'background_task_updated',
+        turnId: 'turn-1',
+        task: { taskId: 'live', status: 'running', startedAt: 1000, stats: { status: 'running' } },
+      })
+
+      expect(store.backgroundTasks.map((t) => t.taskId)).toEqual(['live', 'done'])
+    })
+
+    test('turn 因错误结束时清扫仍在运行的任务，徽标不会永远转圈', () => {
+      const store = useMessageStore()
+      store.setCurrentSession('session-1')
+      store.applyEvent('session-1', {
+        type: 'background_task_updated',
+        turnId: 'turn-1',
+        task: { taskId: 'task-a', status: 'running', stats: { status: 'running' } },
+      })
+      expect(store.runningBackgroundTaskCount).toBe(1)
+
+      // error 结束会直接掐断 SDK query，任务不会再收到终态通知。
+      store.applyEvent('session-1', {
+        type: 'turn_completed',
+        turnId: 'turn-1',
+        status: 'error',
+      })
+
+      expect(store.runningBackgroundTaskCount).toBe(0)
+      expect(store.backgroundTasks[0]).toMatchObject({ status: 'stopped' })
+    })
+
+    test('turn 正常结束不动任务状态', () => {
+      const store = useMessageStore()
+      store.setCurrentSession('session-1')
+      store.applyEvent('session-1', {
+        type: 'background_task_updated',
+        turnId: 'turn-1',
+        task: { taskId: 'task-a', status: 'completed', stats: { status: 'completed' } },
+      })
+      store.applyEvent('session-1', {
+        type: 'turn_completed',
+        turnId: 'turn-1',
+        status: 'completed',
+      })
+
+      expect(store.backgroundTasks[0]).toMatchObject({ status: 'completed' })
+    })
+
+    test('子 Agent 实时消息挂到发起它的卡片下，不进主对话流', () => {
+      const store = useMessageStore()
+      store.setCurrentSession('session-1')
+      store.applyEvent('session-1', {
+        type: 'subagent_message',
+        turnId: 'turn-1',
+        parentToolUseId: 'tool-a',
+        message: {
+          id: 'sub-1',
+          role: 'assistant',
+          turnId: 'turn-1',
+          textBlocks: [{ id: 'b1', text: '正在读取文件', kind: 'text' }],
+          toolBlocks: [
+            { id: 'sub-tool-1', info: { kind: 'other', title: 'Read' }, status: 'running' },
+          ],
+          createdAt: 0,
+        },
+      })
+
+      // 主对话流必须干净——子 Agent 的内部过程不是用户发起的对话
+      expect(store.messages).toHaveLength(0)
+      expect(store.subagentMessagesFor('tool-a')).toHaveLength(1)
+      expect(store.subagentMessagesFor('tool-a')[0]?.textBlocks?.[0]?.text).toBe('正在读取文件')
+    })
+
+    test('同 id 的子 Agent 消息合并而非裂成两条', () => {
+      const store = useMessageStore()
+      store.setCurrentSession('session-1')
+      const base = {
+        type: 'subagent_message' as const,
+        turnId: 'turn-1',
+        parentToolUseId: 'tool-a',
+      }
+      store.applyEvent('session-1', {
+        ...base,
+        message: {
+          id: 'sub-1',
+          role: 'assistant',
+          turnId: 'turn-1',
+          textBlocks: [{ id: 'b1', text: '先想一下', kind: 'reasoning' }],
+          toolBlocks: [],
+          createdAt: 0,
+        },
+      })
+      store.applyEvent('session-1', {
+        ...base,
+        message: {
+          id: 'sub-1',
+          role: 'assistant',
+          turnId: 'turn-1',
+          textBlocks: [],
+          toolBlocks: [
+            { id: 'sub-tool-1', info: { kind: 'other', title: 'Read' }, status: 'running' },
+          ],
+          createdAt: 0,
+        },
+      })
+
+      const list = store.subagentMessagesFor('tool-a')
+      expect(list).toHaveLength(1)
+      expect(list[0]?.textBlocks).toHaveLength(1)
+      expect(list[0]?.toolBlocks).toHaveLength(1)
+    })
+
+    test('子 Agent 内部工具结果回填到对应工具块', () => {
+      const store = useMessageStore()
+      store.setCurrentSession('session-1')
+      store.applyEvent('session-1', {
+        type: 'subagent_message',
+        turnId: 'turn-1',
+        parentToolUseId: 'tool-a',
+        message: {
+          id: 'sub-1',
+          role: 'assistant',
+          turnId: 'turn-1',
+          textBlocks: [],
+          toolBlocks: [
+            { id: 'sub-tool-1', info: { kind: 'other', title: 'Read' }, status: 'running' },
+          ],
+          createdAt: 0,
+        },
+      })
+      store.applyEvent('session-1', {
+        type: 'subagent_tool_result',
+        turnId: 'turn-1',
+        parentToolUseId: 'tool-a',
+        toolUseId: 'sub-tool-1',
+        output: { ok: true, summary: '读到 120 行' },
+      })
+
+      const block = store.subagentMessagesFor('tool-a')[0]?.toolBlocks?.[0]
+      expect(block?.status).toBe('completed')
+      expect(block?.output).toMatchObject({ ok: true, summary: '读到 120 行' })
+    })
+
+    test('任务表按 session 隔离', () => {
+      const store = useMessageStore()
+      store.setCurrentSession('session-1')
+      store.applyEvent('session-1', {
+        type: 'background_task_updated',
+        turnId: 'turn-1',
+        task: { taskId: 'task-a', status: 'running', stats: { status: 'running' } },
+      })
+
+      store.setCurrentSession('session-2')
+      expect(store.backgroundTasks).toHaveLength(0)
+      expect(store.runningBackgroundTaskCount).toBe(0)
+
+      store.setCurrentSession('session-1')
+      expect(store.backgroundTasks).toHaveLength(1)
+    })
+  })
 })

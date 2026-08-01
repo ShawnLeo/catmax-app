@@ -18,7 +18,7 @@
     <div v-if="summary" class="mt-2">
       <button
         type="button"
-        class="flex items-center gap-1.5 text-[12px] text-muted-foreground hover:text-foreground transition-colors w-full text-left cursor-pointer"
+        class="flex items-center gap-1.5 text-[length:var(--chat-text-d1)] text-muted-foreground hover:text-foreground transition-colors w-full text-left cursor-pointer"
         @click="expanded = !expanded"
       >
         <ChevronDownIcon
@@ -35,7 +35,7 @@
       -->
       <div
         v-if="expanded"
-        class="mt-1.5 max-h-80 overflow-y-auto rounded-md border border-border/50 bg-muted/30 p-3 text-[12px] leading-relaxed text-muted-foreground whitespace-pre-wrap break-words"
+        class="mt-1.5 max-h-80 overflow-y-auto rounded-md border border-border/50 bg-muted/30 p-3 text-[length:var(--chat-text-d1)] leading-relaxed text-muted-foreground whitespace-pre-wrap break-words"
       >
         {{ summary }}
       </div>

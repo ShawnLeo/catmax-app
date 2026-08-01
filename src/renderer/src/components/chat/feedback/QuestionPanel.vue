@@ -24,20 +24,27 @@
           <MessageCircleQuestionIcon class="w-5 h-5 flex-shrink-0 text-primary" />
           <span
             v-if="question.header"
-            class="text-[10px] font-mono uppercase tracking-wide text-muted-foreground bg-muted px-1.5 py-0.5 rounded whitespace-nowrap"
+            class="text-[length:var(--chat-text-d3)] font-mono uppercase tracking-wide text-muted-foreground bg-muted px-1.5 py-0.5 rounded whitespace-nowrap"
           >
             {{ question.header }}
           </span>
-          <span v-if="question.multiSelect" class="text-[10px] text-muted-foreground italic">
+          <span
+            v-if="question.multiSelect"
+            class="text-[length:var(--chat-text-d3)] text-muted-foreground italic"
+          >
             可多选
           </span>
           <div class="flex-1" />
-          <span class="text-xs text-muted-foreground whitespace-nowrap">Claude 想问你</span>
+          <span class="text-[length:var(--chat-text-d1)] text-muted-foreground whitespace-nowrap"
+            >Claude 想问你</span
+          >
         </div>
 
         <!-- 问题文本 -->
         <div class="px-4 pb-2">
-          <p class="text-sm font-medium text-foreground">{{ question.question }}</p>
+          <p class="text-[length:var(--chat-text-u1)] font-medium text-foreground">
+            {{ question.question }}
+          </p>
         </div>
 
         <!-- 选项 -->
@@ -61,8 +68,13 @@
               />
               <div v-else class="w-3.5 h-3.5 flex-shrink-0 mt-0.5"></div>
               <div class="flex-1 min-w-0">
-                <div class="text-[13px] font-medium text-foreground">{{ opt.label }}</div>
-                <div v-if="opt.description" class="text-[11px] text-muted-foreground mt-0.5">
+                <div class="text-[length:var(--chat-text-base)] font-medium text-foreground">
+                  {{ opt.label }}
+                </div>
+                <div
+                  v-if="opt.description"
+                  class="text-[length:var(--chat-text-d2)] text-muted-foreground mt-0.5"
+                >
                   {{ opt.description }}
                 </div>
               </div>
@@ -79,14 +91,14 @@
             :placeholder="
               options.length > 0 ? '或直接输入你的想法（可不选上面的选项）…' : '输入你的回答…'
             "
-            class="w-full bg-transparent font-chat text-[14px] text-foreground px-3 py-2 rounded-md border border-border resize-none focus:outline-none focus:border-primary/50 placeholder:text-muted-foreground/60"
+            class="w-full bg-transparent font-chat text-[length:var(--chat-text-u1)] text-foreground px-3 py-2 rounded-md border border-border resize-none focus:outline-none focus:border-primary/50 placeholder:text-muted-foreground/60"
             @keydown="onKeyDown"
           />
         </div>
 
         <!-- footer -->
         <div class="px-4 py-2.5 border-t border-border flex items-center justify-between gap-2">
-          <span class="text-xs text-muted-foreground truncate">
+          <span class="text-[length:var(--chat-text-d1)] text-muted-foreground truncate">
             {{ canSubmit ? '回车提交 / Esc 跳过' : 'Esc 跳过（让 Claude 自行判断）' }}
           </span>
           <div class="flex gap-2 flex-shrink-0">

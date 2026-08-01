@@ -65,7 +65,7 @@
 
         <!-- 计数指示（顶部居中） -->
         <div
-          class="pointer-events-none absolute left-1/2 top-4 z-10 -translate-x-1/2 rounded-full bg-black/50 px-3 py-1 text-xs text-white/90"
+          class="pointer-events-none absolute left-1/2 top-4 z-10 -translate-x-1/2 rounded-full bg-black/50 px-3 py-1 text-[length:var(--chat-text-d1)] text-white/90"
         >
           {{ preview.index + 1 }} / {{ preview.total }}
         </div>
@@ -101,7 +101,7 @@
         </OverlayButton>
         <button
           type="button"
-          class="min-w-[3.5rem] cursor-pointer rounded-md px-2 py-1 text-center text-xs text-white/90 hover:bg-white/10"
+          class="min-w-[3.5rem] cursor-pointer rounded-md px-2 py-1 text-center text-[length:var(--chat-text-d1)] text-white/90 hover:bg-white/10"
           :title="zoom === 1 ? '实际大小' : '重置缩放'"
           @click="resetZoom"
         >

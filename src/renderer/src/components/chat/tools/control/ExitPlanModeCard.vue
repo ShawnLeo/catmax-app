@@ -4,12 +4,20 @@
     input.plan 是 markdown 实施方案——用户审批的核心内容。
   -->
   <div>
-    <div class="text-[12px] text-muted-foreground mb-2 flex items-center gap-1.5">
+    <div
+      class="text-[length:var(--chat-text-d1)] text-muted-foreground mb-2 flex items-center gap-1.5"
+    >
       <ClipboardCheckIcon class="w-3 h-3" />
       <span>已退出计划模式，方案如下：</span>
     </div>
-    <MarkdownView v-if="control.plan" :text="control.plan" class="text-[14px] text-foreground" />
-    <div v-else class="text-[13px] text-muted-foreground italic">（无方案内容）</div>
+    <MarkdownView
+      v-if="control.plan"
+      :text="control.plan"
+      class="text-[length:var(--chat-text-u1)] text-foreground"
+    />
+    <div v-else class="text-[length:var(--chat-text-base)] text-muted-foreground italic">
+      （无方案内容）
+    </div>
   </div>
 </template>
 

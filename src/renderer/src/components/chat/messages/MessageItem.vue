@@ -96,7 +96,7 @@
 
         <!-- hover 浮出的操作行：时间 + 复制 -->
         <div
-          class="absolute right-2 -bottom-6 flex items-center gap-1.5 text-[11px] text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none"
+          class="absolute right-2 -bottom-6 flex items-center gap-1.5 text-[length:var(--chat-text-d2)] text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none"
         >
           <span>{{ formattedTime }}</span>
           <button

@@ -23,6 +23,7 @@ import {
   readClaudeSessionJsonl,
   readHistoryFromJsonl,
   resolveSessionJsonlPath,
+  resolveSubagentJsonlPath,
 } from '@main/backend/claude/jsonl-reader'
 import { describe, expect, test, afterEach } from 'vitest'
 
@@ -66,6 +67,36 @@ describe('resolveSessionJsonlPath', () => {
     process.env.HOME = fakeHome
     const p = resolveSessionJsonlPath('sess-123', '/Users/x/demo')
     expect(p).toBe(join(fakeHome, '.claude', 'projects', '-Users-x-demo', 'sess-123.jsonl'))
+  })
+})
+
+describe('resolveSubagentJsonlPath', () => {
+  test('子 Agent 目录挂在 session 目录下，靠 agentId 扫出来', () => {
+    const fakeHome = mkdtempSync(join(tmpdir(), 'h-'))
+    tempDirs.push(fakeHome)
+    process.env.HOME = fakeHome
+    const subagentDir = join(
+      fakeHome,
+      '.claude',
+      'projects',
+      '-Users-x-demo',
+      'sess-abc',
+      'subagents',
+    )
+    mkdirSync(subagentDir, { recursive: true })
+    const filePath = join(subagentDir, 'agent-a1b2.jsonl')
+    writeFileSync(filePath, '', 'utf-8')
+
+    expect(resolveSubagentJsonlPath('a1b2', '/Users/x/demo')).toBe(filePath)
+  })
+
+  test('项目目录不存在时退回老布局，不抛', () => {
+    const fakeHome = mkdtempSync(join(tmpdir(), 'h-'))
+    tempDirs.push(fakeHome)
+    process.env.HOME = fakeHome
+    expect(resolveSubagentJsonlPath('a1b2', '/Users/x/demo')).toBe(
+      join(fakeHome, '.claude', 'projects', '-Users-x-demo', 'subagents', 'agent-a1b2.jsonl'),
+    )
   })
 })
 

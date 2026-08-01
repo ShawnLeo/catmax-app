@@ -11,7 +11,7 @@
     <li
       v-for="(todo, i) in control.todos ?? []"
       :key="i"
-      class="flex items-start gap-2 text-[13px] leading-relaxed"
+      class="flex items-start gap-2 text-[length:var(--chat-text-base)] leading-relaxed"
     >
       <!-- 状态图标 -->
       <span class="flex-shrink-0 mt-0.5">

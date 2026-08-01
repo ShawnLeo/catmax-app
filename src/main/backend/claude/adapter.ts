@@ -69,6 +69,7 @@ import {
   isSdkUserMessage,
   sdkAssistantToEvents,
   sdkResultToEvent,
+  sdkSubagentToEvents,
   sdkSystemSessionId,
   sdkUserToolResultToEvents,
 } from './sdk-mapping'
@@ -540,6 +541,10 @@ export class ClaudeAdapter implements AgentBackend {
     const options: Record<string, any> = {
       abortController,
       includePartialMessages: true, // 真正的 token 级流式（对应 CLI 的 --include-partial-messages）
+      // 转发子 Agent 的文本/思考块（都带 parent_tool_use_id）。默认只转发它的
+      // tool_use/tool_result，够做心跳计数但渲染不出过程——子 Agent 跑几分钟，
+      // 用户只能看到工具次数在涨。开了才能把子 Agent 过程实时渲染出来。
+      forwardSubagentText: true,
       canUseTool, // 进程内权限回调，替代 CLI 的 --permission-prompt-tool + MCP + socket
       // ask_user 工具以 in-process MCP server 注入（type:'sdk'，SDK 自行接管 transport）
       mcpServers: {
@@ -810,6 +815,7 @@ export class ClaudeAdapter implements AgentBackend {
         case 'background_tasks_changed':
         case 'task_started':
         case 'task_progress':
+        case 'task_updated':
         case 'task_notification': {
           for (const task of backgroundTasks.handle(msg)) {
             events.push({ type: 'background_task_updated', turnId, task })
@@ -817,6 +823,17 @@ export class ClaudeAdapter implements AgentBackend {
           return events
         }
       }
+    }
+
+    // 子 Agent 的内部消息统一改道，绝不进主对话流。
+    // 开了 forwardSubagentText 之后这类消息数量可观（文本 + 思考 + 每次工具调用），
+    // 不拦住的话主对话会突然多出一堆用户没发起过的工具卡片和正文。
+    const parentToolUseId = (msg as { parent_tool_use_id?: string | null }).parent_tool_use_id
+    if (typeof parentToolUseId === 'string' && parentToolUseId.length > 0) {
+      if (isSdkAssistantMessage(msg) || isSdkUserMessage(msg)) {
+        events.push(...sdkSubagentToEvents(msg, turnId, parentToolUseId))
+      }
+      return events
     }
 
     if (isSdkInitMessage(msg)) {
@@ -952,6 +969,26 @@ export class ClaudeAdapter implements AgentBackend {
     if (!ctx.inputController.push(prompt)) {
       log.debug('steer: input already closed for turn', turnId)
     }
+  }
+
+  /**
+   * 停止单个后台任务。
+   *
+   * taskId 不带 turnId，所以要扫所有活跃 turn context 找持有它的那个。
+   * 停止后 SDK 会发 status='stopped' 的 task_notification，快照由正常事件流更新——
+   * 这里不自己造快照，避免和 SDK 的终态打架。
+   */
+  async stopBackgroundTask(taskId: string): Promise<void> {
+    for (const ctx of this.turnContexts.values()) {
+      if (!ctx.backgroundTasks.activeTaskIds().includes(taskId)) continue
+      try {
+        await ctx.query.stopTask(taskId)
+      } catch (e) {
+        log.warn('stopBackgroundTask failed:', taskId, e)
+      }
+      return
+    }
+    log.debug('stopBackgroundTask: no active context holds task', taskId)
   }
 
   async interrupt(turnId: string): Promise<void> {

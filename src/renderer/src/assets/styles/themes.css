@@ -69,6 +69,7 @@
   --sidebar-border: oklch(34% 0 0 / 0.6);
   --sidebar-foreground: var(--color-gray-800);
   --sidebar-accent: oklch(30% 0 0);
+  --panel-edge-shadow: oklch(0% 0 0 / 0.17);
   --composer-background: var(--color-gray-50);
   --composer-border: var(--border);
   --code-block-background: oklch(12% 0.005 250);
@@ -140,6 +141,7 @@
   --sidebar-border: oklch(89% 0.002 80);
   --sidebar-foreground: var(--color-gray-700);
   --sidebar-accent: var(--color-gray-300);
+  --panel-edge-shadow: oklch(20% 0 0 / 0.09);
   --composer-background: var(--color-gray-0);
   --composer-border: var(--border);
   --code-block-background: oklch(96% 0.003 80);
@@ -150,9 +152,100 @@
   --user-bubble-background: oklch(99% 0.002 80);
 }
 
-/* ============ 字体（三个独立 token） ============ */
+/* ============ 字体族（三个独立 token） ============ */
 :root {
   --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Helvetica Neue', system-ui, sans-serif;
   --font-chat: 'Inter', -apple-system, BlinkMacSystemFont, 'Helvetica Neue', system-ui, sans-serif;
   --font-mono: 'JetBrains Mono', 'SF Mono', Menlo, Consolas, monospace;
+}
+
+/*
+ * ============ 字号系统 ============
+ *
+ * 三条**互不影响**的字号基准，各自对应设置页的一个输入框：
+ *
+ *   --ui-font-size    settings.theme.fontSize      界面：侧边栏 / 面板 / 设置页 / 命令面板
+ *   --chat-font-size  settings.theme.chatFontSize  对话正文与 Markdown（含标题）
+ *   --code-font-size  settings.theme.codeFontSize  代码块 / diff / 终端（等宽区域）
+ *
+ * 三者都由 useTheme 的 apply*FontSize 写到 <html> 的行内样式上；下面 :root 里的值
+ * 只是设置加载完成前的兜底，与 shared/constants.ts 的 DEFAULT_* 保持一致。
+ *
+ * 每条基准派生出一套刻度，命名是**相对基准的偏移**：d = down（减），u = up（加），
+ * base = 基准本身。例如 --ui-text-d3 = 基准 - 3px。
+ *
+ * ⚠️ 刻意不用 xs/sm/md/lg 这类 t-shirt 名：那样会和 Tailwind 的同名类混淆
+ * （Tailwind 的 text-sm 恒为 14px，而我们的基准可变），照名字选 token 就会差 1px。
+ * 偏移名没有这种"望文生义"的空间，必须查下面的表。
+ *
+ * ⚠️ 为什么每套刻度除了 :root 还要带一个 *-font-scope 类：自定义属性里的 var()
+ * 是在**声明它的那个元素**上求值的。刻度只写在 :root 的话，嵌套元素改基准不会让
+ * 继承下来的刻度重算。要让某一块整体缩放（子 Agent 过程比主对话小 2px），就在它的
+ * 容器上挂对应的 scope 类并覆盖基准，刻度会在那个元素上重新求值。
+ *
+ * ⚠️ 覆盖基准只能给绝对值：`--chat-font-size: calc(var(--chat-font-size) - 2px)`
+ * 是自引用循环，CSS 会整条判为无效。要取当前基准做减法，得在 JS 里算好再传进来。
+ */
+:root {
+  --ui-font-size: 15px;
+  --chat-font-size: 13px;
+  --code-font-size: 13px;
+}
+
+/*
+ * 界面刻度（基准 15）。偏移取自清扫前写死的绝对值，所以默认下除正文外观感不变：
+ *   d5   10px  原 text-[10px]
+ *   d4   11px  原 text-[11px]
+ *   d3   12px  原 text-xs / text-[12px]
+ *   d2   13px  原 text-[13px]
+ *   base 15px  原 text-sm（14px）← 正文基准，是唯一被抬高 1px 的一档
+ *   u3   18px  原 text-lg
+ *   display 30px 原 text-3xl（欢迎页字标）——按倍数走，基准调大时保持视觉比例
+ */
+:root,
+.ui-font-scope {
+  --ui-text-d5: calc(var(--ui-font-size) - 5px);
+  --ui-text-d4: calc(var(--ui-font-size) - 4px);
+  --ui-text-d3: calc(var(--ui-font-size) - 3px);
+  --ui-text-d2: calc(var(--ui-font-size) - 2px);
+  --ui-text-base: var(--ui-font-size);
+  --ui-text-u3: calc(var(--ui-font-size) + 3px);
+  --ui-text-display: calc(var(--ui-font-size) * 2);
+}
+
+/*
+ * 对话 / Markdown 刻度（基准 13）。d3~u2 来自聊天组件原先写死的 10~15px，
+ * u3~u11 是 Markdown 标题原先的 text-base/lg/xl/2xl：
+ *   d3  10px    d2  11px    d1  12px    base 13px ← 正文
+ *   u1  14px    u2  15px
+ *   u3  16px  原 text-base（base 版 h3 / codex 版 h4）
+ *   u5  18px  原 text-lg  （base 版 h2 / codex 版 h3）
+ *   u7  20px  原 text-xl  （base 版 h1 / codex 版 h2）
+ *   u11 24px  原 text-2xl （codex 版 h1）
+ */
+:root,
+.chat-font-scope {
+  --chat-text-d3: calc(var(--chat-font-size) - 3px);
+  --chat-text-d2: calc(var(--chat-font-size) - 2px);
+  --chat-text-d1: calc(var(--chat-font-size) - 1px);
+  --chat-text-base: var(--chat-font-size);
+  --chat-text-u1: calc(var(--chat-font-size) + 1px);
+  --chat-text-u2: calc(var(--chat-font-size) + 2px);
+  --chat-text-u3: calc(var(--chat-font-size) + 3px);
+  --chat-text-u5: calc(var(--chat-font-size) + 5px);
+  --chat-text-u7: calc(var(--chat-font-size) + 7px);
+  --chat-text-u11: calc(var(--chat-font-size) + 11px);
+}
+
+/*
+ * 等宽刻度（基准 13）。终端和 diff 的字号是 JS 参数（xterm.options.fontSize /
+ * DiffView 的 prop），读不到 CSS 变量，那两处直接从 settings 取数；这里的 token
+ * 给纯 CSS 的代码块用，两边同源于 settings.theme.codeFontSize。
+ *   d1   12px  原 diff 的 12
+ *   base 13px  原代码块 / 终端的 13
+ */
+:root,
+.code-font-scope {
+  --code-text-d1: calc(var(--code-font-size) - 1px);
+  --code-text-base: var(--code-font-size);
 }

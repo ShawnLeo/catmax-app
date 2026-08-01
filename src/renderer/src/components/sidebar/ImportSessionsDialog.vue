@@ -19,8 +19,8 @@
       <!-- 头部 -->
       <div class="flex items-center justify-between p-4 border-b border-border">
         <div>
-          <h3 class="text-lg font-semibold">扫描导入会话</h3>
-          <p class="text-xs text-muted-foreground mt-0.5">
+          <h3 class="text-[length:var(--ui-text-u3)] font-semibold">扫描导入会话</h3>
+          <p class="text-[length:var(--ui-text-d3)] text-muted-foreground mt-0.5">
             扫描当前后端（{{ currentBackendLabel }}）磁盘/RPC 上已存在但还没纳入 catmax 的会话
           </p>
         </div>
@@ -36,7 +36,7 @@
       <!-- 错误警告条（当前后端扫描失败时显示） -->
       <div
         v-if="result?.errors.length"
-        class="px-4 py-2 bg-amber-500/10 border-b border-amber-500/30 text-xs text-amber-700 dark:text-amber-400 flex items-center gap-2"
+        class="px-4 py-2 bg-amber-500/10 border-b border-amber-500/30 text-[length:var(--ui-text-d3)] text-amber-700 dark:text-amber-400 flex items-center gap-2"
       >
         <AlertTriangleIcon class="w-3.5 h-3.5 flex-shrink-0" />
         <span class="flex-1">
@@ -52,7 +52,7 @@
         <!-- 加载中 -->
         <div
           v-if="scanning"
-          class="flex items-center justify-center py-16 gap-2 text-sm text-muted-foreground"
+          class="flex items-center justify-center py-16 gap-2 text-[length:var(--ui-text-base)] text-muted-foreground"
         >
           <Loader2Icon class="w-4 h-4 animate-spin" />
           <span>正在扫描磁盘和后端...</span>
@@ -61,11 +61,11 @@
         <!-- 空结果 -->
         <div
           v-else-if="result && importableSessions.length === 0"
-          class="text-center py-16 text-sm text-muted-foreground"
+          class="text-center py-16 text-[length:var(--ui-text-base)] text-muted-foreground"
         >
           <CheckCircle2Icon class="w-8 h-8 mx-auto mb-2 opacity-50" />
           <p>没有发现可导入的会话</p>
-          <p class="text-xs mt-1 opacity-70">
+          <p class="text-[length:var(--ui-text-d3)] mt-1 opacity-70">
             已扫描当前后端（{{ currentBackendLabel }}）的所有会话，全部已纳入或为空
           </p>
         </div>
@@ -73,7 +73,7 @@
         <!-- 列表 -->
         <template v-else-if="result">
           <!-- 工具条：全选 / 数量统计 -->
-          <div class="flex items-center justify-between mb-3 text-xs">
+          <div class="flex items-center justify-between mb-3 text-[length:var(--ui-text-d3)]">
             <label class="flex items-center gap-2 cursor-pointer">
               <input
                 type="checkbox"
@@ -105,7 +105,7 @@
               <!-- 反推路径没匹配上 workspace 时，在行内加一个"创建工作区"快捷入口 -->
               <template v-if="needsCreateWorkspace(sess, idx)" #hint>
                 <button
-                  class="text-xs text-primary hover:underline cursor-pointer"
+                  class="text-[length:var(--ui-text-d3)] text-primary hover:underline cursor-pointer"
                   @click="createWorkspaceFromCwd(sess.cwd!)"
                 >
                   + 用此路径新建工作区
@@ -119,7 +119,7 @@
       <!-- 底部操作 -->
       <div class="p-4 border-t border-border flex items-center justify-between gap-2">
         <button
-          class="text-xs text-muted-foreground hover:text-foreground flex items-center gap-1 cursor-pointer"
+          class="text-[length:var(--ui-text-d3)] text-muted-foreground hover:text-foreground flex items-center gap-1 cursor-pointer"
           :disabled="scanning"
           @click="rescan"
         >
@@ -127,7 +127,10 @@
           重新扫描
         </button>
         <div class="flex items-center gap-2">
-          <span v-if="selectedCount > 0" class="text-xs text-muted-foreground">
+          <span
+            v-if="selectedCount > 0"
+            class="text-[length:var(--ui-text-d3)] text-muted-foreground"
+          >
             已选 {{ selectedCount }} 条
           </span>
           <Button variant="outline" size="sm" @click="onClose">取消</Button>

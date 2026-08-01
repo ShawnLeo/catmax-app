@@ -18,7 +18,7 @@
     <button
       type="button"
       :title="triggerTitle"
-      class="perm-trigger-btn flex items-center gap-2 px-3 py-2 rounded-md text-sm transition-colors bg-secondary text-secondary-foreground hover:bg-accent hover:text-accent-foreground focus:outline-none focus-visible:ring-1 focus-visible:ring-ring cursor-pointer"
+      class="perm-trigger-btn flex items-center gap-2 px-3 py-2 rounded-md text-[length:var(--chat-text-u1)] transition-colors bg-secondary text-secondary-foreground hover:bg-accent hover:text-accent-foreground focus:outline-none focus-visible:ring-1 focus-visible:ring-ring cursor-pointer"
       @click="open = !open"
     >
       <!-- 盾牌图标比 Brain 留白多,同尺寸视觉偏小;+2px 到 18px 与脑图标视觉平衡。
@@ -41,7 +41,7 @@
         v-for="opt in options"
         :key="String(opt.value)"
         type="button"
-        class="w-full flex items-center gap-2.5 px-3 py-2 rounded text-sm text-left transition-colors text-popover-foreground hover:bg-accent hover:text-accent-foreground"
+        class="w-full flex items-center gap-2.5 px-3 py-2 rounded text-[length:var(--chat-text-u1)] text-left transition-colors text-popover-foreground hover:bg-accent hover:text-accent-foreground"
         :class="opt.value === modelValue ? 'bg-accent/60 text-accent-foreground' : ''"
         @click="onSelect(opt.value)"
       >

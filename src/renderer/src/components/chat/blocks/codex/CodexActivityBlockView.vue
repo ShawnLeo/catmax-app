@@ -1,5 +1,5 @@
 <template>
-  <div class="text-[13px] text-muted-foreground">
+  <div class="text-[length:var(--chat-text-base)] text-muted-foreground">
     <button
       type="button"
       class="group flex max-w-full items-center gap-2 py-0.5 text-left transition-colors hover:text-foreground"
@@ -36,7 +36,9 @@
             <span class="min-w-0 truncate font-mono underline decoration-border underline-offset-2">
               {{ basename(change.movePath ?? change.path) }}
             </span>
-            <span class="ml-auto inline-flex shrink-0 gap-1 font-mono text-[11px] tabular-nums">
+            <span
+              class="ml-auto inline-flex shrink-0 gap-1 font-mono text-[length:var(--chat-text-d2)] tabular-nums"
+            >
               <span class="text-emerald-500">+{{ change.stats.additions }}</span>
               <span class="text-red-500">-{{ change.stats.deletions }}</span>
             </span>

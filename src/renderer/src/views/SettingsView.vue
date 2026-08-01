@@ -6,18 +6,20 @@
       class="h-12 shrink-0 flex items-center gap-2 px-3 border-b border-border bg-background titlebar"
     >
       <TitleBarControls />
-      <h1 class="text-sm font-medium text-foreground ml-2">设置</h1>
+      <h1 class="text-[length:var(--ui-text-base)] font-medium text-foreground ml-2">设置</h1>
     </div>
 
     <!-- 主体：左侧导航 + 右侧内容 -->
     <div class="flex-1 flex min-h-0">
       <!-- 左侧导航：复用 sidebar token（bg-sidebar / sidebar-accent / sidebar-border），
            跟主会话侧栏共享配色，保持两种布局下"侧栏"视觉一致。右侧内容区沿用 bg-background。 -->
-      <nav class="w-52 shrink-0 border-r border-sidebar-border bg-sidebar p-3 flex flex-col gap-1">
+      <nav
+        class="settings-sidebar w-52 shrink-0 border-r border-sidebar-border bg-sidebar p-3 flex flex-col gap-1"
+      >
         <!-- 返回按钮：放在外观导航项之上，样式对齐工作区切换按钮
              （hover:bg-sidebar-accent + rounded-md），与下方导航项同间距。 -->
         <button
-          class="flex items-center gap-2.5 px-3 py-2 rounded-md text-sm font-medium text-left transition-colors text-muted-foreground hover:bg-sidebar-accent hover:text-foreground interactive cursor-pointer mb-1"
+          class="flex items-center gap-2.5 px-3 py-2 rounded-md text-[length:var(--ui-text-base)] font-medium text-left transition-colors text-muted-foreground hover:bg-sidebar-accent hover:text-foreground interactive cursor-pointer mb-1"
           @click="goBack"
         >
           <ArrowLeftIcon class="w-4 h-4 shrink-0" />
@@ -27,7 +29,7 @@
           v-for="item in navItems"
           :key="item.id"
           :class="[
-            'flex items-center gap-2.5 px-3 py-2 rounded-md text-sm text-left transition-colors interactive cursor-pointer',
+            'flex items-center gap-2.5 px-3 py-2 rounded-md text-[length:var(--ui-text-base)] text-left transition-colors interactive cursor-pointer',
             activeSection === item.id
               ? 'bg-sidebar-accent text-foreground font-medium'
               : 'text-muted-foreground hover:bg-sidebar-accent hover:text-foreground',
@@ -49,11 +51,11 @@
 
           <section v-show="activeSection === 'about'" class="flex flex-col gap-4">
             <header>
-              <h2 class="text-lg font-semibold text-foreground">关于</h2>
+              <h2 class="text-[length:var(--ui-text-u3)] font-semibold text-foreground">关于</h2>
             </header>
             <div class="flex items-center gap-3">
               <CatmaxLogo variant="badge" class="w-12 h-12 rounded-[22%]" />
-              <div class="text-sm text-muted-foreground space-y-1">
+              <div class="text-[length:var(--ui-text-base)] text-muted-foreground space-y-1">
                 <div class="text-foreground font-medium">Catmax</div>
                 <div>v{{ platformInfo?.appVersion ?? '...' }}</div>
                 <div>Electron v{{ platformInfo?.electronVersion ?? '...' }}</div>
@@ -143,5 +145,29 @@ function goBack(): void {
 
 .interactive {
   -webkit-app-region: no-drag;
+}
+
+/* Panel Depth: 与主聊天侧栏共用柔焦内阴影，让两种双栏布局保持一致。 */
+.settings-sidebar {
+  position: relative;
+  overflow: hidden;
+}
+
+.settings-sidebar::after {
+  position: absolute;
+  z-index: 20;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: 32px;
+  pointer-events: none;
+  background: linear-gradient(
+    to left,
+    var(--panel-edge-shadow) 0,
+    color-mix(in oklch, var(--panel-edge-shadow) 55%, transparent) 24%,
+    color-mix(in oklch, var(--panel-edge-shadow) 18%, transparent) 58%,
+    transparent 100%
+  );
+  content: '';
 }
 </style>

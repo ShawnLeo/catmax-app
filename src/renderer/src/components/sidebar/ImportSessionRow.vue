@@ -15,17 +15,17 @@
     <!-- 主信息 -->
     <div class="flex-1 min-w-0">
       <div class="flex items-center gap-2">
-        <span class="text-sm font-medium text-foreground truncate flex-1">
+        <span class="text-[length:var(--ui-text-base)] font-medium text-foreground truncate flex-1">
           {{ session.title ?? '(无标题)' }}
         </span>
         <span
           v-if="session.alreadyImported"
-          class="text-[10px] text-muted-foreground flex-shrink-0"
+          class="text-[length:var(--ui-text-d5)] text-muted-foreground flex-shrink-0"
         >
           已导入
         </span>
       </div>
-      <div class="text-xs text-muted-foreground truncate mt-0.5 font-mono">
+      <div class="text-[length:var(--ui-text-d3)] text-muted-foreground truncate mt-0.5 font-mono">
         <!-- claude 显示 cwd（反推路径）；codex 显示 thread id -->
         <span v-if="session.cwd" :title="session.cwd">{{ session.cwd }}</span>
         <span v-else :title="session.backendThreadId">{{ shortThreadId }}</span>

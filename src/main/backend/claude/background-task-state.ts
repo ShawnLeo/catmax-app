@@ -11,15 +11,60 @@ import type {
   SDKTaskNotificationMessage,
   SDKTaskProgressMessage,
   SDKTaskStartedMessage,
+  SDKTaskUpdatedMessage,
   SDKUserMessage,
 } from '@anthropic-ai/claude-agent-sdk'
 import type { BackgroundTaskSnapshot, TokenUsage, ToolTaskStats } from '@shared/backend/types'
+
+import { stripHarnessEnvelope } from './mapping'
 
 type TaskMessage =
   | SDKBackgroundTasksChangedMessage
   | SDKTaskNotificationMessage
   | SDKTaskProgressMessage
   | SDKTaskStartedMessage
+  | SDKTaskUpdatedMessage
+
+/**
+ * 从后台 Bash 的 tool_result 文本里捞出输出文件路径。
+ *
+ * SDK 只在终态的 task_notification 上给 output_file，可 shell 任务恰恰是在运行中
+ * 才需要它（`pnpm dist:mac` 跑五分钟，期间面板要能 tail 输出）。启动时的
+ * tool_result 文本里已经有同一个路径，这里是唯一能提前拿到它的地方。
+ */
+export function parseBackgroundOutputFile(text: string): string | undefined {
+  const match = /Output is being written to:\s*(\S+?\.output)/.exec(text)
+  return match?.[1]
+}
+
+/**
+ * 归一化 SDK 给的任务摘要。
+ *
+ * 子 Agent 的 task_notification.summary 装的是回传给上层模型的整份产出，开头
+ * 常常带 harness 的信封说明（"输出匹配到指令形状，控制标签已中和…"）。那是
+ * 写给模型的免疫声明，直接进快照就会在后台面板顶部糊上一大段方括号噪音。
+ */
+function normalizeSummary(summary: string | undefined): string | undefined {
+  if (!summary) return undefined
+  return stripHarnessEnvelope(summary).trim() || undefined
+}
+
+/** task_updated 的 status 取值比快照多，收敛到快照的 4 态。 */
+function normalizeUpdatedStatus(
+  status: NonNullable<SDKTaskUpdatedMessage['patch']['status']>,
+): BackgroundTaskSnapshot['status'] {
+  switch (status) {
+    case 'completed':
+      return 'completed'
+    case 'failed':
+      return 'failed'
+    case 'killed':
+      return 'stopped'
+    // pending / paused 都还在生命周期内，对 UI 而言仍是"没结束"。
+    default:
+      return 'running'
+  }
+}
 
 interface InternalTask {
   snapshot: BackgroundTaskSnapshot
@@ -46,6 +91,8 @@ export class ClaudeBackgroundTaskState {
         return [this.handleProgress(message)]
       case 'task_notification':
         return this.handleNotification(message)
+      case 'task_updated':
+        return this.handleUpdated(message)
     }
   }
 
@@ -57,20 +104,30 @@ export class ClaudeBackgroundTaskState {
       result.status === 'async_launched' ||
       result.status === 'remote_launched' ||
       result.isAsync === true
-    if (!isAsyncLaunch) return []
+    // 后台 Bash（run_in_background）走的是另一条路：tool_use_result 上只有
+    // backgroundTaskId，既没有 async_launched 也没有 isAsync。漏掉它，shell 任务
+    // 就只能等 task_started 才进表，而且永远拿不到 outputFile——面板也就没有输出可 tail。
+    const backgroundTaskId =
+      typeof result.backgroundTaskId === 'string' ? result.backgroundTaskId : undefined
+    if (!isAsyncLaunch && !backgroundTaskId) return []
 
     const taskId =
-      typeof result.agentId === 'string'
+      backgroundTaskId ??
+      (typeof result.agentId === 'string'
         ? result.agentId
         : typeof result.taskId === 'string'
           ? result.taskId
-          : undefined
+          : undefined)
     if (!taskId) return []
 
     const toolUseId = this.findToolUseId(message)
     const existing = this.tasks.get(taskId)
     const description =
       typeof result.description === 'string' ? result.description : existing?.snapshot.description
+    const outputFile =
+      (backgroundTaskId
+        ? parseBackgroundOutputFile(this.findToolResultText(message))
+        : undefined) ?? existing?.snapshot.outputFile
     const snapshot: BackgroundTaskSnapshot = {
       taskId,
       ...(toolUseId
@@ -80,9 +137,17 @@ export class ClaudeBackgroundTaskState {
           : {}),
       status: 'running',
       ...(description ? { description } : {}),
+      ...(backgroundTaskId
+        ? { taskType: 'shell' }
+        : existing?.snapshot.taskType
+          ? { taskType: existing.snapshot.taskType }
+          : {}),
+      ...(outputFile ? { outputFile } : {}),
+      startedAt: existing?.snapshot.startedAt ?? Date.now(),
       stats: {
         ...(existing?.snapshot.stats ?? {}),
-        agentId: taskId,
+        // shell 任务没有 agent，agentId 会被 TaskCard 误当成"可展开子会话"。
+        ...(backgroundTaskId ? {} : { agentId: taskId }),
         status: 'running',
       },
     }
@@ -170,6 +235,8 @@ export class ClaudeBackgroundTaskState {
       if (existing) {
         existing.snapshot.status = 'running'
         existing.snapshot.description = task.description
+        if (task.task_type) existing.snapshot.taskType = task.task_type
+        existing.snapshot.startedAt ??= Date.now()
         existing.snapshot.stats.status = 'running'
         updates.push(this.copy(existing.snapshot))
         continue
@@ -178,6 +245,8 @@ export class ClaudeBackgroundTaskState {
         taskId: task.task_id,
         status: 'running',
         description: task.description,
+        ...(task.task_type ? { taskType: task.task_type } : {}),
+        startedAt: Date.now(),
         stats: { agentId: task.task_id, status: 'running' },
       }
       this.tasks.set(task.task_id, { snapshot, attempt: 1 })
@@ -204,16 +273,50 @@ export class ClaudeBackgroundTaskState {
       ...(message.tool_use_id ? { toolUseId: message.tool_use_id } : {}),
       status: 'running',
       description: message.description,
+      ...(message.task_type
+        ? { taskType: message.task_type }
+        : message.subagent_type
+          ? { taskType: 'subagent' }
+          : previous?.snapshot.taskType
+            ? { taskType: previous.snapshot.taskType }
+            : {}),
+      ...(previous?.snapshot.outputFile ? { outputFile: previous.snapshot.outputFile } : {}),
+      startedAt: Date.now(),
       stats,
     }
     this.tasks.set(message.task_id, { snapshot, attempt })
     return this.copy(snapshot)
   }
 
+  /**
+   * task_updated 是 patch 语义：只带变化的字段，客户端合并进本地表。
+   * 它是 SDK 唯一给出 error 原文和 killed/paused 状态的地方。
+   */
+  private handleUpdated(message: SDKTaskUpdatedMessage): BackgroundTaskSnapshot[] {
+    const existing = this.tasks.get(message.task_id)
+    if (!existing) return []
+    this.sawBackgroundTask = true
+    const { patch } = message
+    const snapshot = existing.snapshot
+    if (patch.description) snapshot.description = patch.description
+    if (patch.error) snapshot.error = patch.error
+    if (patch.status) {
+      const status = normalizeUpdatedStatus(patch.status)
+      snapshot.status = status
+      snapshot.stats.status = status
+      if (status !== 'running') {
+        this.liveTaskIds.delete(message.task_id)
+        this.pendingNotificationFollowup = true
+      }
+    }
+    return [this.copy(snapshot)]
+  }
+
   private handleProgress(message: SDKTaskProgressMessage): BackgroundTaskSnapshot {
     this.sawBackgroundTask = true
     this.liveTaskIds.add(message.task_id)
     const existing = this.tasks.get(message.task_id)
+    const summary = normalizeSummary(message.summary)
     const stats: ToolTaskStats = {
       ...(existing?.snapshot.stats ?? {}),
       agentId: message.task_id,
@@ -222,7 +325,7 @@ export class ClaudeBackgroundTaskState {
       totalTokens: message.usage.total_tokens,
       totalToolUseCount: message.usage.tool_uses,
       ...(message.subagent_type ? { agentType: message.subagent_type } : {}),
-      ...(message.summary ? { progressSummary: message.summary } : {}),
+      ...(summary ? { progressSummary: summary } : {}),
       ...(message.last_tool_name ? { lastToolName: message.last_tool_name } : {}),
     }
     const snapshot: BackgroundTaskSnapshot = {
@@ -234,7 +337,14 @@ export class ClaudeBackgroundTaskState {
           : {}),
       status: 'running',
       description: message.description,
-      ...(message.summary ? { summary: message.summary } : {}),
+      ...(summary ? { summary } : {}),
+      ...(message.subagent_type
+        ? { taskType: 'subagent' }
+        : existing?.snapshot.taskType
+          ? { taskType: existing.snapshot.taskType }
+          : {}),
+      ...(existing?.snapshot.outputFile ? { outputFile: existing.snapshot.outputFile } : {}),
+      startedAt: existing?.snapshot.startedAt ?? Date.now(),
       stats,
     }
     this.tasks.set(message.task_id, {
@@ -253,6 +363,7 @@ export class ClaudeBackgroundTaskState {
 
     const existing = this.tasks.get(message.task_id)
     const status = message.status
+    const summary = normalizeSummary(message.summary)
     const stats: ToolTaskStats = {
       ...(existing?.snapshot.stats ?? {}),
       agentId: message.task_id,
@@ -274,7 +385,16 @@ export class ClaudeBackgroundTaskState {
           : {}),
       status,
       ...(existing?.snapshot.description ? { description: existing.snapshot.description } : {}),
-      summary: message.summary,
+      ...(summary ? { summary } : {}),
+      ...(existing?.snapshot.taskType ? { taskType: existing.snapshot.taskType } : {}),
+      // 终态才拿到权威的 output_file；shell 任务运行期用的是启动时解析出来的那个。
+      ...(message.output_file
+        ? { outputFile: message.output_file }
+        : existing?.snapshot.outputFile
+          ? { outputFile: existing.snapshot.outputFile }
+          : {}),
+      ...(existing?.snapshot.startedAt ? { startedAt: existing.snapshot.startedAt } : {}),
+      ...(existing?.snapshot.error ? { error: existing.snapshot.error } : {}),
       stats,
     }
     this.tasks.set(message.task_id, {
@@ -306,6 +426,25 @@ export class ClaudeBackgroundTaskState {
       }
     }
     return undefined
+  }
+
+  /** 拼出 user 消息里所有 tool_result 的文本，供解析后台 Bash 的输出文件路径。 */
+  private findToolResultText(message: SDKUserMessage): string {
+    const content = message.message.content
+    if (!Array.isArray(content)) return typeof content === 'string' ? content : ''
+    const parts: string[] = []
+    for (const block of content) {
+      if (typeof block !== 'object' || block === null || block.type !== 'tool_result') continue
+      const inner = block.content
+      if (typeof inner === 'string') parts.push(inner)
+      else if (Array.isArray(inner)) {
+        for (const item of inner) {
+          if (typeof item === 'object' && item !== null && item.type === 'text')
+            parts.push(item.text)
+        }
+      }
+    }
+    return parts.join('\n')
   }
 
   private copy(snapshot: BackgroundTaskSnapshot): BackgroundTaskSnapshot {

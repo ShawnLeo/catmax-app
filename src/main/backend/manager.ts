@@ -482,6 +482,25 @@ export class BackendManager {
     if (adapter.steer) await adapter.steer(turnId, prompt)
   }
 
+  /**
+   * 停止单个后台任务。
+   *
+   * taskId 不带 backend/turn 归属，而后台任务只有 claude 有，所以广播给所有
+   * 实现了该方法的 adapter，由持有该任务的那个自行认领（其余是 no-op）。
+   */
+  async stopBackgroundTask(taskId: string): Promise<void> {
+    await Promise.all(
+      [...this.adapters.values()].map(async (adapter) => {
+        if (!adapter.stopBackgroundTask) return
+        try {
+          await adapter.stopBackgroundTask(taskId)
+        } catch (e) {
+          log.warn('stopBackgroundTask failed on adapter', adapter.id, e)
+        }
+      }),
+    )
+  }
+
   listTurnRuns(sessionId?: string): TurnRunRecord[] {
     return this.turnCoordinator.list(sessionId)
   }

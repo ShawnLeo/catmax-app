@@ -38,7 +38,7 @@
           :placeholder="disabled ? '后端未连接...' : '发送消息...（Shift+Enter 换行）'"
           :disabled="disabled"
           rows="3"
-          class="w-full bg-transparent font-chat text-[15px] text-foreground px-4 py-3 resize-none focus:outline-none placeholder:text-muted-foreground/60 disabled:opacity-50"
+          class="w-full bg-transparent font-chat text-[length:var(--chat-text-u2)] text-foreground px-4 py-3 resize-none focus:outline-none placeholder:text-muted-foreground/60 disabled:opacity-50"
           @keydown="onKeyDown"
           @paste="onPaste"
         />
@@ -107,7 +107,9 @@
           <div class="flex-1" />
 
           <!-- 提示文字:窄屏隐藏(composer-hint) -->
-          <span class="composer-hint font-sans text-[11px] text-muted-foreground hidden sm:inline">
+          <span
+            class="composer-hint font-sans text-[length:var(--chat-text-d2)] text-muted-foreground hidden sm:inline"
+          >
             Shift+Enter 换行
           </span>
 

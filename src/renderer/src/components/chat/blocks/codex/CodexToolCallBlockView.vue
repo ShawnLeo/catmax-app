@@ -1,5 +1,5 @@
 <template>
-  <div class="text-[13px] text-muted-foreground">
+  <div class="text-[length:var(--chat-text-base)] text-muted-foreground">
     <button
       type="button"
       class="flex max-w-full items-center gap-2 py-0.5 text-left hover:text-foreground"
@@ -16,7 +16,7 @@
     </button>
     <pre
       v-if="open && hasDetails"
-      class="mt-1 max-h-64 overflow-auto whitespace-pre-wrap rounded-md bg-muted/30 px-3 py-2 font-mono text-[11px]"
+      class="mt-1 max-h-64 overflow-auto whitespace-pre-wrap rounded-md bg-muted/30 px-3 py-2 font-mono text-[length:var(--chat-text-d2)]"
       >{{ details }}</pre>
   </div>
 </template>

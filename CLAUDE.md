@@ -15,7 +15,7 @@ pnpm format           # Prettier formatting
 
 # Testing (IMPORTANT: dual ABI handling required)
 pnpm rebuild:node     # Rebuild native modules for Node — REQUIRED before running tests
-pnpm test             # Run all tests (vitest, ~47 files under tests/**/*.test.ts and src/**/*.test.ts)
+pnpm test             # Run all tests (vitest, ~66 files under tests/**/*.test.ts and src/**/*.test.ts)
 pnpm test:watch       # Watch mode
 
 # Run a single test file / single test
@@ -138,13 +138,15 @@ Don't assume both adapters have the same file layout:
   **A thread's `model_provider` is baked into its rollout, and `thread/resume` restores it — `-c model_provider=` does not override it.** This breaks a bridge toggle in *both* directions, and neither failure names the provider as the cause: a pre-bridge session resumed with the bridge on keeps going straight to ChatGPT (the bridge never sees a request; the visible error is `The '<upstream-model>' model is not supported when using Codex with a ChatGPT account.` — the *model* was swapped but the provider wasn't), and a bridge-era session resumed with the bridge off dies at `failed to load configuration: Model provider \`catmax-bridge\` not found`, after which the thread won't even load. `ThreadResumeParams.modelProvider` is the only override, so every resume passes it explicitly (`CodexAdapter.resumeParams()`): the bridge's id when the bridge is on, otherwise whatever `~/.codex/config.toml` actually resolves to (`readCodexDefaultProvider()`, profile-aware). Never hardcode `openai` for the off case — users customize `model_provider` (e.g. an `openai-custom` that disables WebSockets), and hardcoding silently discards that. `BridgeManager.codexModelProviderId()` and `codexSpawnArgs()` share one predicate so resume can never name a provider the spawn args didn't define.
 - **Claude** (`src/main/backend/claude/`): migrated OFF spawning the `claude` CLI and parsing raw stream-json onto `@anthropic-ai/claude-agent-sdk`. The SDK still spawns a bundled claude binary internally, but exposes a typed `SDKMessage` stream and an in-process `canUseTool` callback for permissions — this eliminated the old ApprovalBridge / Unix socket / separate MCP-server subprocess / temp mcp-config machinery (electron.vite.config.ts's main entry used to have a separate `mcp-server` bundle, since deleted). `interrupt` calls the SDK's `query.interrupt()` directly. `sdk-mapping.ts` reuses most translation logic from `mapping.ts` since `SDKMessage` is structurally isomorphic to the old CLI stream-json shapes, just re-typed. Other files: `ask-user-server.ts` (custom `ask_user` MCP tool for clarifying questions), `background-task-state.ts` (subagent/background task tracking), `jsonl-reader.ts` (reads `~/.claude/projects/**/*.jsonl` for history independent of the live SDK connection).
 
+What the two adapters *do* share lives in `src/main/backend/shared/assess-risk.ts` — one `low`/`medium`/`high` classifier over `ApprovalRequest`, called by both, that the approval UI uses to pick the default-focused button and destructive styling. Backend-specific approval shapes get normalized into `ApprovalRequest` first, so risk policy is never duplicated per backend.
+
 When adding a new backend: add to `BackendId` (`src/shared/constants.ts`), create a plugin in the style of `builtin-plugins.ts` with a manifest declaring `blockTypes`, implement `AgentBackend`, register it in `plugin-loader.ts`. The renderer needs a matching entry in `src/renderer/src/backend-plugins/index.ts` that registers block-renderer components — a mismatch degrades to `FallbackBlockView`/`BlockErrorView` per block (warning, not a crash) rather than an app-wide failure.
 
 ## IPC Domains
 
 8 domains under `src/main/ipc/domains/` (there is **no `credential` domain**. Backends manage their own auth externally, e.g. `codex login` / `claude login`, and catmax-app only persists the CLI binary path and proxy settings. The `backend.*ConfigFile` handlers let the settings page _edit_ the backends' own config files in place — including `~/.codex/auth.json` — but nothing is copied into catmax's own storage.
 
-**One deliberate exception**: the Protocol Bridge (see below) must hold the upstream provider's API key to forward requests. When the user picks `credentialSource: 'stored'`, that key is written to `userData/bridge-credentials.json` with mode `0600` by `src/main/service/bridge-credentials.ts` — **never into `settings.json`** (which is `0644`, backed up, and readable wholesale by the renderer). It only ever travels renderer → main; IPC returns `credentialReady: boolean` and never the secret. `credentialSource: 'env'` stores only the env var _name_ and writes nothing to disk):
+**One deliberate exception**: the Protocol Bridge (see below) must hold the upstream provider's API key to forward requests. When the user picks `credentialSource: 'stored'`, that key is written to `userData/bridge-credentials.json` (`{ secrets: { [providerId]: key } }`, keyed by the provider's UUID, atomic rename + `chmod 0600`) by `src/main/service/bridge-credentials.ts` — **never into `settings.json`** (which is `0644`, backed up, and readable wholesale by the renderer). It only ever travels renderer → main; IPC returns `credentialReady: boolean` and never the secret. `credentialSource: 'env'` stores only the env var _name_ and writes nothing to disk):
 
 | Domain      | Purpose                                                                                                                                                                                                                                                                                                                               |
 | ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -169,6 +171,7 @@ Codex only speaks the OpenAI **Responses** protocol — `wire_api = "chat"` was 
 codex app-server ──Responses──▶ BridgeServer (127.0.0.1:random) ──Anthropic──▶ upstream
 ```
 
+- **The bridge config is a multi-provider library, not one upstream.** `ProtocolBridgeSettings` is `{ enabled, currentProviderId, providers: Record<id, BridgeProvider> }` (`src/shared/protocol/bridge-config.ts` + `settings-schema.ts`); each `BridgeProvider` is a saved `BridgeUpstreamConfig` plus stable UUID `id`, user-editable `name`, and the `presetId` it was created from (echo-only). Switching upstreams only moves `currentProviderId` — provider entries and their stored secrets are never rewritten, which is why the secret file is keyed by provider id rather than holding a single key. Anything that reads "the bridge upstream" must resolve `providers[currentProviderId]` and handle `currentProviderId === ''` (nothing selected) as bridge-off.
 - **IR hub-and-spoke, not pairwise.** `src/shared/protocol/ir.ts` defines a block-centric intermediate representation; each protocol contributes one `ProtocolCodec` (`codec.ts`) with a client half (`decodeRequest` / `createResponseEncoder`) and an upstream half (`encodeRequest` / `createStreamDecoder`). N codecs cover N² pairs — adding `openai.chat` means one new file in `codecs/` plus one line in `registry.ts`, and every existing codec is untouched. Fidelity is protected by `IrRequest.vendor` (verbatim original body, used for same-protocol passthrough) and `IrOpaque` (payloads the target protocol can't express — Anthropic thinking `signature`, Responses `encrypted_content` — carried through and restored).
 - **Encoders/decoders are stateful objects, not pure functions** — Responses requires `output_item.added`/`done` pairing and dense `output_index` allocation, which needs cross-event state. `ResponseEncoder.finish()` enforces the same exactly-one-terminal-event invariant `PerTurnCoordinator` does.
 - **codex is reconfigured at spawn time, not on disk.** `BridgeManager.codexSpawnArgs()` emits `-c model_provider=...` overrides consumed by `CodexAdapter.setExtraArgs()`; `~/.codex/config.toml` is never touched, so disabling the bridge is a complete revert. codex receives only the bridge's per-boot token via `CATMAX_BRIDGE_TOKEN`; **the real upstream key never enters codex's env or config**.
@@ -178,6 +181,17 @@ codex app-server ──Responses──▶ BridgeServer (127.0.0.1:random) ──
 - **The bridge deliberately 404s `GET /models`.** An earlier version hand-forged codex's private `models_cache.json` shape (34 undocumented fields) to quiet codex's models-manager refresh. That schema drifts between codex releases — 0.146 rejects it with ``unknown variant `disabled`, expected `text` or `text_and_image` `` and logs the whole refresh as an ERROR. Serving a response that _fails to decode_ is worse than serving none, and catmax no longer needs codex's catalog at all (see the previous bullet). 404 is the path every third-party provider already takes, so it is codex's best-tested fallback. Do not reintroduce a forged catalog.
 - **The models endpoint is not under `baseUrl`.** DeepSeek serves chat at `https://api.deepseek.com/anthropic` but its model list only at the OpenAI-style `https://api.deepseek.com/models` (`/anthropic/models` is a 404) — hence a separate `upstream.modelsUrl` field. Left blank, `candidateModelsUrls()` probes `<origin>/v1/models` then `<origin>/models`, which is what makes configs saved before this field existed keep working. The probe sends Bearer **and** `x-api-key` because the list endpoint's protocol style need not match the chat endpoint's.
 - Reference implementation studied when designing this: cc-switch's `src-tauri/src/proxy/providers/`. Design rationale and the Responses/Chat/Anthropic protocol comparison: `docs/superpowers/specs/2026-07-29-protocol-bridge-design.md`.
+
+## Session Persistence: Disk Is Truth, SQLite Is an Index
+
+`src/main/service/schema.sql` is imported as `./schema.sql?raw` and inlined into the bundle at build time — it must never be read from disk at runtime, because the packaged `out/main/` contains only `index.js`. `database.ts`'s `migrate()` just `exec`s that string on boot; it is `CREATE TABLE IF NOT EXISTS` only, with no version tracking, so altering an existing table needs a hand-written guarded `ALTER`. The schema holds `workspaces`, `sessions`, `messages`, `turn_runs`, `deleted_sessions`, `app_state`. The actual conversation content is **not** in sqlite: it lives in the backends' own files (codex rollouts, `~/.claude/projects/**/*.jsonl`) and is re-read on demand by each adapter's `getHistory()`. `messages` only stores previews/counts for list rendering, and `sessions` is a `(backend, backend_thread_id)`-unique index over those files.
+
+Because disk is truth, the two sides drift and `src/main/ipc/domains/session/handlers.ts` reconciles them — with a deliberate asymmetry that is easy to break:
+
+- **`reconcileSessions`** (automatic, on workspace open) syncs db against the current backend's `listSessions()`. It **honors the `deleted_sessions` tombstone**: a session the user deleted is not re-added just because its rollout/jsonl file is still on disk. It also only ever touches the *current* backend's rows, and swallows a failing `listSessions` (an uninstalled codex used to hang the whole workspace open on a 30s `initialize` timeout).
+- **`scanImportable` / `importSessions`** (explicit, user-initiated) **ignore the tombstone**, so a deletion stays recoverable by hand.
+
+`removeSession` writes the tombstone *before* attempting to delete the underlying file, so a failed physical delete still can't resurrect the session. Any new code path that adds sessions from disk must decide which of these two semantics it has.
 
 ## Renderer Structure Notes
 
@@ -205,7 +219,7 @@ Switching themes = changing `<html data-theme="dark|light|system|...">`; CSS var
 
 ## Testing
 
-- Vitest, `happy-dom` environment, discovers `tests/**/*.test.ts` and `src/**/*.test.ts` (both locations are intentional — co-located tests live alongside stores/lib in `src/renderer/src/`, everything else lives under `tests/{backend,renderer,shared,ipc,service}/`).
+- Vitest, `happy-dom` environment, discovers `tests/**/*.test.ts` and `src/**/*.test.ts` (both locations are intentional — co-located tests live alongside stores/lib in `src/renderer/src/`, everything else lives under `tests/{backend,protocol,renderer,shared,ipc,service}/`).
 - Tests mock spawned subprocesses/SDK calls — no real CLI dependency needed to run the suite.
 - Always `pnpm rebuild:node` first (see Native Module Handling above).
 - Path aliases (`@shared`, `@main`, `@renderer`) are declared separately in both `electron.vite.config.ts` and `vitest.config.ts` — keep them in sync manually if adding new aliases.
@@ -234,4 +248,11 @@ Switching themes = changing `<html data-theme="dark|light|system|...">`; CSS var
 
 - `docs/superpowers/specs/2026-07-18-catmax-app-design.md` — original architecture design (process model, adapter abstraction, typed IPC).
 - `docs/superpowers/specs/2026-07-25-chat-block-architecture-design.md` — the block/content-model design described above.
+- `docs/superpowers/specs/2026-07-29-protocol-bridge-design.md` — Protocol Bridge design and the Responses/Chat/Anthropic protocol comparison.
 - `docs/superpowers/plans/plan-{1..5}-*[-smoke-test].md` — the phased implementation plan the app was originally built from (foundation → backend/chat → claude/sidebar → git/files/editor → terminal/cmdk → history/packaging/shortcuts).
+
+## Other Guidance Files in This Repo
+
+- `.claude/skills/catmax-conventions/` — the same conventions in Chinese, with deeper `references/` (`architecture.md`, `ipc-pattern.md`, `backend-adapter.md`, `coding-style.md`, `ui-conventions.md`). Consult it for the step-by-step recipes; this file is the map.
+- `AGENTS.md` — a copy of this file for non-Claude agents. It is currently **stale** (missing the backend-plugin, Protocol Bridge, and session-persistence sections). If you make a substantive edit here, mirror it there or the two will keep diverging.
+- `README.md` — user-facing feature/setup overview, Chinese. Some claims are out of date relative to the code (e.g. it advertises `safeStorage`-encrypted credentials; no `safeStorage` call exists in `src/` — see the credential note under IPC Domains for what actually happens).

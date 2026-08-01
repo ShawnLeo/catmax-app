@@ -478,4 +478,94 @@ describe('claude history mapping', () => {
     expect(assistantMsgs).toHaveLength(1)
     expect(assistantMsgs[0]!.id).toBe('m-real')
   })
+
+  describe('后台任务完成通知', () => {
+    /** 复刻真实 jsonl：后台 Bash 启动 → 立即拿到 running 回执 → 几分钟后收到完成通知。 */
+    function replayWithNotification(status: string, summary: string) {
+      return claudeReplayToMessages([
+        {
+          type: 'assistant',
+          message: {
+            id: 'm1',
+            type: 'message',
+            role: 'assistant',
+            content: [
+              {
+                type: 'tool_use',
+                id: 'call_89007',
+                name: 'Bash',
+                input: { command: 'pnpm dist:mac', run_in_background: true },
+              },
+            ],
+          },
+        },
+        {
+          type: 'user',
+          message: {
+            role: 'user',
+            content: [
+              {
+                type: 'tool_result',
+                tool_use_id: 'call_89007',
+                content: 'Command running in background with ID: b2d7h94fn.',
+              },
+            ],
+          },
+        },
+        {
+          type: 'user',
+          message: {
+            role: 'user',
+            content: [
+              {
+                type: 'text',
+                text: `<task-notification>\n<task-id>b2d7h94fn</task-id>\n<tool-use-id>call_89007</tool-use-id>\n<output-file>/tmp/x/tasks/b2d7h94fn.output</output-file>\n<status>${status}</status>\n<summary>${summary}</summary>\n</task-notification>`,
+              },
+            ],
+          },
+        },
+      ])
+    }
+
+    test('不产生 user 气泡，终态回填到发起它的工具卡片', () => {
+      const messages = replayWithNotification('completed', 'Background command "打包" completed')
+
+      // 通知本身是喂给模型的信封，不是用户说的话——历史里只应有那条 tool_result 的
+      // user 消息被消费掉，不能多出一个装着 task-id/文件路径的气泡。
+      const userTexts = messages
+        .filter((m) => m.role === 'user')
+        .flatMap((m) => m.textBlocks?.map((b) => b.text) ?? [])
+      expect(userTexts.join('')).not.toContain('task-notification')
+      expect(userTexts.join('')).not.toContain('b2d7h94fn')
+
+      const tool = messages.find((m) => m.role === 'assistant')?.toolBlocks?.[0]
+      expect(tool?.status).toBe('completed')
+      expect(tool?.output?.ok).toBe(true)
+      expect(tool?.output?.summary).toBe('Background command "打包" completed')
+      expect(tool?.taskStats?.status).toBe('completed')
+    })
+
+    test('失败状态标红并保留 summary', () => {
+      const messages = replayWithNotification('failed', 'exit code 1')
+      const tool = messages.find((m) => m.role === 'assistant')?.toolBlocks?.[0]
+      expect(tool?.status).toBe('failed')
+      expect(tool?.output?.ok).toBe(false)
+      expect(tool?.output?.summary).toBe('exit code 1')
+      expect(tool?.taskStats?.status).toBe('failed')
+    })
+
+    test('长得像通知但缺 task-id 的普通文本仍按用户消息处理', () => {
+      const messages = claudeReplayToMessages([
+        {
+          type: 'user',
+          message: {
+            role: 'user',
+            content: [{ type: 'text', text: '这段 <task-notification> 是我手打的' }],
+          },
+        },
+      ])
+      expect(messages).toHaveLength(1)
+      expect(messages[0]!.textBlocks?.[0]?.text).toContain('我手打的')
+    })
+  })
 })

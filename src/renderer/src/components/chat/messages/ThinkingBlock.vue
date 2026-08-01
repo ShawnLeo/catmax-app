@@ -16,7 +16,7 @@
     <!-- header：点击切换展开/收起 -->
     <button
       type="button"
-      class="inline-flex items-center gap-1.5 px-2 py-1 rounded-md text-[12px] transition-colors hover:bg-accent/50 text-muted-foreground cursor-pointer"
+      class="inline-flex items-center gap-1.5 px-2 py-1 rounded-md text-[length:var(--chat-text-d1)] transition-colors hover:bg-accent/50 text-muted-foreground cursor-pointer"
       :title="streaming ? '正在思考...' : '点击展开/收起推理'"
       @click="open = !open"
     >
@@ -47,7 +47,7 @@
     <!-- 展开内容：斜体灰文，跟原本内联样式一致 -->
     <div
       v-if="open"
-      class="mt-1 pl-2 border-l border-border/40 text-muted-foreground italic leading-relaxed text-[14px]"
+      class="mt-1 pl-2 border-l border-border/40 text-muted-foreground italic leading-relaxed text-[length:var(--chat-text-u1)]"
     >
       <MarkdownView v-if="text.trim()" :text="text" />
     </div>

@@ -7,7 +7,7 @@
     <button
       type="button"
       :class="[
-        'group flex h-7 w-full items-center rounded-md pr-2 text-[13px] transition-colors',
+        'group flex h-7 w-full items-center rounded-md pr-2 text-[length:var(--ui-text-d2)] transition-colors',
         isSelected ? 'bg-primary/10 text-foreground' : 'text-foreground/85 hover:bg-muted/70',
       ]"
       :style="{ paddingLeft: `${depth * 14 + 6}px` }"
@@ -33,7 +33,7 @@
       <!-- 文件节点：右侧 +/- 统计 -->
       <span
         v-if="!node.dir && node.change"
-        class="ml-auto flex-shrink-0 font-mono text-[11px] tabular-nums"
+        class="ml-auto flex-shrink-0 font-mono text-[length:var(--ui-text-d4)] tabular-nums"
       >
         <span class="text-emerald-500">+{{ node.change.stats.additions }}</span>
         <span class="ml-1 text-red-500">-{{ node.change.stats.deletions }}</span>

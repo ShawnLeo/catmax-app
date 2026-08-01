@@ -9,7 +9,7 @@
     <div
       v-for="(att, i) in attachments"
       :key="i"
-      class="group inline-flex items-center gap-1.5 pl-2 pr-1 py-0.5 rounded-md bg-muted text-muted-foreground text-[12px] max-w-full"
+      class="group inline-flex items-center gap-1.5 pl-2 pr-1 py-0.5 rounded-md bg-muted text-muted-foreground text-[length:var(--chat-text-d1)] max-w-full"
     >
       <TextSelectIcon class="w-3 h-3 flex-shrink-0" />
       <span class="truncate max-w-[280px]">{{ describe(att) }}</span>

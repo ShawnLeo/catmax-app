@@ -1,5 +1,5 @@
 <template>
-  <div class="p-2 border-t border-sidebar-border flex items-center gap-1">
+  <div class="sidebar-footer p-2 border-t border-sidebar-border bg-sidebar flex items-center gap-1">
     <!-- 用户信息（预留）—— 后续接入登录态后填充头像/用户名 -->
     <button
       class="flex-1 min-w-0 flex items-center gap-2 px-2 py-1.5 rounded-md hover:bg-sidebar-accent text-left cursor-pointer"
@@ -13,7 +13,7 @@
         <UserIcon class="w-3.5 h-3.5 text-muted-foreground" />
       </div>
       <div class="flex-1 min-w-0">
-        <div class="text-xs text-foreground truncate">未登录</div>
+        <div class="text-[length:var(--ui-text-d3)] text-foreground truncate">未登录</div>
       </div>
     </button>
 
@@ -44,3 +44,12 @@ function onUserClick(): void {
   router.push('/settings')
 }
 </script>
+
+<style scoped>
+/* Panel Depth: 底部操作栏轻微浮在会话列表之上，阴影向上柔和发散。 */
+.sidebar-footer {
+  position: relative;
+  z-index: 10;
+  box-shadow: 0 -8px 20px -14px var(--panel-edge-shadow);
+}
+</style>

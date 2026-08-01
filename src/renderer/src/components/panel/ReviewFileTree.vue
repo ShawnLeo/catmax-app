@@ -11,7 +11,7 @@
   <div class="flex h-full flex-col">
     <!-- header：变更文件数 + 总 +/- 统计 -->
     <div
-      class="flex items-center gap-2 border-b border-border px-3 py-2 text-xs text-muted-foreground"
+      class="flex items-center gap-2 border-b border-border px-3 py-2 text-[length:var(--ui-text-d3)] text-muted-foreground"
     >
       <span class="font-medium text-foreground">{{ files.length }} 个文件</span>
       <span class="font-mono tabular-nums">

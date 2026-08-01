@@ -7,7 +7,7 @@
     <div class="flex items-center gap-1.5 px-3 py-2 border-b border-border bg-muted/30">
       <!-- "终端" 标题字样 -->
       <span
-        class="text-sm font-medium text-muted-foreground px-2 py-1 border-r border-border mr-1 shrink-0"
+        class="text-[length:var(--ui-text-base)] font-medium text-muted-foreground px-2 py-1 border-r border-border mr-1 shrink-0"
       >
         终端
       </span>
@@ -18,7 +18,7 @@
           v-for="t in terminalStore.terminals"
           :key="t.id"
           :class="[
-            'group flex items-center gap-1.5 pl-3 pr-2 py-1 rounded-md text-sm whitespace-nowrap transition-colors shrink-0 cursor-pointer',
+            'group flex items-center gap-1.5 pl-3 pr-2 py-1 rounded-md text-[length:var(--ui-text-base)] whitespace-nowrap transition-colors shrink-0 cursor-pointer',
             terminalStore.activeId === t.id
               ? 'bg-background text-foreground'
               : 'text-muted-foreground hover:text-foreground hover:bg-muted/50',
@@ -32,7 +32,7 @@
             v-if="renamingId === t.id"
             :ref="(el) => setRenameInput(el as HTMLInputElement | null)"
             v-model="renameValue"
-            class="bg-transparent border-none outline-none text-sm text-foreground max-w-[120px] p-0"
+            class="bg-transparent border-none outline-none text-[length:var(--ui-text-base)] text-foreground max-w-[120px] p-0"
             @click.stop
             @keydown.enter="commitRename(t.id)"
             @keydown.escape="cancelRename"
@@ -94,7 +94,7 @@
     <!-- 没有 terminal 时的提示 -->
     <div
       v-if="terminalStore.terminals.length === 0"
-      class="absolute inset-0 top-10 flex items-center justify-center text-xs text-muted-foreground pointer-events-none"
+      class="absolute inset-0 top-10 flex items-center justify-center text-[length:var(--ui-text-d3)] text-muted-foreground pointer-events-none"
     >
       点击 + 创建终端
     </div>
@@ -102,18 +102,32 @@
 </template>
 
 <script setup lang="ts">
+import { useSettingsStore } from '@renderer/stores/settings'
 import { useTerminalStore } from '@renderer/stores/terminal'
 import { useUiStore } from '@renderer/stores/ui'
 import { useWorkspaceStore } from '@renderer/stores/workspace'
+import { DEFAULT_CODE_FONT_SIZE } from '@shared/constants'
 import { FitAddon } from '@xterm/addon-fit'
 import { WebLinksAddon } from '@xterm/addon-web-links'
 import { Terminal } from '@xterm/xterm'
 import { ChevronDownIcon, PlusIcon, TerminalIcon, XIcon } from 'lucide-vue-next'
-import { nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 
 const terminalStore = useTerminalStore()
+const settingsStore = useSettingsStore()
 const uiStore = useUiStore()
 const workspaceStore = useWorkspaceStore()
+
+/**
+ * 终端字号。
+ *
+ * xterm 的字号是构造参数 / `options` 属性，读不到 CSS 变量，所以这里直接取
+ * settings.theme.codeFontSize——和代码块用的 --code-font-size 同一个字段。
+ * DEFAULT_CODE_FONT_SIZE 兜底设置未加载完的那一瞬。
+ */
+const codeFontSize = computed(
+  () => settingsStore.settings?.theme.codeFontSize ?? DEFAULT_CODE_FONT_SIZE,
+)
 
 // —— xterm 多实例管理 ——
 // 每个终端 id 对应一个 xterm 实例 + fit addon；DOM 挂载点单独存。
@@ -143,7 +157,7 @@ function setMountEl(id: string, el: HTMLElement | null): void {
 function initTerminal(id: string, el: HTMLElement): void {
   const term = new Terminal({
     cursorBlink: true,
-    fontSize: 13,
+    fontSize: codeFontSize.value,
     fontFamily: 'var(--font-mono), monospace',
     theme: {
       background: '#0a0a0c',
@@ -242,6 +256,20 @@ watch(
   () => terminalStore.activeId,
   () => nextTick(() => fitActive()),
 )
+
+// 代码字号改变 → 已有的 xterm 实例改字号后必须重新 fit：字号变了每个字符的
+// 像素宽高就变了，不重算 cols/rows 的话 pty 侧的换行位置会和显示对不上。
+watch(codeFontSize, (size) => {
+  for (const [id, inst] of instances) {
+    inst.term.options.fontSize = size
+    try {
+      inst.fit.fit()
+      void terminalStore.resize(id, inst.term.cols, inst.term.rows)
+    } catch {
+      // 该终端当前不可见，尺寸算不出来——下次切到它时 fitActive 会补上
+    }
+  }
+})
 
 // 终端被 kill（从 store terminals 数组移除）后，清理对应 xterm 实例
 watch(

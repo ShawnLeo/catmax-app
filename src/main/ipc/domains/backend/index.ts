@@ -14,6 +14,7 @@ import {
   listModelsFor,
   listTurnRuns,
   readBackendConfigFile,
+  readBackgroundTaskOutput,
   refreshModels,
   refreshModelsFor,
   respondApproval,
@@ -24,6 +25,7 @@ import {
   testBridgeUpstream,
   startTurn,
   steerTurn,
+  stopBackgroundTask,
   switchBackend,
   updateTurnConfig,
   validateBackendConfigFile,
@@ -55,6 +57,14 @@ export function registerBackendHandlers(): void {
     interruptTurn,
   )
   handleRendererRequest<BackendHandlers, 'backend.steerTurn'>('backend.steerTurn', steerTurn)
+  handleRendererRequest<BackendHandlers, 'backend.stopBackgroundTask'>(
+    'backend.stopBackgroundTask',
+    stopBackgroundTask,
+  )
+  handleRendererRequest<BackendHandlers, 'backend.readBackgroundTaskOutput'>(
+    'backend.readBackgroundTaskOutput',
+    readBackgroundTaskOutput,
+  )
   handleRendererRequest<BackendHandlers, 'backend.listTurnRuns'>(
     'backend.listTurnRuns',
     listTurnRuns,

@@ -37,7 +37,7 @@
         <div
           v-for="block in textBlocks"
           :key="block.id"
-          class="whitespace-pre-wrap text-[15px] leading-relaxed"
+          class="whitespace-pre-wrap text-[length:var(--chat-text-u2)] leading-relaxed"
         >
           {{ block.text }}
         </div>

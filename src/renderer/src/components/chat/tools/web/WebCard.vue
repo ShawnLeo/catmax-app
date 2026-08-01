@@ -11,7 +11,7 @@
   -->
   <div class="space-y-1.5 py-0.5">
     <!-- query / url -->
-    <div class="flex items-start gap-1.5 text-[13px]">
+    <div class="flex items-start gap-1.5 text-[length:var(--chat-text-base)]">
       <span class="text-muted-foreground flex-shrink-0 mt-0.5">{{
         info.type === 'search' ? '🔍' : '🔗'
       }}</span>
@@ -19,7 +19,10 @@
     </div>
 
     <!-- WebFetch 的 prompt -->
-    <div v-if="info.prompt" class="text-[12px] text-muted-foreground italic pl-5">
+    <div
+      v-if="info.prompt"
+      class="text-[length:var(--chat-text-d1)] text-muted-foreground italic pl-5"
+    >
       指令：{{ info.prompt }}
     </div>
 
@@ -31,14 +34,14 @@
       <span
         v-for="d in info.allowedDomains ?? []"
         :key="`a-${d}`"
-        class="text-[10px] px-1.5 py-0.5 rounded bg-success/10 text-success border border-success/20 font-mono"
+        class="text-[length:var(--chat-text-d3)] px-1.5 py-0.5 rounded bg-success/10 text-success border border-success/20 font-mono"
       >
         + {{ d }}
       </span>
       <span
         v-for="d in info.blockedDomains ?? []"
         :key="`b-${d}`"
-        class="text-[10px] px-1.5 py-0.5 rounded bg-destructive/10 text-destructive border border-destructive/20 font-mono"
+        class="text-[length:var(--chat-text-d3)] px-1.5 py-0.5 rounded bg-destructive/10 text-destructive border border-destructive/20 font-mono"
       >
         − {{ d }}
       </span>

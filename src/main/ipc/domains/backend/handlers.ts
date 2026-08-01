@@ -1,5 +1,6 @@
 import { existsSync, mkdirSync } from 'node:fs'
-import { dirname } from 'node:path'
+import { open, type FileHandle } from 'node:fs/promises'
+import { basename, dirname, resolve } from 'node:path'
 
 import { ctx } from '@main/context'
 import { bridgeManager } from '@main/protocol/manager'
@@ -70,6 +71,50 @@ export const startTurn = async (args: CoordinatedStartTurnArgs) => {
 
 export const interruptTurn = async (args: { turnId: string }) => {
   await ctx.backendManager.interruptTurn(args.turnId)
+}
+
+export const stopBackgroundTask = async (args: { taskId: string }) => {
+  await ctx.backendManager.stopBackgroundTask(args.taskId)
+}
+
+/** 后台任务输出文件的默认尾部读取上限——面板只展示尾部，不需要整个构建日志。 */
+const TASK_OUTPUT_MAX_BYTES = 64 * 1024
+
+export const readBackgroundTaskOutput = async (args: {
+  taskId: string
+  outputFile: string
+  maxBytes?: number
+}) => {
+  const empty = { exists: false, content: '', size: 0, truncated: false }
+  // Background Tasks Panel: renderer 传来的路径不可信。SDK 的布局固定是
+  // `<...>/tasks/<taskId>.output`，把路径钉死在这个形状上，越权读任意文件就无从谈起。
+  const resolved = resolve(args.outputFile)
+  if (basename(resolved) !== `${args.taskId}.output`) {
+    log.warn('readBackgroundTaskOutput: path does not match task id', args.taskId)
+    return empty
+  }
+  if (basename(dirname(resolved)) !== 'tasks') {
+    log.warn('readBackgroundTaskOutput: path is not under a tasks/ dir', resolved)
+    return empty
+  }
+
+  const maxBytes = Math.max(1, Math.min(args.maxBytes ?? TASK_OUTPUT_MAX_BYTES, 1024 * 1024))
+  let handle: FileHandle | undefined
+  try {
+    handle = await open(resolved, 'r')
+    const { size } = await handle.stat()
+    const start = Math.max(0, size - maxBytes)
+    const length = size - start
+    if (length <= 0) return { exists: true, content: '', size, truncated: false }
+    const buffer = Buffer.allocUnsafe(length)
+    await handle.read(buffer, 0, length, start)
+    return { exists: true, content: buffer.toString('utf-8'), size, truncated: start > 0 }
+  } catch {
+    // 任务刚启动时文件可能还没建出来——这是正常状态，不是错误。
+    return empty
+  } finally {
+    await handle?.close()
+  }
 }
 
 export const steerTurn = async (args: { turnId: string; prompt: string }) => {

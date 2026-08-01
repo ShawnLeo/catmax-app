@@ -54,6 +54,20 @@ export type BackendHandlers = {
   'backend.startTurn': (args: CoordinatedStartTurnArgs) => Promise<{ turnId: string }>
   'backend.interruptTurn': (args: { turnId: string }) => Promise<void>
   'backend.steerTurn': (args: { turnId: string; prompt: string }) => Promise<void>
+  /** 停止单个后台任务（后台任务面板上的"停止"按钮），不影响所在 turn 的其他任务。 */
+  'backend.stopBackgroundTask': (args: { taskId: string }) => Promise<void>
+  /**
+   * 读取后台任务输出文件的尾部（后台任务面板展开时轮询）。
+   *
+   * outputFile 由 BackgroundTaskSnapshot 带过来，但 renderer 传来的路径一律不可信：
+   * main 侧会校验它确实是 `<taskId>.output` 且位于 `tasks/` 目录下，否则拒读。
+   */
+  'backend.readBackgroundTaskOutput': (args: {
+    taskId: string
+    outputFile: string
+    /** 最多返回的尾部字节数（默认 64KB）。 */
+    maxBytes?: number
+  }) => Promise<{ exists: boolean; content: string; size: number; truncated: boolean }>
   'backend.listTurnRuns': (args?: { sessionId?: string }) => Promise<TurnRunRecord[]>
   'backend.respondApproval': (args: ApprovalDecision) => Promise<void>
   /** 响应 agent 的问题（ask_user 工具）：把用户答案回流给阻塞中的 handler */
