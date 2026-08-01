@@ -7,6 +7,7 @@ import type {
 } from './base'
 import type {
   CodexActivityContentBlock,
+  CodexGeneratedImageContentBlock,
   CodexUserInputContentBlock,
   PlanContentBlock,
 } from './codex'
@@ -24,6 +25,7 @@ export interface ContentBlockMap {
   compact_divider: CompactDividerContentBlock
   plan: PlanContentBlock
   codex_user_input: CodexUserInputContentBlock
+  codex_generated_image: CodexGeneratedImageContentBlock
   codex_activity: CodexActivityContentBlock
 }
 

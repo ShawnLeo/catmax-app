@@ -23,6 +23,15 @@ export interface CodexUserInputContentBlock extends BaseContentBlock {
   detail?: string
 }
 
+/** Codex 图像工具生成并持久化到 rollout 的图片。 */
+export interface CodexGeneratedImageContentBlock extends BaseContentBlock {
+  type: 'codex_generated_image'
+  /** 无本地文件时使用的 data URL。 */
+  url?: string
+  /** Codex 同时保存的本地文件路径，用于展示文件名和未来的文件操作。 */
+  path?: string
+}
+
 export type CodexActivityStatus = 'running' | 'completed' | 'failed'
 
 export interface CodexDiffStats {

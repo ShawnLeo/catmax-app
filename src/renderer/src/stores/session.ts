@@ -20,7 +20,21 @@ export const useSessionStore = defineStore('session', () => {
   async function load(workspaceId: string, backend: BackendId): Promise<void> {
     loading.value = true
     try {
-      sessions.value = await window.api.session.list({ workspaceId, backend })
+      const nextSessions = await window.api.session.list({ workspaceId, backend })
+      sessions.value = nextSessions
+
+      // Session Selection Consistency: 切后端、切工作区或刷新列表后，旧选择可能不属于
+      // 新列表。sessionStore 和 messageStore 分别持有当前 id，必须同时清空；否则侧栏已经
+      // 展示新后端的数据，聊天正文仍会渲染旧后端会话的缓存消息。
+      if (
+        currentSessionId.value !== null &&
+        !nextSessions.some((session) => session.id === currentSessionId.value)
+      ) {
+        currentSessionId.value = null
+        selectionVersion.value++
+        const { useMessageStore } = await import('@renderer/stores/message')
+        useMessageStore().setCurrentSession(null)
+      }
     } finally {
       loading.value = false
     }

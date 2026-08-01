@@ -239,6 +239,18 @@ const camelUserMessageItemSchema = userMessageItemSchema.extend({
   type: z.literal('userMessage'),
 })
 
+/** imagegen 等图像工具完成后由 App Server 暴露的可回放图片 item。 */
+const imageGenerationItemSchema = z
+  .object({
+    type: z.literal('imageGeneration'),
+    id: z.string(),
+    status: z.string().optional(),
+    result: z.string().optional(),
+    revisedPrompt: z.string().optional(),
+    savedPath: z.string().optional(),
+  })
+  .passthrough()
+
 const mcpToolCallItemSchema = z.object({
   type: z.literal('mcp_tool_call'),
   id: z.string(),
@@ -279,6 +291,7 @@ export const codexItemSchema = z.union([
   reasoningItemSchema,
   userMessageItemSchema,
   camelUserMessageItemSchema,
+  imageGenerationItemSchema,
   mcpToolCallItemSchema,
   camelMcpToolCallItemSchema,
   customToolCallItemSchema,

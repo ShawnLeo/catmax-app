@@ -7,6 +7,7 @@ import { registerBlock } from '../registry'
 export function registerCodexBlocks(): void {
   registerBlock('plan', () => import('./PlanBlockView.vue'))
   registerBlock('codex_user_input', () => import('./CodexUserInputBlockView.vue'))
+  registerBlock('codex_generated_image', () => import('./CodexGeneratedImageBlockView.vue'))
   registerBlock('codex_activity', () => import('./CodexActivityBlockView.vue'))
 }
 

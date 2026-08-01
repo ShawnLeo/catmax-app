@@ -13,6 +13,24 @@ function message(
 }
 
 describe('Codex conversation composition', () => {
+  test('keeps generated images visible outside the collapsed work log', () => {
+    const sections = splitCodexTurn([
+      message('image-message', 'assistant', 'turn-1', [
+        {
+          id: 'generated-1',
+          type: 'codex_generated_image',
+          url: 'data:image/png;base64,AAAA',
+          path: '/tmp/generated-1.png',
+        },
+      ]),
+    ])
+
+    expect(sections.processBlocks).toEqual([])
+    expect(sections.generatedImageBlocks).toEqual([
+      expect.objectContaining({ id: 'generated-1', type: 'codex_generated_image' }),
+    ])
+  })
+
   test('groups item-shaped assistant messages into one turn', () => {
     const entries = buildCodexConversationEntries([
       message('u1', 'user', 't1', [{ id: 'u1-text', type: 'text', text: 'go' }]),

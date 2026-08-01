@@ -34,6 +34,15 @@
       </template>
     </div>
 
+    <!-- Generated Images: 生成结果是回合产物，不随默认折叠的处理日志隐藏。 -->
+    <div v-if="sections.generatedImageBlocks.length" class="mt-4 grid gap-3 sm:grid-cols-2">
+      <CodexGeneratedImageBlockView
+        v-for="block in sections.generatedImageBlocks"
+        :key="block.id"
+        :block="block"
+      />
+    </div>
+
     <div
       v-if="sections.finalBlocks.length"
       :class="open && sections.processBlocks.length ? 'mt-5' : 'pt-4'"
@@ -70,6 +79,7 @@ import ChangesCard from '../../changes/ChangesCard.vue'
 import LoadingDots from '../../messages/LoadingDots.vue'
 
 import CodexActivityBlockView from './CodexActivityBlockView.vue'
+import CodexGeneratedImageBlockView from './CodexGeneratedImageBlockView.vue'
 import CodexToolCallBlockView from './CodexToolCallBlockView.vue'
 import { splitCodexTurn } from './conversation'
 import MarkdownView from './MarkdownView.vue'

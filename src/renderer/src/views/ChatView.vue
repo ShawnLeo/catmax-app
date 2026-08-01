@@ -11,6 +11,31 @@
       @resize="uiStore.setSidebarWidth"
     />
 
+    <!--
+      Sidebar Peek 热区：侧栏折叠时，窗口最左边缘一条 8px 的感应带。
+      指针划进来就临时划出一层浮动侧栏（会话列表 + 底部设置栏），不改变折叠状态。
+    -->
+    <div
+      v-if="uiStore.sidebarCollapsed"
+      class="absolute inset-y-0 left-0 z-30 w-2"
+      aria-hidden="true"
+      @pointerenter="openPeek"
+    />
+
+    <!--
+      划出的浮层：从顶栏下方开始（顶栏那一条 h-12 已有窗口控制按钮和标题，不重复划出），
+      内容复用同一个 Sidebar 组件的 overlay 形态，指针离开后由 useSidebarPeek 自动收回。
+    -->
+    <Transition name="sidebar-peek">
+      <div
+        v-if="uiStore.sidebarPeeking"
+        ref="peekRef"
+        class="absolute bottom-0 left-0 top-12 z-40 flex"
+      >
+        <Sidebar variant="overlay" />
+      </div>
+    </Transition>
+
     <!-- 主聊天区:用具体 min-width 而非 min-w-0,防止被右面板挤压到低于 250px。
          sidebar 折叠时宽度为 0,不占空间;展开时由 ResizeHandle clamp 在 [SIDEBAR_MIN, 容器一半],
          加上这里的 min-w 保证主聊天区 + sidebar 不会被右面板挤没。 -->
@@ -91,16 +116,39 @@
       <BottomTerminalPanel />
     </div>
 
-    <!-- 右栏面板 -->
-    <ResizeHandle
-      v-if="uiStore.rightPanelVisible"
-      side="right"
-      :min="rightPanelMin"
-      :max="rightPanelMax"
-      :current="rightPanelCurrent"
-      @resize="resizeRightPanel"
-    />
-    <RightPanel />
+    <!--
+      右栏面板两种形态（切换阈值见 useRightPanelOverlay）：
+      - 停靠（宽屏）：参与布局，跟主聊天区并排，拖宽会挤压聊天区。
+      - 浮层（窄屏）：绝对定位浮在聊天区之上，不占布局宽度，聊天区保持全宽；
+        抽屉式交互——点面板以外的地方或按 Esc 收起。
+    -->
+    <template v-if="!rightPanelOverlay">
+      <ResizeHandle
+        v-if="uiStore.rightPanelVisible"
+        side="right"
+        :min="rightPanelMin"
+        :max="rightPanelMax"
+        :current="rightPanelCurrent"
+        @resize="resizeRightPanel"
+      />
+      <RightPanel />
+    </template>
+    <Transition v-else name="right-panel-overlay">
+      <div
+        v-if="uiStore.rightPanelVisible"
+        ref="rightPanelOverlayRef"
+        class="absolute inset-y-0 right-0 z-40 flex"
+      >
+        <ResizeHandle
+          side="right"
+          :min="rightPanelMin"
+          :max="rightPanelMax"
+          :current="rightPanelCurrent"
+          @resize="resizeRightPanel"
+        />
+        <RightPanel variant="overlay" />
+      </div>
+    </Transition>
   </div>
 </template>
 
@@ -116,6 +164,8 @@ import CatmaxLogo from '@renderer/components/icons/CatmaxLogo.vue'
 import RightPanel from '@renderer/components/panel/RightPanel.vue'
 import Sidebar from '@renderer/components/sidebar/Sidebar.vue'
 import ResizeHandle from '@renderer/components/ui/ResizeHandle.vue'
+import { useRightPanelOverlay } from '@renderer/composables/useRightPanelOverlay'
+import { useSidebarPeek } from '@renderer/composables/useSidebarPeek'
 import { useStreamMessage } from '@renderer/composables/useStreamMessage'
 import { MIN_WIDTH_FOR_MESSAGE_NAV_RAIL } from '@renderer/lib/chat-layout'
 import { isNavigableUserMessage } from '@renderer/lib/message-navigation'
@@ -151,6 +201,8 @@ const gitStore = useGitStore()
 const uiStore = useUiStore()
 const settingsStore = useSettingsStore()
 useStreamMessage()
+// Sidebar Peek: 折叠态下从左边缘划出的临时侧栏，收回逻辑（含 Teleport 出去的菜单）在 composable 里
+const { peekRef, openPeek } = useSidebarPeek()
 
 const backendDisplayName = computed(() => {
   if (backendStore.currentId === 'claude') return 'Claude'
@@ -197,8 +249,19 @@ const rightPanelCurrent = computed(() => {
   return filePreviewOpen.value ? uiStore.filePreviewWidth : uiStore.rightPanelWidth
 })
 const rightPanelMin = computed(() => (filePreviewOpen.value ? FILE_PREVIEW_MIN : RIGHT_PANEL_MIN))
+
+// Right Panel Overlay: 窗口窄到聊天区放不下时右栏改成浮层，不再挤占布局宽度。
+const {
+  overlayMode: rightPanelOverlay,
+  overlayRef: rightPanelOverlayRef,
+  overlayMaxWidth,
+} = useRightPanelOverlay({ containerWidth, desiredWidth: rightPanelCurrent })
+
 const rightPanelMax = computed(() => {
-  // 右面板最大值受「主聊天区最小宽度」约束:
+  // 浮层形态不占布局宽度,"挤压聊天区"这个约束不再成立——只要不铺满整个窗口即可
+  // （得给聊天区留一条看得见、点得到的边，点外部要能收起面板）。
+  if (rightPanelOverlay.value) return Math.max(rightPanelMin.value, overlayMaxWidth.value)
+  // 停靠形态下右面板最大值受「主聊天区最小宽度」约束:
   // 容器 - sidebar 实际宽度 - 聊天区最小宽度 = 右面板能占的最大空间。
   // sidebar 折叠时不占空间(宽度 0),展开时用 uiStore.sidebarWidth。
   const sidebarWidth = uiStore.sidebarCollapsed ? 0 : uiStore.sidebarWidth
@@ -256,6 +319,13 @@ watch([filePreviewOpen, rightPanelMax], ([previewOpen, maxWidth]) => {
   if (previewOpen && rightPanelCurrent.value > maxWidth) {
     uiStore.setFilePreviewWidth(Math.max(FILE_PREVIEW_MIN, maxWidth - uiStore.rightPanelWidth))
   }
+})
+
+// Right Panel Overlay: 浮层形态下面板宽度没有"挤压聊天区"这个泄压阀，窗口比面板还窄时
+// （比如审查 tab 把宽度撑到 760 之后再把窗口缩小）必须自己收进来，否则会溢出到窗口外。
+watch([rightPanelOverlay, rightPanelMax], ([overlay, maxWidth]) => {
+  if (!overlay || filePreviewOpen.value) return
+  if (uiStore.rightPanelWidth > maxWidth) uiStore.setRightPanelWidth(maxWidth)
 })
 
 // 工作区切换时刷新 git status
@@ -712,6 +782,34 @@ async function onSend(text: string, attachments: ContextBlock[]): Promise<void> 
 </script>
 
 <style scoped>
+/* Sidebar Peek: 浮层从左边缘滑入/滑出，配合 200ms 的侧栏折叠动画节奏。 */
+.sidebar-peek-enter-active,
+.sidebar-peek-leave-active {
+  transition:
+    transform 200ms ease,
+    opacity 200ms ease;
+}
+
+.sidebar-peek-enter-from,
+.sidebar-peek-leave-to {
+  transform: translateX(-100%);
+  opacity: 0;
+}
+
+/* Right Panel Overlay: 浮层从右边缘滑入/滑出，跟侧栏 peek 同一套节奏。 */
+.right-panel-overlay-enter-active,
+.right-panel-overlay-leave-active {
+  transition:
+    transform 200ms ease,
+    opacity 200ms ease;
+}
+
+.right-panel-overlay-enter-from,
+.right-panel-overlay-leave-to {
+  transform: translateX(100%);
+  opacity: 0;
+}
+
 /* New Session Welcome: 克制的中心光晕把品牌 Logo 融入空状态，不制造厚重卡片边界。 */
 .new-session {
   position: relative;

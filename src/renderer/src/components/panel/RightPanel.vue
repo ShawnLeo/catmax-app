@@ -1,12 +1,23 @@
 <template>
+  <!--
+    两种形态共用同一棵结构：
+    - docked（默认）：参与布局，跟主聊天区并排；始终挂载，隐藏时宽度收为 0 走 transition。
+    - overlay：Right Panel Overlay 的浮层形态，显隐由父级 v-if + Transition 控制，
+      宽度恒为 panelWidth（不再收 0），定位交给外层容器。
+  -->
   <aside
     :class="[
-      'flex flex-col bg-card shrink-0 overflow-hidden',
-      uiStore.panelDragging ? '' : 'transition-[width,border-color] duration-200 ease-out',
-      uiStore.rightPanelVisible ? 'border-l border-border' : 'border-l border-transparent',
+      'flex flex-col bg-card overflow-hidden',
+      isOverlay
+        ? 'h-full border-l border-border shadow-xl'
+        : [
+            'shrink-0',
+            uiStore.panelDragging ? '' : 'transition-[width,border-color] duration-200 ease-out',
+            uiStore.rightPanelVisible ? 'border-l border-border' : 'border-l border-transparent',
+          ],
     ]"
-    :style="{ width: uiStore.rightPanelVisible ? panelWidth + 'px' : '0px' }"
-    :aria-hidden="!uiStore.rightPanelVisible"
+    :style="{ width: outerWidth + 'px' }"
+    :aria-hidden="isOverlay ? undefined : !uiStore.rightPanelVisible"
   >
     <div class="h-full flex flex-col" :style="{ width: panelWidth + 'px' }">
       <!-- Tab 头 -->
@@ -99,6 +110,15 @@ import GitPanel from './GitPanel.vue'
 import ReviewPanel from './ReviewPanel.vue'
 import TasksPanel from './TasksPanel.vue'
 
+interface Props {
+  /** docked = 参与布局的常驻右栏；overlay = 窄窗口下浮在聊天区之上的形态 */
+  variant?: 'docked' | 'overlay'
+}
+
+const props = withDefaults(defineProps<Props>(), { variant: 'docked' })
+
+const isOverlay = computed(() => props.variant === 'overlay')
+
 const uiStore = useUiStore()
 const gitStore = useGitStore()
 const filesStore = useFilesStore()
@@ -122,6 +142,12 @@ const panelWidth = computed(() => {
 const filePreviewMax = computed(
   () => uiStore.filePreviewWidth + uiStore.rightPanelWidth - FILE_TREE_MIN,
 )
+
+// 浮层由父级挂载/卸载，不走"宽度收 0"那套隐藏动画。
+const outerWidth = computed(() => {
+  if (isOverlay.value) return panelWidth.value
+  return uiStore.rightPanelVisible ? panelWidth.value : 0
+})
 
 interface PanelTab {
   id: RightPanelTab

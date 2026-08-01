@@ -118,6 +118,7 @@ export function normalizeItemType(type: string): string {
       collabToolCall: 'collab_tool_call',
       webSearch: 'web_search',
       imageView: 'image_view',
+      imageGeneration: 'image_generation',
       contextCompaction: 'context_compaction',
     }[type] ?? type
   )
@@ -165,6 +166,17 @@ export function codexItemToContentBlock(item: CodexItem): ContentBlock | null {
       type: 'tool_call',
       info: { kind: 'file_read', title: `View image: ${path}`, detail: path },
       status: 'completed',
+    }
+  }
+  if (type === 'image_generation') {
+    const path = typeof raw.savedPath === 'string' ? raw.savedPath : undefined
+    const result = typeof raw.result === 'string' ? raw.result : undefined
+    if (!path && !result) return null
+    return {
+      id: item.id,
+      type: 'codex_generated_image',
+      ...(path ? { path } : {}),
+      ...(!path && result ? { url: `data:image/png;base64,${result}` } : {}),
     }
   }
   if (type === 'dynamic_tool_call' || type === 'collab_tool_call') {

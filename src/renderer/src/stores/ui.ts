@@ -26,11 +26,19 @@ export type ReviewDiffMode = 'unified' | 'split'
 
 export const useUiStore = defineStore('ui', () => {
   const sidebarCollapsed = ref(false)
+  // Sidebar Peek: 侧栏折叠时，鼠标划到窗口最左边缘临时"划出"的那层浮动侧栏。
+  // 它跟 sidebarCollapsed 是两个独立状态——peek 只是临时借看一眼会话列表，
+  // 收回时折叠状态不变（真正展开仍然只能靠 toggleSidebar）。
+  const sidebarPeeking = ref(false)
   const settingsDialogOpen = ref(false)
   const rightPanelVisible = ref(false)
   const bottomPanelVisible = ref(false)
   const commandPaletteVisible = ref(false)
   const rightPanelTab = ref<RightPanelTab>('git')
+  // Right Panel Overlay: showRightPanel 的调用计数。浮层形态是抽屉式的（点面板外面收起），
+  // 而消息流里的「审查」「后台任务」入口本身也在面板外面——这个序号让"点外部"能分辨
+  // "用户想关掉面板"和"用户点的正是打开面板的入口"，后者不该先关一次再弹回来。
+  const rightPanelOpenSeq = ref(0)
 
   // ===== 审查 tab 状态 =====
   // 审查是「某一轮改动」的只读快照：files/stats 由 ChangesCard 传入（codex 来自
@@ -126,6 +134,20 @@ export const useUiStore = defineStore('ui', () => {
 
   function toggleSidebar(): void {
     sidebarCollapsed.value = !sidebarCollapsed.value
+    // 展开/折叠后 peek 一律收掉：展开时它会跟真侧栏重叠，折叠时用户刚做完显式操作，
+    // 再留一层浮层在那儿只会挡住视线。
+    sidebarPeeking.value = false
+  }
+
+  /** 划出临时侧栏——只在折叠状态下有意义（展开时真侧栏就在那儿）。 */
+  function openSidebarPeek(): void {
+    if (!sidebarCollapsed.value) return
+    sidebarPeeking.value = true
+  }
+
+  /** 收回临时侧栏。 */
+  function closeSidebarPeek(): void {
+    sidebarPeeking.value = false
   }
 
   function openSettings(): void {
@@ -143,6 +165,7 @@ export const useUiStore = defineStore('ui', () => {
   function showRightPanel(tab: RightPanelTab = rightPanelTab.value): void {
     rightPanelTab.value = tab
     rightPanelVisible.value = true
+    rightPanelOpenSeq.value += 1
   }
 
   function hideRightPanel(): void {
@@ -267,11 +290,13 @@ export const useUiStore = defineStore('ui', () => {
 
   return {
     sidebarCollapsed,
+    sidebarPeeking,
     settingsDialogOpen,
     rightPanelVisible,
     bottomPanelVisible,
     commandPaletteVisible,
     rightPanelTab,
+    rightPanelOpenSeq,
     reviewFiles,
     reviewStats,
     reviewDiffMode,
@@ -294,6 +319,8 @@ export const useUiStore = defineStore('ui', () => {
     setFileTreeVisible,
     setBottomPanelHeight,
     toggleSidebar,
+    openSidebarPeek,
+    closeSidebarPeek,
     openSettings,
     closeSettings,
     toggleRightPanel,

@@ -35,4 +35,29 @@ describe('session store selection version', () => {
     messageStore.setCurrentSession('session-pending')
     expect(messageStore.messages[0]?.blocks?.[0]).toMatchObject({ text: '你好' })
   })
+
+  test('按新后端加载列表时同步清空不属于新列表的当前会话和消息视图', async () => {
+    const list = vi.fn().mockResolvedValue([
+      {
+        id: 'codex-session',
+        backend: 'codex',
+      },
+    ])
+    Object.defineProperty(window, 'api', {
+      configurable: true,
+      value: { session: { list } },
+    })
+    const messageStore = useMessageStore()
+    const sessionStore = useSessionStore()
+    sessionStore.setCurrent('claude-session')
+    messageStore.setCurrentSession('claude-session')
+    messageStore.pushUserMessageToSession('claude-session', 'turn-1', '旧会话消息')
+
+    await sessionStore.load('workspace-1', 'codex')
+
+    expect(list).toHaveBeenCalledWith({ workspaceId: 'workspace-1', backend: 'codex' })
+    expect(sessionStore.currentSessionId).toBeNull()
+    expect(messageStore.currentSessionId).toBeNull()
+    expect(messageStore.messages).toEqual([])
+  })
 })

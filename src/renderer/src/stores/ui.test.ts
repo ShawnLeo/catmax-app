@@ -21,3 +21,36 @@ describe('ui store panel sizes', () => {
     expect(store.bottomPanelHeight).toBe(246)
   })
 })
+
+describe('ui store sidebar peek', () => {
+  beforeEach(() => {
+    setActivePinia(createPinia())
+  })
+
+  test('only peeks while the sidebar is collapsed', () => {
+    const store = useUiStore()
+
+    // 展开状态下真侧栏就在那儿，划出浮层没有意义
+    store.openSidebarPeek()
+    expect(store.sidebarPeeking).toBe(false)
+
+    store.toggleSidebar()
+    store.openSidebarPeek()
+    expect(store.sidebarPeeking).toBe(true)
+
+    store.closeSidebarPeek()
+    expect(store.sidebarPeeking).toBe(false)
+  })
+
+  test('peek does not change the collapsed state, but toggling clears the peek', () => {
+    const store = useUiStore()
+    store.toggleSidebar()
+    store.openSidebarPeek()
+
+    expect(store.sidebarCollapsed).toBe(true)
+
+    store.toggleSidebar()
+    expect(store.sidebarCollapsed).toBe(false)
+    expect(store.sidebarPeeking).toBe(false)
+  })
+})

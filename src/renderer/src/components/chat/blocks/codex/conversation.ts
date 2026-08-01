@@ -1,5 +1,6 @@
 import type {
   CodexActivityContentBlock,
+  CodexGeneratedImageContentBlock,
   ContentBlock,
   TextContentBlock,
 } from '@shared/backend/blocks'
@@ -14,6 +15,7 @@ export type CodexConversationEntry =
 export interface CodexTurnSections {
   processBlocks: ContentBlock[]
   finalBlocks: TextContentBlock[]
+  generatedImageBlocks: CodexGeneratedImageContentBlock[]
   reasoningBlocks: ContentBlock[]
 }
 
@@ -86,15 +88,19 @@ export function splitCodexTurn(messages: NormalizedMessage[]): CodexTurnSections
     explicitFinal.length > 0 ? explicitFinal : fallbackFinal ? [fallbackFinal] : []
   const finalIds = new Set(finalBlocks.map((block) => block.id))
   const reasoningBlocks = blocks.filter((block) => block.type === 'reasoning')
+  const generatedImageBlocks = blocks.filter(
+    (block): block is CodexGeneratedImageContentBlock => block.type === 'codex_generated_image',
+  )
   const processBlocks = coalesceCodexActivities(
     blocks.filter((block) => {
       if (block.type === 'context' || block.type === 'compact_divider') return false
       if (block.type === 'reasoning') return false
+      if (block.type === 'codex_generated_image') return false
       return block.type !== 'text' || !finalIds.has(block.id)
     }),
   )
 
-  return { processBlocks, finalBlocks, reasoningBlocks }
+  return { processBlocks, finalBlocks, generatedImageBlocks, reasoningBlocks }
 }
 
 function dedupeBlocks(blocks: ContentBlock[]): ContentBlock[] {

@@ -24,6 +24,36 @@ describe('codex history mapping', () => {
     expect(messages[1]!.textBlocks?.[0]?.text).toBe('hi there')
   })
 
+  test('imageGeneration 转成可渲染的助手图片 block', () => {
+    const messages = codexTurnsToMessages([
+      {
+        id: 'turn_image',
+        items: [
+          {
+            type: 'imageGeneration',
+            id: 'generated-1',
+            status: 'completed',
+            result: 'AAAA',
+            savedPath: '/tmp/generated-1.png',
+          },
+        ],
+      },
+    ])
+
+    expect(messages).toHaveLength(1)
+    expect(messages[0]).toMatchObject({
+      role: 'assistant',
+      turnId: 'turn_image',
+      blocks: [
+        {
+          id: 'generated-1',
+          type: 'codex_generated_image',
+          path: '/tmp/generated-1.png',
+        },
+      ],
+    })
+  })
+
   test('当前 App Server userMessage 保留图片、文件提及、skill 和 mention', () => {
     const messages = codexTurnsToMessages([
       {

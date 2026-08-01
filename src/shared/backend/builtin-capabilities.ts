@@ -24,6 +24,7 @@ export const CODEX_CAPABILITIES: BackendCapabilities = {
       'compact_divider',
       'plan',
       'codex_user_input',
+      'codex_generated_image',
       'codex_activity',
     ],
   },
