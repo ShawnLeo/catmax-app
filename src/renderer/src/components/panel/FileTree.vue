@@ -5,11 +5,21 @@
       <div class="flex items-center gap-2 mb-2">
         <FileTypeIcon name="src" is-directory expanded class="w-[18px] h-[18px] flex-shrink-0" />
         <div class="min-w-0 flex-1">
-          <div class="text-[length:var(--ui-text-d2)] font-medium truncate">
-            {{ workspaceStore.currentWorkspace?.name ?? 'Files' }}
+          <select
+            v-if="workspaceFolders.length > 1"
+            v-model="selectedFolderId"
+            class="h-6 w-full rounded border border-border bg-background px-1.5 text-[length:var(--ui-text-d2)] font-medium outline-none"
+            title="切换工作区文件夹"
+          >
+            <option v-for="folder in workspaceFolders" :key="folder.id" :value="folder.id">
+              {{ folder.role === 'primary' ? '主' : '次' }} · {{ folder.alias }}
+            </option>
+          </select>
+          <div v-else class="text-[length:var(--ui-text-d2)] font-medium truncate">
+            {{ selectedFolder?.alias ?? workspaceStore.currentWorkspace?.name ?? 'Files' }}
           </div>
           <div class="text-[length:var(--ui-text-d5)] text-muted-foreground truncate">
-            {{ workspaceStore.currentWorkspace?.path }}
+            {{ selectedFolder?.path ?? workspaceStore.currentWorkspace?.path }}
           </div>
         </div>
         <!--
@@ -193,6 +203,13 @@ const workspaceStore = useWorkspaceStore()
 const filesStore = useFilesStore()
 const chatInput = useChatInputStore()
 const query = ref('')
+const workspaceFolders = computed(() => workspaceStore.currentWorkspace?.folders ?? [])
+const selectedFolderId = ref('')
+const selectedFolder = computed(
+  () =>
+    workspaceFolders.value.find((folder) => folder.id === selectedFolderId.value) ??
+    workspaceFolders.value.find((folder) => folder.role === 'primary'),
+)
 
 // File Mention: 右键菜单——树里任意节点和搜索结果共用这一个实例。
 const contextMenu = ref<{ x: number; y: number; entry: DirEntry } | null>(null)
@@ -209,12 +226,19 @@ provide(FILE_TREE_MENU_KEY, openContextMenu)
 function onContextMenuSelect(key: string): void {
   const entry = contextMenu.value?.entry
   if (!entry) return
-  if (key === 'mention') chatInput.addFileMention(entry.relativePath)
+  if (key === 'mention') {
+    chatInput.addFileMention(
+      entry.folderAlias ? `${entry.folderAlias}/${entry.relativePath}` : entry.relativePath,
+    )
+  }
 }
 const refreshing = ref(false)
 let searchTimer: ReturnType<typeof setTimeout> | null = null
 
-const rootEntries = computed(() => filesStore.directoryCache.get('') ?? [])
+const rootEntries = computed(
+  () =>
+    filesStore.directoryCache.get(selectedFolderId.value ? `${selectedFolderId.value}:` : '') ?? [],
+)
 const rootLoading = computed(() => filesStore.loadingPaths.has(''))
 const rootError = computed(() => filesStore.directoryErrors.get(''))
 
@@ -224,6 +248,7 @@ const rootError = computed(() => filesStore.directoryErrors.get(''))
 // IPC 产生竞态：readFilePreview 的 await 期间 Vue 挂载 FileTree → immediate watch 触发
 // reset() → previewTabs 被清空 → 预览面板永远无法显示（直到面板被关闭再重开）。
 onMounted(() => {
+  selectPrimaryFolder()
   if (workspaceStore.currentWorkspace?.id) void loadRoot()
 })
 
@@ -233,6 +258,7 @@ watch(
     if (workspaceId === prevId) return
     filesStore.reset()
     query.value = ''
+    selectPrimaryFolder()
     if (workspaceId) void loadRoot()
   },
 )
@@ -242,7 +268,17 @@ watch(query, (value) => {
   if (searchTimer) clearTimeout(searchTimer)
   const workspaceId = workspaceStore.currentWorkspace?.id
   if (!workspaceId) return
-  searchTimer = setTimeout(() => void filesStore.search(workspaceId, value), 180)
+  searchTimer = setTimeout(
+    () => void filesStore.search(workspaceId, value, selectedFolder.value?.id),
+    180,
+  )
+})
+
+watch(selectedFolderId, (folderId, previousId) => {
+  if (!folderId || folderId === previousId) return
+  filesStore.resetDirectoryState()
+  query.value = ''
+  void loadRoot()
 })
 
 onUnmounted(() => {
@@ -252,7 +288,7 @@ onUnmounted(() => {
 async function loadRoot(force = false): Promise<void> {
   const workspaceId = workspaceStore.currentWorkspace?.id
   if (!workspaceId) return
-  await filesStore.openDirectory(workspaceId, '', force)
+  await filesStore.openDirectory(workspaceId, '', force, selectedFolder.value?.id)
 }
 
 async function refresh(): Promise<void> {
@@ -260,11 +296,16 @@ async function refresh(): Promise<void> {
   if (!workspaceId || refreshing.value) return
   refreshing.value = true
   try {
-    await filesStore.refresh(workspaceId)
-    if (query.value) await filesStore.search(workspaceId, query.value)
+    await filesStore.refresh(workspaceId, selectedFolder.value?.id)
+    if (query.value) await filesStore.search(workspaceId, query.value, selectedFolder.value?.id)
   } finally {
     refreshing.value = false
   }
+}
+
+function selectPrimaryFolder(): void {
+  selectedFolderId.value =
+    workspaceFolders.value.find((folder) => folder.role === 'primary')?.id ?? ''
 }
 
 async function openSearchResult(entry: DirEntry): Promise<void> {
@@ -274,7 +315,15 @@ async function openSearchResult(entry: DirEntry): Promise<void> {
     query.value = ''
     await filesStore.toggleDirectory(workspaceId, entry)
   } else {
-    await filesStore.previewFile(workspaceId, entry.relativePath)
+    await filesStore.previewFile(
+      workspaceId,
+      entry.relativePath,
+      false,
+      undefined,
+      false,
+      entry.folderId,
+      entry.folderAlias,
+    )
   }
 }
 

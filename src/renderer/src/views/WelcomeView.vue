@@ -22,9 +22,7 @@
         </div>
       </div>
 
-      <Button size="lg" :disabled="adding" @click="addWorkspace">
-        {{ adding ? '添加中...' : '选择工作区' }}
-      </Button>
+      <Button size="lg" @click="showCreateWorkspace = true"> 创建工作区 </Button>
 
       <div
         v-if="workspaceStore.workspaces.length > 0"
@@ -50,6 +48,11 @@
         </div>
       </div>
     </div>
+    <CreateWorkspaceDialog
+      :open="showCreateWorkspace"
+      @close="showCreateWorkspace = false"
+      @created="openCreatedWorkspace"
+    />
   </div>
 </template>
 
@@ -57,13 +60,14 @@
 import CatmaxLogo from '@renderer/components/icons/CatmaxLogo.vue'
 import TitleBarControls from '@renderer/components/TitleBarControls.vue'
 import { Button } from '@renderer/components/ui/button'
+import CreateWorkspaceDialog from '@renderer/components/workspace/CreateWorkspaceDialog.vue'
 import { useWorkspaceStore } from '@renderer/stores/workspace'
 import { ref, computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 
 const router = useRouter()
 const workspaceStore = useWorkspaceStore()
-const adding = ref(false)
+const showCreateWorkspace = ref(false)
 
 // 后端 list 已按 last_opened_at DESC 排序，取前 20 即最近的工作区。
 const recentWorkspaces = computed(() => workspaceStore.workspaces.slice(0, 20))
@@ -72,21 +76,9 @@ onMounted(async () => {
   await workspaceStore.load()
 })
 
-async function addWorkspace(): Promise<void> {
-  adding.value = true
-  try {
-    const result = await window.api.system.openDialog({
-      title: '选择工作区文件夹',
-      properties: ['openDirectory'],
-    })
-    if (!result.canceled && result.filePaths.length > 0) {
-      // add() 内部已 setCurrent(ws.id)，这里只需导航
-      await workspaceStore.add(result.filePaths[0]!)
-      router.push('/chat')
-    }
-  } finally {
-    adding.value = false
-  }
+function openCreatedWorkspace(): void {
+  showCreateWorkspace.value = false
+  void router.push('/chat')
 }
 
 async function openWorkspace(id: string): Promise<void> {

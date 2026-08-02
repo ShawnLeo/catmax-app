@@ -5,7 +5,10 @@ import { defineStore } from 'pinia'
 import { computed, ref } from 'vue'
 
 export interface FilePreviewTab {
+  id: string
   relativePath: string
+  folderId?: string
+  folderAlias?: string
   /** 工作区外文件（如 `~/.claude.json`）的绝对路径；存在时预览/编辑走绝对路径通道。 */
   absolutePath?: string
   preview: FilePreview | null
@@ -40,7 +43,7 @@ export const useFilesStore = defineStore('files', () => {
   )
 
   const activePreviewTab = computed(
-    () => previewTabs.value.find((tab) => tab.relativePath === activePreviewPath.value) ?? null,
+    () => previewTabs.value.find((tab) => tab.id === activePreviewPath.value) ?? null,
   )
   const currentPreview = computed(() => activePreviewTab.value?.preview ?? null)
   const previewLoading = computed(() => activePreviewTab.value?.loading ?? false)
@@ -51,9 +54,11 @@ export const useFilesStore = defineStore('files', () => {
     workspaceId: string,
     relativePath = '',
     force = false,
+    folderId?: string,
   ): Promise<DirEntry[]> {
+    const cacheKey = folderCacheKey(folderId, relativePath)
     if (!force) {
-      const cached = directoryCache.value.get(relativePath)
+      const cached = directoryCache.value.get(cacheKey)
       if (cached) return cached
     }
 
@@ -62,10 +67,11 @@ export const useFilesStore = defineStore('files', () => {
     try {
       const entries = await window.api.fs.readDirectory({
         workspaceId,
+        ...(folderId !== undefined && { folderId }),
         ...workspacePathArgument(workspaceId),
         relativePath,
       })
-      setInMap(directoryCache, relativePath, entries)
+      setInMap(directoryCache, cacheKey, entries)
       return entries
     } catch (error) {
       setInMap(directoryErrors, relativePath, errorMessage(error))
@@ -82,7 +88,7 @@ export const useFilesStore = defineStore('files', () => {
       return
     }
     setInSet(expandedPaths, entry.relativePath, true)
-    await openDirectory(workspaceId, entry.relativePath)
+    await openDirectory(workspaceId, entry.relativePath, false, entry.folderId)
   }
 
   async function previewFile(
@@ -91,19 +97,22 @@ export const useFilesStore = defineStore('files', () => {
     force = false,
     absolutePath?: string,
     asTransient = false,
+    folderId?: string,
+    folderAlias?: string,
   ): Promise<FilePreview | null> {
+    const id = previewTabId(folderId, relativePath)
     // File Preview Tabs (VS Code Preview Mode): asTransient=true 时，若当前活动 tab 仍是
     // 预览态，则用新文件原地替换它（复用同一个 tab 位），而非新增——模拟 VS Code 单击预览。
     // 已转正（非 transient）的 tab、以及来自其他入口（asTransient=false）的不受影响。
     if (asTransient) {
       const active = activePreviewTab.value
-      if (active?.isTransient && active.relativePath !== relativePath) {
-        replacePreviewTab(active.relativePath, relativePath, absolutePath)
+      if (active?.isTransient && active.id !== id) {
+        replacePreviewTab(active.id, relativePath, absolutePath, folderId, folderAlias)
       }
     }
 
-    const tab = ensurePreviewTab(relativePath, absolutePath, asTransient)
-    activePreviewPath.value = relativePath
+    const tab = ensurePreviewTab(relativePath, absolutePath, asTransient, folderId, folderAlias)
+    activePreviewPath.value = tab.id
     if (tab.preview && !force) return tab.preview
 
     tab.loading = true
@@ -111,6 +120,7 @@ export const useFilesStore = defineStore('files', () => {
     try {
       const rawPreview = await window.api.fs.readFilePreview({
         workspaceId,
+        ...(folderId !== undefined && { folderId }),
         ...workspacePathArgument(workspaceId),
         relativePath,
         ...(absolutePath !== undefined && { absolutePath }),
@@ -129,9 +139,11 @@ export const useFilesStore = defineStore('files', () => {
     workspaceId: string,
     relativePath: string,
     absolutePath?: string,
+    folderId?: string,
+    folderAlias?: string,
   ): Promise<void> {
     useUiStore().showRightPanel('files')
-    await previewFile(workspaceId, relativePath, false, absolutePath)
+    await previewFile(workspaceId, relativePath, false, absolutePath, false, folderId, folderAlias)
   }
 
   // Chat File Reference: 聊天区、工具调用和文件 pill 最终都汇聚到同一预览入口。
@@ -155,11 +167,17 @@ export const useFilesStore = defineStore('files', () => {
       workspacePathArgument(workspaceId).workspacePath,
     )
     if (!resolved) return false
-    await openFile(workspaceId, resolved.relativePath, resolved.absolutePath)
+    await openFile(
+      workspaceId,
+      resolved.relativePath,
+      resolved.absolutePath,
+      resolved.folderId,
+      resolved.folderAlias,
+    )
     return true
   }
 
-  async function search(workspaceId: string, query: string): Promise<void> {
+  async function search(workspaceId: string, query: string, folderId?: string): Promise<void> {
     searchQuery.value = query
     if (!query.trim()) {
       searchResults.value = []
@@ -173,6 +191,7 @@ export const useFilesStore = defineStore('files', () => {
         typeof searchFiles === 'function'
           ? await searchFiles({
               workspaceId,
+              ...(folderId !== undefined && { folderId }),
               ...workspacePathArgument(workspaceId),
               query,
               limit: 200,
@@ -189,15 +208,19 @@ export const useFilesStore = defineStore('files', () => {
     }
   }
 
-  async function refresh(workspaceId: string): Promise<void> {
+  async function refresh(workspaceId: string, selectedFolderId?: string): Promise<void> {
+    const folderId = selectedFolderId ?? activePreviewTab.value?.folderId
     const paths = ['', ...expandedPaths.value]
-    await Promise.all(paths.map((path) => openDirectory(workspaceId, path, true)))
+    await Promise.all(paths.map((path) => openDirectory(workspaceId, path, true, folderId)))
     if (currentPreview.value) {
       await previewFile(
         workspaceId,
         currentPreview.value.relativePath,
         true,
         activePreviewTab.value?.absolutePath,
+        false,
+        activePreviewTab.value?.folderId,
+        activePreviewTab.value?.folderAlias,
       )
     }
   }
@@ -207,9 +230,11 @@ export const useFilesStore = defineStore('files', () => {
     relativePath: string,
     line?: number,
     absolutePath?: string,
+    folderId?: string,
   ): Promise<{ launched: boolean; error?: string }> {
     const result = await window.api.fs.openInEditor({
       workspaceId,
+      ...(folderId !== undefined && { folderId }),
       relativePath,
       ...(absolutePath !== undefined && { absolutePath }),
       ...(line !== undefined && { line }),
@@ -224,29 +249,29 @@ export const useFilesStore = defineStore('files', () => {
     expandedPaths.value = new Set()
   }
 
-  function selectPreview(relativePath: string): void {
-    if (previewTabs.value.some((tab) => tab.relativePath === relativePath)) {
-      activePreviewPath.value = relativePath
+  function selectPreview(id: string): void {
+    if (previewTabs.value.some((tab) => tab.id === id)) {
+      activePreviewPath.value = id
     }
   }
 
-  function closePreview(relativePath = activePreviewPath.value): void {
-    if (!relativePath) return
-    const index = previewTabs.value.findIndex((tab) => tab.relativePath === relativePath)
+  function closePreview(id = activePreviewPath.value): void {
+    if (!id) return
+    const index = previewTabs.value.findIndex((tab) => tab.id === id)
     if (index === -1) return
-    const wasActive = activePreviewPath.value === relativePath
+    const wasActive = activePreviewPath.value === id
     previewTabs.value.splice(index, 1)
     if (wasActive) {
       // File Preview Tabs: 关闭活动 tab 后优先选择右邻项，再回退到左邻项。
       activePreviewPath.value =
-        previewTabs.value[index]?.relativePath ?? previewTabs.value[index - 1]?.relativePath ?? null
+        previewTabs.value[index]?.id ?? previewTabs.value[index - 1]?.id ?? null
     }
   }
 
   function closeOthersPreviews(keepPath: string): void {
     // File Preview Tabs: 关闭除 keepPath 外的所有 tab；活动 tab 被移除时回退到保留项。
-    if (!previewTabs.value.some((tab) => tab.relativePath === keepPath)) return
-    previewTabs.value = previewTabs.value.filter((tab) => tab.relativePath === keepPath)
+    if (!previewTabs.value.some((tab) => tab.id === keepPath)) return
+    previewTabs.value = previewTabs.value.filter((tab) => tab.id === keepPath)
     if (activePreviewPath.value !== keepPath) activePreviewPath.value = keepPath
   }
 
@@ -256,12 +281,16 @@ export const useFilesStore = defineStore('files', () => {
   }
 
   function reset(): void {
+    resetDirectoryState()
+    previewTabs.value = []
+    activePreviewPath.value = null
+  }
+
+  function resetDirectoryState(): void {
     directoryCache.value = new Map()
     expandedPaths.value = new Set()
     loadingPaths.value = new Set()
     directoryErrors.value = new Map()
-    previewTabs.value = []
-    activePreviewPath.value = null
     searchQuery.value = ''
     searchResults.value = []
   }
@@ -270,8 +299,11 @@ export const useFilesStore = defineStore('files', () => {
     relativePath: string,
     absolutePath?: string,
     asTransient = false,
+    folderId?: string,
+    folderAlias?: string,
   ): FilePreviewTab {
-    const existing = previewTabs.value.find((tab) => tab.relativePath === relativePath)
+    const id = previewTabId(folderId, relativePath)
+    const existing = previewTabs.value.find((tab) => tab.id === id)
     if (existing) {
       // 工作区外文件的 absolutePath 可能后于 tab 创建到达，补写进去。
       if (absolutePath !== undefined) existing.absolutePath = absolutePath
@@ -280,7 +312,10 @@ export const useFilesStore = defineStore('files', () => {
       return existing
     }
     const tab: FilePreviewTab = {
+      id,
       relativePath,
+      ...(folderId !== undefined && { folderId }),
+      ...(folderAlias !== undefined && { folderAlias }),
       ...(absolutePath !== undefined && { absolutePath }),
       preview: null,
       loading: false,
@@ -295,23 +330,33 @@ export const useFilesStore = defineStore('files', () => {
    * File Preview Tabs (VS Code Preview Mode): 用新路径替换旧预览 tab 的槽位。
    * 保持顺序，丢弃旧 tab 的内容/加载态，让新文件作为新的预览态 tab。
    */
-  function replacePreviewTab(oldPath: string, newPath: string, absolutePath?: string): void {
-    const index = previewTabs.value.findIndex((tab) => tab.relativePath === oldPath)
+  function replacePreviewTab(
+    oldPath: string,
+    newPath: string,
+    absolutePath?: string,
+    folderId?: string,
+    folderAlias?: string,
+  ): void {
+    const index = previewTabs.value.findIndex((tab) => tab.id === oldPath)
     if (index === -1) return
     previewTabs.value[index] = {
+      id: previewTabId(folderId, newPath),
       relativePath: newPath,
+      ...(folderId !== undefined && { folderId }),
+      ...(folderAlias !== undefined && { folderAlias }),
       ...(absolutePath !== undefined && { absolutePath }),
       preview: null,
       loading: false,
       error: null,
       isTransient: true,
     }
-    if (activePreviewPath.value === oldPath) activePreviewPath.value = newPath
+    if (activePreviewPath.value === oldPath)
+      activePreviewPath.value = previewTabId(folderId, newPath)
   }
 
   /** File Preview Tabs: 把指定 tab 转为常驻（双击 tab / 双击文件树时调用）。 */
   function pinPreviewTab(relativePath: string): void {
-    const tab = previewTabs.value.find((item) => item.relativePath === relativePath)
+    const tab = previewTabs.value.find((item) => item.id === relativePath)
     if (tab) tab.isTransient = false
   }
 
@@ -346,8 +391,17 @@ export const useFilesStore = defineStore('files', () => {
     closeAllPreviews,
     pinPreviewTab,
     reset,
+    resetDirectoryState,
   }
 })
+
+function previewTabId(folderId: string | undefined, relativePath: string): string {
+  return folderId ? `${folderId}:${relativePath}` : relativePath
+}
+
+function folderCacheKey(folderId: string | undefined, relativePath: string): string {
+  return folderId ? `${folderId}:${relativePath}` : relativePath
+}
 
 function setInSet(target: { value: Set<string> }, key: string, present: boolean): void {
   const next = new Set(target.value)

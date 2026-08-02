@@ -31,7 +31,10 @@ export async function mentionPathFor(
     if (!resolved) return absolutePath
     // 工作区外文件的 relativePath 只是展示用的原始形态，absolutePath 才是真的；
     // 工作区内文件没有 absolutePath，relativePath 就是要的结果。
-    return resolved.absolutePath ? absolutePath : resolved.relativePath
+    if (resolved.absolutePath) return absolutePath
+    return resolved.folderAlias
+      ? `${resolved.folderAlias}/${resolved.relativePath}`
+      : resolved.relativePath
   } catch {
     return absolutePath
   }

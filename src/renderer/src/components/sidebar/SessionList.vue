@@ -400,6 +400,7 @@ async function newSession(): Promise<void> {
       const last = await window.api.session.getLastRuntimeConfig()
       const config: Parameters<typeof window.api.backend.warmup>[0]['config'] = {
         cwd: workspace.path,
+        workspaceFolders: workspace.folders,
       }
       if (last?.backend === 'claude' && last.model) config.model = last.model
       if (last?.backend === 'claude' && last.effort) config.effort = last.effort

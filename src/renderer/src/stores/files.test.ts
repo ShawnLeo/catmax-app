@@ -40,6 +40,7 @@ describe('files store preview tabs', () => {
         id: 'workspace-1',
         path: '/workspace',
         name: 'workspace',
+        folders: [],
         preferredEditor: null,
         lastOpenedAt: 1,
         createdAt: 1,

@@ -52,6 +52,7 @@ import { app } from 'electron'
 
 import { claudeOverrideSettingsPath } from '../../service/backend-config-files'
 import { logger } from '../../service/logger'
+import { buildWorkspaceInstructions, secondaryWorkspacePaths } from '../workspace-context'
 
 import { createAskUserServer } from './ask-user-server'
 import { ClaudeBackgroundTaskState } from './background-task-state'
@@ -349,6 +350,8 @@ export class ClaudeAdapter implements AgentBackend {
 
     // 与正式 turn 保持相同的 system prompt 和 MCP schema，才能复用共享前缀缓存。
     // Warmup 不允许执行任何工具；若模型意外请求工具，直接拒绝。
+    const workspaceInstructions = buildWorkspaceInstructions(args.workspaceFolders)
+    const additionalDirectories = secondaryWorkspacePaths(args.workspaceFolders)
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const options: Record<string, any> = {
       abortController,
@@ -366,8 +369,15 @@ export class ClaudeAdapter implements AgentBackend {
       },
       permissionMode: 'default',
       sessionId,
-      systemPrompt: { type: 'preset', preset: 'claude_code', append: ASK_USER_GUIDE },
+      systemPrompt: {
+        type: 'preset',
+        preset: 'claude_code',
+        append: workspaceInstructions
+          ? `${ASK_USER_GUIDE}\n\n${workspaceInstructions}`
+          : ASK_USER_GUIDE,
+      },
     }
+    if (additionalDirectories.length > 0) options.additionalDirectories = additionalDirectories
     if (args.model) options.model = args.model
     if (args.effort) options.effort = args.effort === 'none' ? 'low' : args.effort
     this.applyOverrideSettings(options)
@@ -597,6 +607,8 @@ export class ClaudeAdapter implements AgentBackend {
     })
 
     // ---- 组装 options ----
+    const workspaceInstructions = buildWorkspaceInstructions(args.workspaceFolders)
+    const additionalDirectories = secondaryWorkspacePaths(args.workspaceFolders)
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const options: Record<string, any> = {
       abortController,
@@ -611,9 +623,16 @@ export class ClaudeAdapter implements AgentBackend {
         catmax: { type: 'sdk', name: 'catmax', instance: askUser.server },
       },
       // 追加 ask_user 引导语到 Claude Code 默认 system prompt（不覆盖默认 prompt）
-      systemPrompt: { type: 'preset', preset: 'claude_code', append: ASK_USER_GUIDE },
+      systemPrompt: {
+        type: 'preset',
+        preset: 'claude_code',
+        append: workspaceInstructions
+          ? `${ASK_USER_GUIDE}\n\n${workspaceInstructions}`
+          : ASK_USER_GUIDE,
+      },
     }
     if (spawnCwd !== undefined) options.cwd = spawnCwd
+    if (additionalDirectories.length > 0) options.additionalDirectories = additionalDirectories
     if (canResume) options.resume = claudeSessionId
     if (args.model) options.model = args.model
     if (args.effort) {

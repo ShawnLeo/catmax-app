@@ -5,7 +5,7 @@
         <h2 class="text-[length:var(--ui-text-u3)] font-semibold text-foreground">工作区</h2>
         <p class="text-[length:var(--ui-text-base)] text-muted-foreground">管理已添加的工作区</p>
       </div>
-      <Button size="sm" @click="addWorkspace">添加</Button>
+      <Button size="sm" @click="showCreateWorkspace = true">创建工作区</Button>
     </header>
 
     <div class="flex flex-col gap-1">
@@ -42,24 +42,22 @@
         暂无工作区
       </div>
     </div>
+    <CreateWorkspaceDialog
+      :open="showCreateWorkspace"
+      @close="showCreateWorkspace = false"
+      @created="showCreateWorkspace = false"
+    />
   </section>
 </template>
 
 <script setup lang="ts">
 import { Button } from '@renderer/components/ui/button'
+import CreateWorkspaceDialog from '@renderer/components/workspace/CreateWorkspaceDialog.vue'
 import { useWorkspaceStore } from '@renderer/stores/workspace'
+import { ref } from 'vue'
 
 const workspaceStore = useWorkspaceStore()
-
-async function addWorkspace(): Promise<void> {
-  const result = await window.api.system.openDialog({
-    title: '选择工作区文件夹',
-    properties: ['openDirectory'],
-  })
-  if (!result.canceled && result.filePaths.length > 0) {
-    await workspaceStore.add(result.filePaths[0]!)
-  }
-}
+const showCreateWorkspace = ref(false)
 
 async function removeWorkspace(id: string): Promise<void> {
   if (!window.confirm('确认删除此工作区？')) return

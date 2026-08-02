@@ -9,8 +9,10 @@ import type { EditorId } from '../constants'
 import type { WorkspaceRecord } from '../domain'
 
 export interface AddWorkspaceArgs {
+  /** 主文件夹；保留 path 字段名以兼容现有 renderer 和历史调用。 */
   path: string
   name?: string
+  secondaryPaths?: string[]
 }
 
 export interface RenameWorkspaceArgs {

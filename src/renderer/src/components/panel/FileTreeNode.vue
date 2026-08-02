@@ -99,12 +99,15 @@ function openContextMenu(event: MouseEvent): void {
  * 不写 text/uri-list——那会让外部程序以为这是一次真实的文件拖拽（可能触发复制/移动）。
  */
 function onDragStart(event: DragEvent): void {
+  const reference = props.entry.folderAlias
+    ? `${props.entry.folderAlias}/${props.entry.relativePath}`
+    : props.entry.relativePath
   const payload: CatmaxDragPayload = {
-    relativePath: props.entry.relativePath,
+    relativePath: reference,
     isDirectory: props.entry.isDirectory,
   }
   event.dataTransfer?.setData(CATMAX_FILE_MIME, JSON.stringify(payload))
-  event.dataTransfer?.setData('text/plain', props.entry.relativePath)
+  event.dataTransfer?.setData('text/plain', reference)
   if (event.dataTransfer) event.dataTransfer.effectAllowed = 'copy'
 }
 
@@ -112,9 +115,20 @@ const filesStore = useFilesStore()
 // File Tree Node: 递归节点只从 store 读取共享缓存，避免每层重复发起 IPC。
 const expanded = computed(() => filesStore.expandedPaths.has(props.entry.relativePath))
 const loading = computed(() => filesStore.loadingPaths.has(props.entry.relativePath))
-const children = computed(() => filesStore.directoryCache.get(props.entry.relativePath) ?? [])
+const children = computed(
+  () =>
+    filesStore.directoryCache.get(
+      props.entry.folderId
+        ? `${props.entry.folderId}:${props.entry.relativePath}`
+        : props.entry.relativePath,
+    ) ?? [],
+)
 const error = computed(() => filesStore.directoryErrors.get(props.entry.relativePath))
-const active = computed(() => filesStore.currentPreview?.relativePath === props.entry.relativePath)
+const active = computed(
+  () =>
+    filesStore.currentPreview?.relativePath === props.entry.relativePath &&
+    filesStore.activePreviewTab?.folderId === props.entry.folderId,
+)
 
 // File Preview Tabs (VS Code Preview Mode): 单击打开预览态（italic、可被后续单击覆盖），
 // 双击把 tab 转正（常驻）。用定时器区分单/双击——浏览器 dblclick 前会先触发两次 click。
@@ -133,7 +147,15 @@ async function onClick(): Promise<void> {
   }
   clickTimer = setTimeout(() => {
     clickTimer = null
-    void filesStore.previewFile(props.workspaceId, props.entry.relativePath, false, undefined, true)
+    void filesStore.previewFile(
+      props.workspaceId,
+      props.entry.relativePath,
+      false,
+      undefined,
+      true,
+      props.entry.folderId,
+      props.entry.folderAlias,
+    )
   }, DBL_CLICK_DELAY)
 }
 
@@ -144,8 +166,20 @@ async function onDoubleClick(): Promise<void> {
     clickTimer = null
   }
   // 双击文件：作为常驻 tab 打开（asTransient=false），并立即转正。
-  await filesStore.previewFile(props.workspaceId, props.entry.relativePath)
-  filesStore.pinPreviewTab(props.entry.relativePath)
+  await filesStore.previewFile(
+    props.workspaceId,
+    props.entry.relativePath,
+    false,
+    undefined,
+    false,
+    props.entry.folderId,
+    props.entry.folderAlias,
+  )
+  filesStore.pinPreviewTab(
+    props.entry.folderId
+      ? `${props.entry.folderId}:${props.entry.relativePath}`
+      : props.entry.relativePath,
+  )
 }
 
 // 卸载时丢弃待触发的单击预览，避免在节点已销毁后还写入 store。

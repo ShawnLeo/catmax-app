@@ -1,5 +1,5 @@
 import { existsSync } from 'node:fs'
-import { join } from 'node:path'
+import { isAbsolute, join } from 'node:path'
 
 import { ctx } from '@main/context'
 import { launchInEditor } from '@main/service/editor-launcher'
@@ -12,45 +12,87 @@ import {
 } from '@main/service/file-tree'
 import { readImageThumbnail } from '@main/service/image-thumbnail'
 import { DEFAULT_EDITOR } from '@shared/constants'
+import type { WorkspaceFolderRecord, WorkspaceRecord } from '@shared/domain'
 import type { DirEntry, FilePreview, MentionPreview, ResolvedFileReference } from '@shared/ipc/fs'
 
 // File Tree IPC: renderer 只提交 workspaceId，主进程从数据库取得可信工作区根目录。
 export const readDirectoryHandler = async (args: {
   workspaceId: string
+  folderId?: string
   relativePath?: string
   respectGitignore?: boolean
 }): Promise<DirEntry[]> => {
-  const workspace = requireWorkspace(args.workspaceId)
-  return readDirectory(workspace.path, args.relativePath ?? '', args.respectGitignore ?? true)
+  const { folder } = requireWorkspaceFolder(args.workspaceId, args.folderId)
+  return annotateEntries(
+    await readDirectory(folder.path, args.relativePath ?? '', args.respectGitignore ?? true),
+    folder,
+  )
 }
 
 export const readFilePreviewHandler = async (args: {
   workspaceId: string
+  folderId?: string
   relativePath: string
   absolutePath?: string
 }): Promise<FilePreview> => {
-  const workspace = requireWorkspace(args.workspaceId)
-  return readFilePreview(workspace.path, args.relativePath, args.absolutePath)
+  const { folder } = requireWorkspaceFolder(args.workspaceId, args.folderId)
+  return readFilePreview(folder.path, args.relativePath, args.absolutePath)
 }
 
 export const searchFilesHandler = async (args: {
   workspaceId: string
+  folderId?: string
+  allFolders?: boolean
   query: string
   limit?: number
 }): Promise<DirEntry[]> => {
   const workspace = requireWorkspace(args.workspaceId)
-  return searchWorkspace(workspace.path, args.query, args.limit)
+  if (args.allFolders) {
+    const limit = args.limit ?? 200
+    const perFolder = Math.max(limit, 30)
+    const groups = await Promise.all(
+      workspace.folders.map(async (folder) =>
+        annotateEntries(await searchWorkspace(folder.path, args.query, perFolder), folder),
+      ),
+    )
+    return groups.flat().slice(0, limit)
+  }
+  const { folder } = requireWorkspaceFolder(args.workspaceId, args.folderId)
+  return annotateEntries(await searchWorkspace(folder.path, args.query, args.limit), folder)
 }
 
 export const resolveFileReferenceHandler = async (args: {
   workspaceId: string
+  folderId?: string
   reference: string
   allowDirectory?: boolean
 }): Promise<ResolvedFileReference | null> => {
   const workspace = requireWorkspace(args.workspaceId)
-  return resolveFileReference(workspace.path, args.reference, {
+  const qualified = resolveQualifiedReference(workspace, args.reference)
+  if (!qualified && args.folderId === undefined && isExternalReference(args.reference)) {
+    for (const candidate of workspace.folders) {
+      const resolved = await resolveFileReference(candidate.path, args.reference, {
+        allowDirectory: args.allowDirectory === true,
+      })
+      if (resolved && resolved.absolutePath === undefined) {
+        return {
+          ...resolved,
+          folderId: candidate.id,
+          folderAlias: candidate.alias,
+        }
+      }
+    }
+  }
+  const { folder } = requireWorkspaceFolder(args.workspaceId, qualified?.folder.id ?? args.folderId)
+  const resolved = await resolveFileReference(folder.path, qualified?.reference ?? args.reference, {
     allowDirectory: args.allowDirectory === true,
   })
+  return resolved ? { ...resolved, folderId: folder.id, folderAlias: folder.alias } : null
+}
+
+function isExternalReference(reference: string): boolean {
+  const value = reference.trim().replace(/^file:\/\//, '')
+  return isAbsolute(value) || value.startsWith('~/') || value.startsWith('$HOME/')
 }
 
 export const readMentionPreviewHandler = async (args: {
@@ -59,31 +101,38 @@ export const readMentionPreviewHandler = async (args: {
   maxSize?: number
 }): Promise<MentionPreview | null> => {
   const workspace = requireWorkspace(args.workspaceId)
-  const resolved = await resolveFileReference(workspace.path, args.reference, {
+  const qualified = resolveQualifiedReference(workspace, args.reference)
+  const folder = qualified?.folder ?? workspace.folders.find((item) => item.role === 'primary')
+  if (!folder) return null
+  const resolved = await resolveFileReference(folder.path, qualified?.reference ?? args.reference, {
     allowDirectory: true,
   })
   if (!resolved) return null
   if (resolved.isDirectory) return { isDirectory: true, thumbnail: null }
   // 工作区内的引用只带相对路径，拼回工作区根；区外的 absolutePath 才是真身。
-  const absolutePath = resolved.absolutePath ?? join(workspace.path, resolved.relativePath)
+  const absolutePath = resolved.absolutePath ?? join(folder.path, resolved.relativePath)
   return { isDirectory: false, thumbnail: await readImageThumbnail(absolutePath, args.maxSize) }
 }
 
 export const openInEditorHandler = async (args: {
   workspaceId: string
+  folderId?: string
   relativePath: string
   absolutePath?: string
   line?: number
   column?: number
 }) => {
-  const ws = ctx.db.findWorkspaceById(args.workspaceId)
-  if (!ws) {
+  let workspace: WorkspaceRecord
+  let folder: WorkspaceFolderRecord
+  try {
+    ;({ workspace, folder } = requireWorkspaceFolder(args.workspaceId, args.folderId))
+  } catch {
     return { launched: false, editor: null, error: 'workspace not found' }
   }
   // 工作区外文件（absolutePath 存在）跳过工作区边界校验，直接交由编辑器启动。
   if (!args.absolutePath) {
     try {
-      await resolveWorkspaceEntry(ws.path, args.relativePath)
+      await resolveWorkspaceEntry(folder.path, args.relativePath)
     } catch {
       return {
         launched: false,
@@ -92,9 +141,9 @@ export const openInEditorHandler = async (args: {
       }
     }
   }
-  const editor = ws.preferredEditor ?? DEFAULT_EDITOR
+  const editor = workspace.preferredEditor ?? DEFAULT_EDITOR
   return launchInEditor(editor, {
-    workspacePath: ws.path,
+    workspacePath: folder.path,
     relativePath: args.relativePath,
     ...(args.absolutePath !== undefined && { absolutePath: args.absolutePath }),
     ...(args.line !== undefined && { line: args.line }),
@@ -111,4 +160,36 @@ function requireWorkspace(workspaceId: string) {
   const workspace = ctx.db.findWorkspaceById(workspaceId)
   if (!workspace) throw new Error('workspace not found')
   return workspace
+}
+
+function requireWorkspaceFolder(
+  workspaceId: string,
+  folderId?: string,
+): { workspace: WorkspaceRecord; folder: WorkspaceFolderRecord } {
+  const workspace = requireWorkspace(workspaceId)
+  const folder = folderId
+    ? workspace.folders.find((item) => item.id === folderId)
+    : workspace.folders.find((item) => item.role === 'primary')
+  if (!folder) throw new Error('workspace folder not found')
+  return { workspace, folder }
+}
+
+function annotateEntries(entries: DirEntry[], folder: WorkspaceFolderRecord): DirEntry[] {
+  return entries.map((entry) => ({
+    ...entry,
+    folderId: folder.id,
+    folderAlias: folder.alias,
+  }))
+}
+
+function resolveQualifiedReference(
+  workspace: WorkspaceRecord,
+  reference: string,
+): { folder: WorkspaceFolderRecord; reference: string } | null {
+  const normalized = reference.trim().replace(/^@/, '')
+  const slash = normalized.indexOf('/')
+  if (slash <= 0) return null
+  const alias = normalized.slice(0, slash)
+  const folder = workspace.folders.find((item) => item.alias === alias)
+  return folder ? { folder, reference: normalized.slice(slash + 1) } : null
 }

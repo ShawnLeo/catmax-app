@@ -1,10 +1,10 @@
 import { randomUUID } from 'node:crypto'
-import { existsSync, statSync } from 'node:fs'
-import { basename } from 'node:path'
+import { existsSync, realpathSync, statSync } from 'node:fs'
+import { basename, relative } from 'node:path'
 
 import { ctx } from '@main/context'
 import { logger } from '@main/service/logger'
-import type { WorkspaceRecord } from '@shared/domain'
+import type { WorkspaceFolderRecord, WorkspaceRecord } from '@shared/domain'
 import type {
   AddWorkspaceArgs,
   RenameWorkspaceArgs,
@@ -28,16 +28,7 @@ export const listWorkspaces = async (): Promise<WorkspaceRecord[]> => {
 }
 
 export const addWorkspace = async (args: AddWorkspaceArgs): Promise<WorkspaceRecord> => {
-  const path = args.path.trim()
-  if (!path) throw new WorkspaceError('invalid-path', 'path is empty')
-
-  if (!existsSync(path)) {
-    throw new WorkspaceError('invalid-path', `path does not exist: ${path}`)
-  }
-  const stat = statSync(path)
-  if (!stat.isDirectory()) {
-    throw new WorkspaceError('invalid-path', `path is not a directory: ${path}`)
-  }
+  const path = normalizeDirectory(args.path)
 
   const existing = ctx.db.findWorkspaceByPath(path)
   if (existing) {
@@ -45,10 +36,19 @@ export const addWorkspace = async (args: AddWorkspaceArgs): Promise<WorkspaceRec
   }
 
   const now = Date.now()
-  const record: WorkspaceRecord = {
-    id: randomUUID(),
+  const workspaceId = randomUUID()
+  const workspaceName = args.name?.trim() || basename(path)
+  const folders = buildWorkspaceFolders(
+    workspaceId,
     path,
-    name: args.name?.trim() || basename(path),
+    (args.secondaryPaths ?? []).map(normalizeDirectory),
+    now,
+  )
+  const record: WorkspaceRecord = {
+    id: workspaceId,
+    path,
+    name: workspaceName,
+    folders,
     preferredEditor: null,
     lastOpenedAt: now,
     createdAt: now,
@@ -56,6 +56,72 @@ export const addWorkspace = async (args: AddWorkspaceArgs): Promise<WorkspaceRec
   ctx.db.insertWorkspace(record)
   log.info('added', record.id, record.path)
   return record
+}
+
+function normalizeDirectory(rawPath: string): string {
+  const candidate = rawPath.trim()
+  if (!candidate) throw new WorkspaceError('invalid-path', 'path is empty')
+  if (!existsSync(candidate)) {
+    throw new WorkspaceError('invalid-path', `path does not exist: ${candidate}`)
+  }
+  if (!statSync(candidate).isDirectory()) {
+    throw new WorkspaceError('invalid-path', `path is not a directory: ${candidate}`)
+  }
+  return realpathSync.native(candidate)
+}
+
+function buildWorkspaceFolders(
+  workspaceId: string,
+  primaryPath: string,
+  secondaryPaths: string[],
+  createdAt: number,
+): WorkspaceFolderRecord[] {
+  const uniquePaths = new Set([primaryPath])
+  const aliases = new Set<string>()
+  const folders: WorkspaceFolderRecord[] = []
+
+  const add = (path: string, role: WorkspaceFolderRecord['role'], sortOrder: number): void => {
+    if (uniquePaths.has(path) && role === 'secondary') {
+      throw new WorkspaceError('invalid-path', `folder already added: ${path}`)
+    }
+    if (
+      role === 'secondary' &&
+      (isNestedPath(primaryPath, path) || isNestedPath(path, primaryPath))
+    ) {
+      throw new WorkspaceError(
+        'invalid-path',
+        `workspace folders cannot contain each other: ${path}`,
+      )
+    }
+    uniquePaths.add(path)
+    const alias = uniqueAlias(basename(path) || 'folder', aliases)
+    aliases.add(alias)
+    folders.push({
+      id: randomUUID(),
+      workspaceId,
+      path,
+      alias,
+      role,
+      sortOrder,
+      createdAt,
+    })
+  }
+
+  add(primaryPath, 'primary', 0)
+  secondaryPaths.forEach((path, index) => add(path, 'secondary', index + 1))
+  return folders
+}
+
+function isNestedPath(parent: string, child: string): boolean {
+  const path = relative(parent, child)
+  return path !== '' && !path.startsWith('..') && path !== '..'
+}
+
+function uniqueAlias(base: string, used: Set<string>): string {
+  if (!used.has(base)) return base
+  let suffix = 2
+  while (used.has(`${base}-${suffix}`)) suffix += 1
+  return `${base}-${suffix}`
 }
 
 export const removeWorkspace = async (args: { id: string }): Promise<void> => {

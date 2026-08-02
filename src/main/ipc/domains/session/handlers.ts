@@ -62,6 +62,7 @@ export const createSession = async (args: CreateSessionArgs): Promise<{ sessionI
   // 调 backend.startSession 拿到 backendThreadId
   // 注意：exactOptionalPropertyTypes: true 不允许把 undefined 传给 optional 字段
   const startArgs: Parameters<typeof ctx.backendManager.startSession>[0] = { cwd: args.cwd }
+  if (args.workspaceFolders !== undefined) startArgs.workspaceFolders = args.workspaceFolders
   if (args.model !== undefined) startArgs.model = args.model
   if (args.effort !== undefined) startArgs.effort = args.effort
   if (args.permissionMode !== undefined) startArgs.permissionMode = args.permissionMode

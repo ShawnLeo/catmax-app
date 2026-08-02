@@ -854,6 +854,7 @@ async function onSend(text: string, attachments: ContextBlock[]): Promise<void> 
     const createArgs: Parameters<typeof sessionStore.create>[0] = {
       workspaceId: workspaceStore.currentWorkspace.id,
       cwd: workspaceStore.currentWorkspace.path,
+      workspaceFolders: workspaceStore.currentWorkspace.folders,
       // 显式传 backend——避免依赖 main 端默认值（getCurrentId）。
       // 切 backend 后 ChatView 应该以新 backend 创建会话。
       backend: backendStore.currentId,
@@ -919,6 +920,7 @@ async function onSend(text: string, attachments: ContextBlock[]): Promise<void> 
     prompt: fullPrompt,
     permissionMode: runtimeConfig.value.permissionMode,
     cwd: workspaceStore.currentWorkspace.path,
+    workspaceFolders: workspaceStore.currentWorkspace.folders,
   }
   if (model !== null) startArgs.model = model
   if (effort !== null) startArgs.effort = effort

@@ -22,13 +22,27 @@ afterEach(() => {
 })
 
 function makeWorkspace(overrides: Partial<WorkspaceRecord> = {}): WorkspaceRecord {
+  const id = overrides.id ?? 'test-id'
+  const path = overrides.path ?? '/tmp/test-workspace'
+  const createdAt = overrides.createdAt ?? Date.now()
   return {
-    id: 'test-id',
-    path: '/tmp/test-workspace',
+    id,
+    path,
     name: 'test-workspace',
+    folders: [
+      {
+        id: `${id}:primary`,
+        workspaceId: id,
+        path,
+        alias: 'test-workspace',
+        role: 'primary',
+        sortOrder: 0,
+        createdAt,
+      },
+    ],
     preferredEditor: null,
     lastOpenedAt: Date.now(),
-    createdAt: Date.now(),
+    createdAt,
     ...overrides,
   }
 }

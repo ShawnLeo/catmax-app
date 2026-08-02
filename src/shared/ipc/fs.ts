@@ -14,6 +14,8 @@ export interface DirEntry {
   isSymlink: boolean
   size: number
   modifiedAt: number
+  folderId?: string
+  folderAlias?: string
 }
 
 // File Preview Contract: kind 决定 renderer 使用代码、媒体、表格或占位预览器。
@@ -48,6 +50,7 @@ export interface FilePreview {
 // File Tree IPC Contract: stub 参数名以 `_` 前缀避免 unused，签名由 main/preload 共用。
 export async function readDirectory(_args: {
   workspaceId: string
+  folderId?: string
   /**
    * 仅用于兼容开发时 renderer 已热更新、main/preload 尚未重启的旧进程。
    * 新版 main 始终通过 workspaceId 从数据库解析可信路径。
@@ -73,10 +76,13 @@ export interface ResolvedFileReference {
   column?: number
   /** File Mention: 引用指向的是目录——仅在调用方传了 allowDirectory 时可能为 true。 */
   isDirectory?: boolean
+  folderId?: string
+  folderAlias?: string
 }
 
 export async function readFilePreview(_args: {
   workspaceId: string
+  folderId?: string
   /** @see readDirectory 的 workspacePath 兼容说明。 */
   workspacePath?: string
   relativePath: string
@@ -91,6 +97,9 @@ export async function readFilePreview(_args: {
 
 export async function searchFiles(_args: {
   workspaceId: string
+  folderId?: string
+  /** Composer 使用：跨工作区全部主/次文件夹聚合搜索。 */
+  allFolders?: boolean
   /** @see readDirectory 的 workspacePath 兼容说明。 */
   workspacePath?: string
   query: string
@@ -101,6 +110,7 @@ export async function searchFiles(_args: {
 
 export async function resolveFileReference(_args: {
   workspaceId: string
+  folderId?: string
   /** @see readDirectory 的 workspacePath 兼容说明。 */
   workspacePath?: string
   reference: string
@@ -116,6 +126,7 @@ export async function resolveFileReference(_args: {
 
 export async function openInEditor(_args: {
   workspaceId: string
+  folderId?: string
   relativePath: string
   /** 工作区外文件的绝对路径，存在时直接以此路径打开编辑器。 */
   absolutePath?: string

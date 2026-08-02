@@ -21,6 +21,23 @@ CREATE TABLE IF NOT EXISTS app_state (
 -- 索引
 CREATE INDEX IF NOT EXISTS idx_workspaces_last_opened ON workspaces(last_opened_at DESC);
 
+-- Multi-root Workspace: 一个工作区由一个主文件夹和零到多个次文件夹组成。
+-- workspaces.path 在兼容期继续镜像主文件夹路径，避免旧会话/调用点迁移时失去 cwd。
+CREATE TABLE IF NOT EXISTS workspace_folders (
+  id            TEXT PRIMARY KEY,
+  workspace_id  TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+  path          TEXT NOT NULL,
+  alias         TEXT NOT NULL,
+  role          TEXT NOT NULL CHECK(role IN ('primary', 'secondary')),
+  sort_order    INTEGER NOT NULL,
+  created_at    INTEGER NOT NULL,
+  UNIQUE(workspace_id, path),
+  UNIQUE(workspace_id, alias)
+);
+
+CREATE INDEX IF NOT EXISTS idx_workspace_folders_workspace
+  ON workspace_folders(workspace_id, sort_order);
+
 CREATE TABLE IF NOT EXISTS sessions (
   id                TEXT PRIMARY KEY,
   backend           TEXT NOT NULL,

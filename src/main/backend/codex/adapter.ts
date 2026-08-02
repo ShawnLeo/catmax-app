@@ -63,6 +63,7 @@ import {
 
 import { checkCliHealth } from '../health-check'
 import { type ProcessSpawner, RealProcessSpawner } from '../process-spawner'
+import { buildWorkspaceInstructions, secondaryWorkspacePaths } from '../workspace-context'
 
 import { readCodexDefaultProvider } from './default-provider'
 import {
@@ -577,10 +578,16 @@ export class CodexAdapter implements AgentBackend {
     // 不传会导致 thread/start 卡住直到超时。用户没在 UI 选 model 时，
     // 用 model/list 返回的默认模型（账户真实可用）。
     const model = args.model ?? (await this.resolveDefaultModel())
+    const developerInstructions = buildWorkspaceInstructions(args.workspaceFolders)
+    const writableRoots = secondaryWorkspacePaths(args.workspaceFolders)
     const result = await this.sendRequest('thread/start', {
       cwd: args.cwd,
       model,
       approvalPolicy: permissionToApproval(args.permissionMode),
+      ...(developerInstructions !== undefined && { developerInstructions }),
+      ...(writableRoots.length > 0 && {
+        config: { sandbox_workspace_write: { writable_roots: writableRoots } },
+      }),
     })
     const thread = (result as { thread?: { id?: string } }).thread
     if (!thread?.id) {
