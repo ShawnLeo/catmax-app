@@ -98,7 +98,7 @@ export function useAutocomplete(options: UseAutocompleteOptions): AutocompleteAp
   }
 
   function refresh(text: string, caret: number): void {
-    const detected = registry.detect(text, caret)
+    const detected = registry.detect(text, caret, context())
     if (!detected) {
       if (open.value) close()
       return
@@ -169,7 +169,18 @@ export function useAutocomplete(options: UseAutocompleteOptions): AutocompleteAp
       refresh(next, caret)
       return
     }
+
     close()
+    /*
+     * 刚插完的这一段不许自己弹回来。
+     *
+     * 文件候选靠尾随空格自然收尾（`@a.ts ` 之后光标前面是空白，检测不到触发段），
+     * 但不带参数的斜杠命令没有尾随空格——插完 `/context` 光标仍落在同一个触发段
+     * 里，紧随其后的光标事件会把弹层又打开，显示的还是刚选完的那一条。
+     * 跟 Esc 用同一个 dismissedKey 机制：记住这一段，直到用户改动文本为止。
+     */
+    const after = registry.detect(next, caret, context())
+    if (after) dismissedKey = triggerKey(after)
     onApply(next, caret)
   }
 

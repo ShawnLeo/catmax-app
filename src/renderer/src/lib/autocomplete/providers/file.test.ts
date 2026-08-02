@@ -30,11 +30,12 @@ function match(query: string): TriggerMatch {
   return { char: '@', start: 0, end: query.length + 1, query }
 }
 
-const ctx = { workspaceId: 'ws-1' }
+const ctx = { workspaceId: 'ws-1', backendId: 'claude' }
 
 describe('fileSuggestionProvider', () => {
   it('没有工作区时什么都不查', async () => {
-    expect(await fileSuggestionProvider.search(match('a'), { workspaceId: undefined })).toEqual([])
+    const empty = { workspaceId: undefined, backendId: 'claude' }
+    expect(await fileSuggestionProvider.search(match('a'), empty)).toEqual([])
     expect(searchFiles).not.toHaveBeenCalled()
   })
 

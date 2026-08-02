@@ -4,7 +4,7 @@
  * 纯字符串逻辑，不碰 DOM 也不碰 Vue——联想里最容易出错的部分（`foo@bar.com`
  * 不该弹、跨行不该连起来、光标退到触发字符前面要关掉）全在这里，也全都能单测。
  */
-import type { TriggerDetector, TriggerMatch } from './types'
+import type { TriggerMatch } from './types'
 
 export interface CharTriggerOptions {
   /** 触发字符，单个字符（`@`、`/`） */
@@ -49,8 +49,15 @@ const DEFAULT_MAX_QUERY_LENGTH = 80
  * 往前扫而不是用正则整体匹配：正则要么匹配到光标之后的内容（用户在句中插入时
  * 就错了），要么得为每种触发规则各写一条难读的正则。往前扫是 O(query 长度)，
  * 每次按键跑一遍毫无压力。
+ *
+ * 返回类型故意比 TriggerDetector 窄（不收 SuggestionContext）：纯字符规则跟当前
+ * 后端/工作区无关，少一个参数就少一处「这里是不是该看上下文」的疑问。它仍然可以
+ * 直接当 TriggerDetector 用。需要按上下文决定「这个触发字符还算不算数」的
+ * provider（斜杠命令就是）自己在外面包一层判断再调它，见 providers/slash-command.ts。
  */
-export function charTrigger(options: CharTriggerOptions): TriggerDetector {
+export function charTrigger(
+  options: CharTriggerOptions,
+): (text: string, caret: number) => TriggerMatch | null {
   const {
     char,
     requireBoundary = true,

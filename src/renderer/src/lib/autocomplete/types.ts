@@ -12,6 +12,7 @@
  * - provider 不直接读 store——工作区 id 这类外部状态从 SuggestionContext 传进来，
  *   provider 才能在测试里脱离 Pinia 单独跑。
  */
+import type { BackendId } from '@shared/constants'
 import type { Component } from 'vue'
 
 /** 光标所处的触发段——`@src/comp` 中 `@` 到光标之间的那一截。 */
@@ -26,8 +27,19 @@ export interface TriggerMatch {
   query: string
 }
 
-/** `(text, caret) → 触发段`，不在触发段里就返回 null。 */
-export type TriggerDetector = (text: string, caret: number) => TriggerMatch | null
+/**
+ * `(text, caret, ctx) → 触发段`，不在触发段里就返回 null。
+ *
+ * 带 ctx 是因为「这个触发字符在当前环境下有没有意义」本身依赖上下文：斜杠命令
+ * 在 codex 会话里根本不存在（codex 的 app-server 没有斜杠命令这一层），此时
+ * `/` 就不该是触发字符。让它在检测阶段返回 null，比先弹出来再显示「没有匹配项」
+ * 干净——后者会在每条以 `/` 开头的消息上闪一下空列表。
+ */
+export type TriggerDetector = (
+  text: string,
+  caret: number,
+  ctx: SuggestionContext,
+) => TriggerMatch | null
 
 /**
  * 候选项的图标。
@@ -64,10 +76,18 @@ export interface SuggestionItem {
   keepOpen?: boolean
 }
 
-/** provider 搜索时能拿到的外部状态。 */
+/** provider（检测和搜索时）能拿到的外部状态。 */
 export interface SuggestionContext {
   /** 当前工作区 id；没打开工作区时为 undefined，provider 应返回空结果 */
   workspaceId: string | undefined
+  /**
+   * 当前会话所属后端。
+   *
+   * 联想内容是按后端分的——同一个 `/`，claude 有一整套命令，codex 一个都没有
+   * （详见 commands/index.ts）。会话的后端不可变，打开会话时 backendStore
+   * 会切过去，所以直接取 backendStore.currentId 即可。
+   */
+  backendId: BackendId | undefined
 }
 
 /** 一种联想来源。 */

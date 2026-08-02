@@ -10,7 +10,7 @@
  * 一次性注册完（见 index.ts）。将来 MCP 工具需要在连接后动态注册的话，
  * 注册本身是同步的、下一次按键就生效，也不需要响应式。
  */
-import type { SuggestionProvider, TriggerMatch } from './types'
+import type { SuggestionContext, SuggestionProvider, TriggerMatch } from './types'
 
 export interface DetectedTrigger {
   provider: SuggestionProvider
@@ -33,9 +33,9 @@ export class SuggestionRegistry {
   }
 
   /** 光标落在谁的触发段里？都不在返回 null。 */
-  detect(text: string, caret: number): DetectedTrigger | null {
+  detect(text: string, caret: number, ctx: SuggestionContext): DetectedTrigger | null {
     for (const provider of this.providers) {
-      const match = provider.detect(text, caret)
+      const match = provider.detect(text, caret, ctx)
       if (match) return { provider, match }
     }
     return null

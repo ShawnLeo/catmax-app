@@ -22,7 +22,7 @@ function setup(search: (query: string) => Promise<SuggestionItem[]>) {
   const api = scope.run(() =>
     useAutocomplete({
       registry,
-      context: () => ({ workspaceId: 'ws-1' }),
+      context: () => ({ workspaceId: 'ws-1', backendId: 'claude' }),
       onApply: (text, caret) => applied.push({ text, caret }),
     }),
   )!
@@ -164,6 +164,29 @@ describe('useAutocomplete', () => {
 
     // 继续输入 = 换了一段，应该重新开始联想
     api.refresh('@ab', 3)
+    expect(api.open.value).toBe(true)
+    dispose()
+  })
+
+  /*
+   * 回归测试。不带尾随空格的候选（不带参数的斜杠命令 `/context`）插入后，光标仍
+   * 落在同一个触发段里，紧随其后的光标事件会把弹层又打开、显示刚选完的那一条。
+   */
+  it('插入不带尾随空格的候选后，弹层不会自己弹回来', async () => {
+    // insert 不带尾随空格，插完光标仍落在 `@…` 这一段里——复现斜杠命令的形态。
+    const { api, dispose } = setup(async () => [item('context', '@context')])
+
+    api.refresh('@c', 2)
+    await settle()
+    api.handleKeydown(keydown('Enter'))
+    expect(api.open.value).toBe(false)
+
+    // 输入框随后回报一次新光标位置（setCaret 会发 caret 事件）
+    api.refresh('@context', 8)
+    expect(api.open.value).toBe(false)
+
+    // 但用户继续输入 = 换了一段，应该重新开始联想
+    api.refresh('@contextx', 9)
     expect(api.open.value).toBe(true)
     dispose()
   })

@@ -249,7 +249,12 @@ const {
   close: closeSuggestions,
 } = useAutocomplete({
   registry: composerSuggestions,
-  context: () => ({ workspaceId: workspaceStore.currentWorkspace?.id }),
+  // 每次检测/搜索都重新取——切工作区、切会话（会话的后端不可变，打开会话时
+  // backendStore 会切过去）都要立刻反映到候选内容上。
+  context: () => ({
+    workspaceId: workspaceStore.currentWorkspace?.id,
+    backendId: backendStore.currentId,
+  }),
   onApply: (text, caret) => {
     prompt.value = text
     // 等 textarea 拿到新文本再挪光标——DOM 还是旧值时 setSelectionRange 会被
