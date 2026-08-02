@@ -25,10 +25,12 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     name?: string,
     secondaryPaths?: string[],
   ): Promise<WorkspaceRecord> {
+    // Workspace IPC: 调用方可能传入 Vue ref/reactive 中的数组。Electron 的 structured
+    // clone 无法序列化 Proxy，因此在统一的 store 边界展开成普通数组。
     const args = {
       path,
       ...(name !== undefined && { name }),
-      ...(secondaryPaths !== undefined && { secondaryPaths }),
+      ...(secondaryPaths !== undefined && { secondaryPaths: [...secondaryPaths] }),
     }
     const ws = await window.api.workspace.add(args)
     workspaces.value.unshift(ws)

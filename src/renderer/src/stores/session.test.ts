@@ -1,5 +1,6 @@
 import { createPinia, setActivePinia } from 'pinia'
 import { beforeEach, describe, expect, test, vi } from 'vitest'
+import { reactive } from 'vue'
 
 import { useMessageStore } from './message'
 import { useSessionStore } from './session'
@@ -17,6 +18,39 @@ describe('session store selection version', () => {
     expect(store.selectionVersion).toBe(1)
     store.setCurrent('')
     expect(store.selectionVersion).toBe(2)
+  })
+
+  test('创建会话前将响应式工作区目录转换为 IPC 可克隆对象', async () => {
+    const create = vi.fn((args: unknown) => {
+      structuredClone(args)
+      return Promise.resolve({ sessionId: 'session-1' })
+    })
+    const list = vi.fn().mockResolvedValue([])
+    Object.defineProperty(window, 'api', {
+      configurable: true,
+      value: { session: { create, list } },
+    })
+    const workspaceFolders = reactive([
+      { id: 'primary', path: '/code/app', alias: 'app', role: 'primary' as const },
+      { id: 'secondary', path: '/code/docs', alias: 'docs', role: 'secondary' as const },
+    ])
+
+    await useSessionStore().create({
+      workspaceId: 'workspace-1',
+      cwd: '/code/app',
+      workspaceFolders,
+      backend: 'codex',
+    })
+
+    expect(create).toHaveBeenCalledWith({
+      workspaceId: 'workspace-1',
+      cwd: '/code/app',
+      workspaceFolders: [
+        { id: 'primary', path: '/code/app', alias: 'app', role: 'primary' },
+        { id: 'secondary', path: '/code/docs', alias: 'docs', role: 'secondary' },
+      ],
+      backend: 'codex',
+    })
   })
 
   test('已有实时消息的新 thread 切换时不读取尚未物化的历史', async () => {

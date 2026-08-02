@@ -614,6 +614,23 @@ export class ClaudeAdapter implements AgentBackend {
     const internalTurnId = randomUUID()
     yield { type: 'turn_started', turnId: internalTurnId, sessionId: args.sessionId }
 
+    /*
+     * claude 没有命令 turn——它的斜杠命令是**文本**，CLI 收到 user message 时自己
+     * 拦截 `/xxx`，所以走普通 prompt 就行（TurnCommand 的注释里有两边的对比）。
+     * 不认识就报错而不是把 prompt 照发：照发的话调用方以为命令生效了，实际发出去的
+     * 是一句普通消息，排查时看到的现象是"命令时灵时不灵"。
+     */
+    if (args.command) {
+      yield {
+        type: 'error',
+        turnId: internalTurnId,
+        message: `claude 不支持命令 turn：${args.command.kind}`,
+        recoverable: false,
+      }
+      yield { type: 'turn_completed', turnId: internalTurnId, status: 'error' }
+      return
+    }
+
     // ---- 解析 claude session id + 决定能否 resume ----
     const claudeSessionId = this.sessionIdMap.get(args.sessionId) ?? args.sessionId
     let canResume = this.resumableSessions.has(args.sessionId)

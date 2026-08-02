@@ -58,6 +58,7 @@ import {
   type SessionSummary,
   type StartSessionArgs,
   type StartTurnArgs,
+  type TurnCommand,
   type TurnEvent,
 } from '@shared/backend/types'
 
@@ -846,25 +847,37 @@ export class CodexAdapter implements AgentBackend {
     this.currentSink = makeSink(state)
 
     try {
-      // args.sessionId 实际是 backendThreadId（startSession 返回的）
-      // codex 0.93+ 的 turn/start 把 input 从 string 改成了 UserInput[] 数组：
-      //   旧版: input: "用户文本"
-      //   新版: input: [{ type: "text", text: "用户文本" }]
-      // 不改的话 codex 报 "Invalid request: invalid type: string ..., expected a sequence"。
-      // 同时 model 也是必需的（同 thread/start），用户没选时用 listModels 返回的默认。
-      const model = await this.resolveTurnModel(args.model)
-      // effort='none' 时产生零 reasoning token——codex 是两端里唯一能真正"关闭思考"的后端。
-      // effort 字段 schema 是 z.string().optional()，'none' 合法。
-      const turnResponse = await this.startTurnRequest(args.sessionId, {
-        threadId: args.sessionId,
-        input: [{ type: 'text', text: args.prompt }],
-        model,
-        ...(args.effort !== undefined ? { effort: args.effort } : {}),
-        approvalPolicy: permissionToApproval(args.permissionMode),
-      })
-      const codexTurnId = (turnResponse as { turn?: { id?: string } }).turn?.id
-      if (codexTurnId) {
-        this.turnIdMap.set(internalTurnId, codexTurnId)
+      if (args.command) {
+        /*
+         * 命令 turn：不发 prompt，改发对应的 RPC。
+         *
+         * 拿不到 codex turn id——thread/compact/start 的响应是空对象 `{}`，不像
+         * turn/start 会把 turn 带回来。但随后的 `turn/started` **通知**里有，
+         * translateNotification 会回填 turnIdMap（见 case 'turn/started'），
+         * 所以 interrupt 仍然可用。
+         */
+        await this.startCommandRequest(args.sessionId, args.command)
+      } else {
+        // args.sessionId 实际是 backendThreadId（startSession 返回的）
+        // codex 0.93+ 的 turn/start 把 input 从 string 改成了 UserInput[] 数组：
+        //   旧版: input: "用户文本"
+        //   新版: input: [{ type: "text", text: "用户文本" }]
+        // 不改的话 codex 报 "Invalid request: invalid type: string ..., expected a sequence"。
+        // 同时 model 也是必需的（同 thread/start），用户没选时用 listModels 返回的默认。
+        const model = await this.resolveTurnModel(args.model)
+        // effort='none' 时产生零 reasoning token——codex 是两端里唯一能真正"关闭思考"的后端。
+        // effort 字段 schema 是 z.string().optional()，'none' 合法。
+        const turnResponse = await this.startTurnRequest(args.sessionId, {
+          threadId: args.sessionId,
+          input: [{ type: 'text', text: args.prompt }],
+          model,
+          ...(args.effort !== undefined ? { effort: args.effort } : {}),
+          approvalPolicy: permissionToApproval(args.permissionMode),
+        })
+        const codexTurnId = (turnResponse as { turn?: { id?: string } }).turn?.id
+        if (codexTurnId) {
+          this.turnIdMap.set(internalTurnId, codexTurnId)
+        }
       }
     } catch (e) {
       this.currentSink = null
@@ -947,7 +960,7 @@ export class CodexAdapter implements AgentBackend {
   }
 
   /**
-   * 发 turn/start；撞上 "thread not found" 就先 thread/resume 再重试一次。
+   * 发一个作用于 thread 的请求；撞上 "thread not found" 就先 thread/resume 再重试一次。
    *
    * codex app-server 把 thread 状态放在**进程内存**里。进程一换（崩溃、空闲回收，
    * 或者协议桥开关翻转触发的 reconnect——那条路会 dispose + 重新 spawn），
@@ -958,20 +971,50 @@ export class CodexAdapter implements AgentBackend {
    * getHistory 里已有同样的 resume 前置，但那只覆盖"打开历史会话"这条路径；
    * 会话已经开着时后端重启，没有任何东西会去 resume——必须在这里兜住。
    *
+   * 命令 turn（thread/compact/start）跟普通 turn 一样吃这个问题，所以这里按方法名
+   * 参数化而不是写死 turn/start——两条路复用同一份重试逻辑，不会漏掉其中一条。
+   *
    * 只重试一次：resume 都失败说明 rollout 也没了，再转圈没有意义。
    */
-  private async startTurnRequest(
+  private async sendWithThreadResume(
     backendThreadId: string,
+    method: string,
     params: Record<string, unknown>,
   ): Promise<unknown> {
     try {
-      return await this.sendRequest('turn/start', params)
+      return await this.sendRequest(method, params)
     } catch (e) {
       if (!isThreadNotFoundError(e)) throw e
       log.info('thread not in app-server memory, resuming before retry', backendThreadId)
       await this.sendRequest('thread/resume', await this.resumeParams(backendThreadId))
-      return await this.sendRequest('turn/start', params)
+      return await this.sendRequest(method, params)
     }
+  }
+
+  private startTurnRequest(
+    backendThreadId: string,
+    params: Record<string, unknown>,
+  ): Promise<unknown> {
+    return this.sendWithThreadResume(backendThreadId, 'turn/start', params)
+  }
+
+  /**
+   * 用命令发起一轮 turn。
+   *
+   * 不认识的 kind 直接抛：静默降级成普通消息的表现是"命令发出去了，模型茫然地
+   * 回问你要干什么"，比一条明确的错误难查得多（这正是把 `/compact` 当文本发给
+   * codex 会发生的事）。
+   */
+  private async startCommandRequest(
+    backendThreadId: string,
+    command: TurnCommand,
+  ): Promise<unknown> {
+    if (command.kind !== 'compact') {
+      throw new BackendError('protocol', `codex 不支持的命令：${String(command.kind)}`)
+    }
+    return this.sendWithThreadResume(backendThreadId, 'thread/compact/start', {
+      threadId: backendThreadId,
+    })
   }
 
   // ============ 反向控制 ============

@@ -104,7 +104,7 @@
         <!-- 错误提示（codex/claude 调 API 失败时 messageStore.lastError 会被设置） -->
         <div
           v-if="messageStore.lastError"
-          class="rounded-md border border-destructive/30 bg-destructive/5 px-4 py-3 text-[length:var(--chat-text-u1)] text-destructive whitespace-pre-wrap"
+          class="mt-3 rounded-md border border-destructive/30 bg-destructive/5 px-4 py-3 text-[length:var(--chat-text-u1)] text-destructive whitespace-pre-wrap"
         >
           <div class="flex items-start gap-2">
             <AlertCircleIcon class="w-4 h-4 flex-shrink-0 mt-0.5" />

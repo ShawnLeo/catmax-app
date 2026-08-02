@@ -44,11 +44,12 @@ export const slashCommandProvider: SuggestionProvider = {
   emptyText: '没有匹配的命令',
 
   /*
-   * 当前后端一条命令都没有时（codex 就是），`/` 干脆不算触发字符。
+   * 当前后端一条命令都没有时，`/` 干脆不算触发字符。
    *
    * 让它在检测阶段就返回 null，而不是弹出来再显示「没有匹配的命令」：后者会让
-   * codex 用户每写一条以 `/` 开头的消息都闪一下空列表，而那个列表永远不可能有
-   * 内容——不是「没搜到」，是这个后端就没有这个概念。
+   * 该后端的用户每写一条以 `/` 开头的消息都闪一下空列表，而那个列表永远不可能有
+   * 内容——不是「没搜到」，是这个后端就没有这个概念。第三方 backend plugin 不注册
+   * 命令表时走的就是这条路。
    */
   detect(text, caret, ctx) {
     if (slashCommandsFor(ctx.backendId).length === 0) return null
@@ -95,6 +96,8 @@ function toItem(spec: SlashCommandSpec, match: TriggerMatch): SuggestionItem {
   const insert = `${match.char}${spec.name}${spec.argumentHint ? ' ' : ''}`
   return {
     id: spec.name,
+    // 动作型命令（codex）带上 commandId；纯文本命令（claude 全部）不带，照常插入。
+    ...(spec.commandId ? { command: { id: spec.commandId } } : {}),
     // 参数提示跟在命令名后面（而不是塞进 detail）：它是「这条命令怎么用」的一
     // 部分，读起来就该是 `/compact [保留重点]`；detail 那一栏窄屏会被截掉。
     label: spec.argumentHint

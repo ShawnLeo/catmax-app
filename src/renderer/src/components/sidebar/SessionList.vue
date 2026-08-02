@@ -90,6 +90,7 @@
 
 <script setup lang="ts">
 import { ContextMenu, type ContextMenuItem } from '@renderer/components/ui/context-menu'
+import { toPlainWorkspaceFolders } from '@renderer/lib/workspace-folder-context'
 import { useBackendStore } from '@renderer/stores/backend'
 import { useMessageStore } from '@renderer/stores/message'
 import { useSessionStore } from '@renderer/stores/session'
@@ -400,7 +401,7 @@ async function newSession(): Promise<void> {
       const last = await window.api.session.getLastRuntimeConfig()
       const config: Parameters<typeof window.api.backend.warmup>[0]['config'] = {
         cwd: workspace.path,
-        workspaceFolders: workspace.folders,
+        workspaceFolders: toPlainWorkspaceFolders(workspace.folders),
       }
       if (last?.backend === 'claude' && last.model) config.model = last.model
       if (last?.backend === 'claude' && last.effort) config.effort = last.effort

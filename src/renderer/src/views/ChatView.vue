@@ -142,6 +142,7 @@
         :nav-rail-visible="navRailVisible"
         @update:model-value="onComposerUpdate"
         @send="onSend"
+        @command="onComposerCommand"
       />
 
       <!-- 底部终端面板（始终挂载，折叠通过高度 0 过渡） -->
@@ -213,6 +214,7 @@ import {
 import { useSidebarOverlay } from '@renderer/composables/useSidebarOverlay'
 import { useSidebarPeek } from '@renderer/composables/useSidebarPeek'
 import { useStreamMessage } from '@renderer/composables/useStreamMessage'
+import type { SuggestionCommand } from '@renderer/lib/autocomplete'
 import { MIN_WIDTH_FOR_MESSAGE_NAV_RAIL } from '@renderer/lib/chat-layout'
 import { isNavigableUserMessage } from '@renderer/lib/message-navigation'
 import {
@@ -223,6 +225,7 @@ import {
   RIGHT_PANEL_MIN,
 } from '@renderer/lib/panel-layout'
 import { randomUUID } from '@renderer/lib/utils'
+import { toPlainWorkspaceFolders } from '@renderer/lib/workspace-folder-context'
 import { useBackendStore } from '@renderer/stores/backend'
 import { useFilesStore } from '@renderer/stores/files'
 import { useGitStore } from '@renderer/stores/git'
@@ -236,6 +239,7 @@ import type {
   ContextBlock,
   EffortLevel,
   PermissionMode,
+  TurnCommand,
   TurnConfigUpdate,
 } from '@shared/backend/types'
 import { type BackendId, NARROW_WINDOW_BREAKPOINT } from '@shared/constants'
@@ -813,12 +817,50 @@ watch(
   { deep: true },
 )
 
-async function onSend(text: string, attachments: ContextBlock[]): Promise<void> {
+/**
+ * Composer Autocomplete: 斜杠命令派发。
+ *
+ * codex 的斜杠命令是**动作**（对应具体 JSON-RPC），不是发出去的文本——当文本发过去
+ * 会被原样交给模型。claude 的命令走普通 prompt，不到这里。
+ */
+function onComposerCommand(command: SuggestionCommand): void {
+  if (command.id !== 'compact') {
+    console.warn('[ChatView] 未知的斜杠命令:', command.id)
+    return
+  }
+  // 文本仍传 '/compact'——turn_runs 列表和会话预览要有可读内容，别落一条空记录。
+  void onSend('/compact', [], { kind: 'compact' })
+}
+
+/**
+ * 手打 `/compact` 但没从弹层里选的兜底。
+ *
+ * 弹层可以被 Esc 关掉，也可能因为命令表还没预取到而没弹——这两种情况下用户敲完
+ * `/compact` 回车，走的是纯文本路径。对 claude 那是对的（CLI 自己拦截），对 codex
+ * 就变成把命令当普通消息发给模型。所以这里补一道，让两条路殊途同归。
+ */
+function codexCompactFallback(text: string): TurnCommand | undefined {
+  if (backendStore.currentId !== 'codex') return undefined
+  // 严格匹配：`/compact 保留测试相关` 带参数，codex 的 thread/compact/start 不吃参数，
+  // 当普通消息发出去反而更接近用户意图。
+  return text.trim() === '/compact' ? { kind: 'compact' } : undefined
+}
+
+async function onSend(
+  text: string,
+  attachments: ContextBlock[],
+  command?: TurnCommand,
+): Promise<void> {
   if ((!text.trim() && attachments.length === 0) || !workspaceStore.currentWorkspace) return
+
+  const turnCommand = command ?? codexCompactFallback(text)
 
   // 运行中再次发送不是新开并发 turn，而是 steer 到当前 turn。
   // 协调器仍保持同 session 单 active turn；用户补充要求会进入当前 backend 的输入流。
   if (messageStore.isRunning && messageStore.currentTurnId) {
+    // 命令不能 steer——把 '/compact' 当补充说明塞进正在跑的 turn，模型会莫名其妙
+    // 收到一句命令文本。等这一轮结束再压缩。
+    if (turnCommand) return
     if (!backendStore.current?.capabilities.supportsSteer) return
     const activeTurnId = messageStore.currentTurnId
     messageStore.pushUserMessage(
@@ -920,10 +962,12 @@ async function onSend(text: string, attachments: ContextBlock[]): Promise<void> 
     prompt: fullPrompt,
     permissionMode: runtimeConfig.value.permissionMode,
     cwd: workspaceStore.currentWorkspace.path,
-    workspaceFolders: workspaceStore.currentWorkspace.folders,
+    workspaceFolders: toPlainWorkspaceFolders(workspaceStore.currentWorkspace.folders),
   }
   if (model !== null) startArgs.model = model
   if (effort !== null) startArgs.effort = effort
+  // 命令 turn：adapter 据此改发对应 RPC（codex → thread/compact/start），不发 prompt。
+  if (turnCommand) startArgs.command = turnCommand
   await window.api.backend.startTurn(startArgs)
 }
 </script>

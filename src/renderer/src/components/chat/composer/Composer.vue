@@ -184,7 +184,7 @@ import ThinkingSlider from '@renderer/components/chat/composer/ThinkingSlider.vu
 import { Button } from '@renderer/components/ui/button'
 import { DropdownMenu } from '@renderer/components/ui/dropdown-menu'
 import { useAutocomplete } from '@renderer/composables/useAutocomplete'
-import { composerSuggestions } from '@renderer/lib/autocomplete'
+import { composerSuggestions, type SuggestionCommand } from '@renderer/lib/autocomplete'
 import { chatContentWidthClass } from '@renderer/lib/chat-layout'
 import { shuffledHints } from '@renderer/lib/composer-hints'
 import { mentionPathFor } from '@renderer/lib/mention-path'
@@ -211,6 +211,11 @@ const props = defineProps<{
 }>()
 const emit = defineEmits<{
   send: [text: string, attachments: ContextBlock[]]
+  /**
+   * 斜杠命令被选中——codex 的命令是动作不是文本，见 SuggestionItem.command。
+   * 输入框在派发前已被清空，使用方不必再管它。
+   */
+  command: [command: SuggestionCommand]
   'update:modelValue': [value: RuntimeConfigValue]
 }>()
 
@@ -266,6 +271,7 @@ const {
     // 随后的值更新重置到末尾。
     void nextTick(() => mentionInput.value?.setCaret(caret))
   },
+  onCommand: (command) => emit('command', command),
 })
 
 function onCaret(caret: number): void {

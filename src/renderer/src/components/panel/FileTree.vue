@@ -3,23 +3,104 @@
     <!-- File Tree Header: 展示工作区上下文，并集中提供搜索、刷新和折叠操作。 -->
     <div class="px-2.5 pt-2.5 pb-2 border-b border-border/70">
       <div class="flex items-center gap-2 mb-2">
-        <FileTypeIcon name="src" is-directory expanded class="w-[18px] h-[18px] flex-shrink-0" />
-        <div class="min-w-0 flex-1">
-          <select
+        <div ref="folderSwitcherEl" class="relative min-w-0 flex-1">
+          <button
             v-if="workspaceFolders.length > 1"
-            v-model="selectedFolderId"
-            class="h-6 w-full rounded border border-border bg-background px-1.5 text-[length:var(--ui-text-d2)] font-medium outline-none"
+            type="button"
+            class="folder-switcher-trigger"
+            :class="folderMenuOpen ? 'border-ring/70 bg-accent/45 ring-1 ring-ring/15' : ''"
             title="切换工作区文件夹"
+            aria-haspopup="listbox"
+            :aria-expanded="folderMenuOpen"
+            @click="folderMenuOpen = !folderMenuOpen"
           >
-            <option v-for="folder in workspaceFolders" :key="folder.id" :value="folder.id">
-              {{ folder.role === 'primary' ? '主' : '次' }} · {{ folder.alias }}
-            </option>
-          </select>
-          <div v-else class="text-[length:var(--ui-text-d2)] font-medium truncate">
-            {{ selectedFolder?.alias ?? workspaceStore.currentWorkspace?.name ?? 'Files' }}
+            <FileTypeIcon
+              :name="selectedFolder?.alias ?? 'src'"
+              is-directory
+              expanded
+              class="h-[18px] w-[18px] flex-shrink-0"
+            />
+            <span class="min-w-0 flex-1 text-left">
+              <span class="flex min-w-0 items-center gap-1.5">
+                <span class="truncate text-[length:var(--ui-text-d2)] font-semibold">
+                  {{ selectedFolder?.alias }}
+                </span>
+                <span class="folder-role-badge">
+                  {{ selectedFolder?.role === 'primary' ? '主文件夹' : '次文件夹' }}
+                </span>
+              </span>
+              <span
+                class="block truncate text-[length:var(--ui-text-d5)] leading-4 text-muted-foreground"
+              >
+                {{ selectedFolder?.path }}
+              </span>
+            </span>
+            <ChevronDownIcon
+              class="h-3.5 w-3.5 flex-shrink-0 text-muted-foreground transition-transform"
+              :class="folderMenuOpen ? 'rotate-180 text-foreground' : ''"
+            />
+          </button>
+
+          <div
+            v-if="workspaceFolders.length > 1 && folderMenuOpen"
+            class="folder-switcher-menu"
+            role="listbox"
+            aria-label="工作区文件夹"
+          >
+            <button
+              v-for="folder in workspaceFolders"
+              :key="folder.id"
+              type="button"
+              role="option"
+              :aria-selected="folder.id === selectedFolderId"
+              class="folder-switcher-option"
+              :class="folder.id === selectedFolderId ? 'bg-accent/70' : ''"
+              @click="selectFolder(folder.id)"
+            >
+              <FileTypeIcon
+                :name="folder.alias"
+                is-directory
+                :expanded="folder.id === selectedFolderId"
+                class="h-4 w-4 flex-shrink-0"
+              />
+              <span class="min-w-0 flex-1">
+                <span class="flex min-w-0 items-center gap-1.5">
+                  <span class="truncate text-[length:var(--ui-text-d2)] font-medium">
+                    {{ folder.alias }}
+                  </span>
+                  <span class="folder-role-badge">
+                    {{ folder.role === 'primary' ? '主文件夹' : '次文件夹' }}
+                  </span>
+                </span>
+                <span
+                  class="block truncate text-[length:var(--ui-text-d5)] leading-4 text-muted-foreground"
+                >
+                  {{ folder.path }}
+                </span>
+              </span>
+              <CheckIcon
+                v-if="folder.id === selectedFolderId"
+                class="h-3.5 w-3.5 flex-shrink-0 text-foreground"
+              />
+              <span v-else class="h-3.5 w-3.5 flex-shrink-0" />
+            </button>
           </div>
-          <div class="text-[length:var(--ui-text-d5)] text-muted-foreground truncate">
-            {{ selectedFolder?.path ?? workspaceStore.currentWorkspace?.path }}
+
+          <div v-if="workspaceFolders.length <= 1" class="flex min-w-0 items-center gap-2 py-0.5">
+            <FileTypeIcon
+              name="src"
+              is-directory
+              expanded
+              class="h-[18px] w-[18px] flex-shrink-0"
+            />
+            <div class="min-w-0 flex-1">
+              <div class="truncate text-[length:var(--ui-text-d2)] font-medium">
+                {{ selectedFolder?.alias ?? workspaceStore.currentWorkspace?.name ?? 'Files' }}
+              </div>
+              <div class="truncate text-[length:var(--ui-text-d5)] text-muted-foreground">
+                {{ selectedFolder?.path ?? workspaceStore.currentWorkspace?.path }}
+              </div>
+            </div>
           </div>
         </div>
         <!--
@@ -176,6 +257,8 @@ import { useFilesStore } from '@renderer/stores/files'
 import { useWorkspaceStore } from '@renderer/stores/workspace'
 import type { DirEntry } from '@shared/ipc/fs'
 import {
+  CheckIcon,
+  ChevronDownIcon,
   CircleAlertIcon,
   FolderOpenIcon,
   ListTreeIcon,
@@ -205,6 +288,8 @@ const chatInput = useChatInputStore()
 const query = ref('')
 const workspaceFolders = computed(() => workspaceStore.currentWorkspace?.folders ?? [])
 const selectedFolderId = ref('')
+const folderMenuOpen = ref(false)
+const folderSwitcherEl = ref<HTMLElement | null>(null)
 const selectedFolder = computed(
   () =>
     workspaceFolders.value.find((folder) => folder.id === selectedFolderId.value) ??
@@ -248,6 +333,7 @@ const rootError = computed(() => filesStore.directoryErrors.get(''))
 // IPC 产生竞态：readFilePreview 的 await 期间 Vue 挂载 FileTree → immediate watch 触发
 // reset() → previewTabs 被清空 → 预览面板永远无法显示（直到面板被关闭再重开）。
 onMounted(() => {
+  document.addEventListener('click', closeFolderMenuOnOutsideClick, true)
   selectPrimaryFolder()
   if (workspaceStore.currentWorkspace?.id) void loadRoot()
 })
@@ -282,8 +368,19 @@ watch(selectedFolderId, (folderId, previousId) => {
 })
 
 onUnmounted(() => {
+  document.removeEventListener('click', closeFolderMenuOnOutsideClick, true)
   if (searchTimer) clearTimeout(searchTimer)
 })
+
+function selectFolder(folderId: string): void {
+  selectedFolderId.value = folderId
+  folderMenuOpen.value = false
+}
+
+function closeFolderMenuOnOutsideClick(event: MouseEvent): void {
+  if (!folderMenuOpen.value) return
+  if (!folderSwitcherEl.value?.contains(event.target as Node)) folderMenuOpen.value = false
+}
 
 async function loadRoot(force = false): Promise<void> {
   const workspaceId = workspaceStore.currentWorkspace?.id
@@ -342,5 +439,21 @@ function parentPath(path: string): string {
 
 .file-state {
   @apply min-h-28 flex flex-col items-center justify-center gap-2 text-[length:var(--ui-text-d3)] text-muted-foreground;
+}
+
+.folder-switcher-trigger {
+  @apply flex min-h-10 w-full items-center gap-2 rounded-md border border-border/80 bg-background/70 px-2 py-1 text-left outline-none transition-colors hover:border-border hover:bg-accent/35 focus-visible:ring-1 focus-visible:ring-ring;
+}
+
+.folder-switcher-menu {
+  @apply absolute left-0 right-0 top-full z-50 mt-1 min-w-56 rounded-lg border border-border bg-popover p-1.5 shadow-xl;
+}
+
+.folder-switcher-option {
+  @apply flex w-full items-center gap-2 rounded-md px-2 py-2 text-left text-popover-foreground outline-none transition-colors hover:bg-accent focus-visible:bg-accent;
+}
+
+.folder-role-badge {
+  @apply flex-shrink-0 rounded border border-border/70 bg-muted/70 px-1 py-px text-[9px] font-medium leading-3 text-muted-foreground;
 }
 </style>

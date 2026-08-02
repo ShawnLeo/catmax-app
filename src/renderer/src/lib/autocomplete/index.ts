@@ -30,6 +30,7 @@ export {
 export { charTrigger, type CharTriggerOptions } from './trigger'
 export { type DetectedTrigger, SuggestionRegistry } from './registry'
 export type {
+  SuggestionCommand,
   SuggestionContext,
   SuggestionIcon,
   SuggestionItem,

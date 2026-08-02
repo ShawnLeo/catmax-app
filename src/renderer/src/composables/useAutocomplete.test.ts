@@ -1,4 +1,9 @@
-import { charTrigger, SuggestionRegistry, type SuggestionItem } from '@renderer/lib/autocomplete'
+import {
+  charTrigger,
+  SuggestionRegistry,
+  type SuggestionCommand,
+  type SuggestionItem,
+} from '@renderer/lib/autocomplete'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { effectScope } from 'vue'
 
@@ -9,7 +14,10 @@ function item(label: string, insert: string, keepOpen = false): SuggestionItem {
 }
 
 /** 用 effectScope 跑，composable 的 onScopeDispose 才有归属（不必挂真组件）。 */
-function setup(search: (query: string) => Promise<SuggestionItem[]>) {
+function setup(
+  search: (query: string) => Promise<SuggestionItem[]>,
+  options: { withCommandHandler?: boolean } = {},
+) {
   const registry = new SuggestionRegistry()
   registry.register({
     id: 'test',
@@ -18,15 +26,20 @@ function setup(search: (query: string) => Promise<SuggestionItem[]>) {
     emptyText: '没有匹配的文件',
   })
   const applied: Array<{ text: string; caret: number }> = []
+  const commands: SuggestionCommand[] = []
   const scope = effectScope()
   const api = scope.run(() =>
     useAutocomplete({
       registry,
       context: () => ({ workspaceId: 'ws-1', backendId: 'claude' }),
       onApply: (text, caret) => applied.push({ text, caret }),
+      // 默认接上——不接的那条退化路径由专门的用例覆盖。
+      ...(options.withCommandHandler === false
+        ? {}
+        : { onCommand: (c: SuggestionCommand) => commands.push(c) }),
     }),
   )!
-  return { api, applied, dispose: () => scope.stop() }
+  return { api, applied, commands, dispose: () => scope.stop() }
 }
 
 /** 走完防抖 + 让 provider 的 promise 落地。 */
@@ -206,6 +219,49 @@ describe('useAutocomplete', () => {
     expect(api.open.value).toBe(true)
     await settle()
     expect(seen).toEqual(['s', 'src/'])
+    dispose()
+  })
+})
+
+/*
+ * 动作型候选：codex 的斜杠命令对应具体 JSON-RPC，选中后要立刻执行，不是把文本
+ * 填进输入框等回车。详见 SuggestionItem.command。
+ */
+describe('useAutocomplete — 命令候选', () => {
+  function commandItem(): SuggestionItem {
+    return { id: 'compact', label: '/compact', insert: '@compact', command: { id: 'compact' } }
+  }
+
+  it('派发命令，并把触发段从输入框里抹掉', async () => {
+    const { api, applied, commands, dispose } = setup(async () => [commandItem()])
+
+    // '前面 @comp'：@ 在下标 3，光标在末尾 8
+    api.refresh('前面 @comp', 8)
+    await settle()
+    api.handleKeydown(keydown('Enter'))
+
+    // insert 没有生效——留着文本用户会再回车发一次（见 SuggestionItem.command）
+    expect(applied).toEqual([{ text: '前面 ', caret: 3 }])
+    expect(commands).toEqual([{ id: 'compact' }])
+    expect(api.open.value).toBe(false)
+    dispose()
+  })
+
+  /*
+   * 没接 onCommand 的使用方（未接线的调用点）应退化成普通文本插入，而不是
+   * 「输入框被清空、什么都没发生」——后者是静默失败。
+   */
+  it('没接 onCommand 时退化成普通插入', async () => {
+    const { api, applied, commands, dispose } = setup(async () => [commandItem()], {
+      withCommandHandler: false,
+    })
+
+    api.refresh('@comp', 5)
+    await settle()
+    api.handleKeydown(keydown('Enter'))
+
+    expect(applied).toEqual([{ text: '@compact', caret: 8 }])
+    expect(commands).toEqual([])
     dispose()
   })
 })

@@ -1,3 +1,4 @@
+import { toPlainWorkspaceFolders } from '@renderer/lib/workspace-folder-context'
 import type { EffortLevel, PermissionMode, WorkspaceFolderContext } from '@shared/backend/types'
 import { type BackendId } from '@shared/constants'
 import type { SessionView } from '@shared/domain'
@@ -61,7 +62,13 @@ export const useSessionStore = defineStore('session', () => {
     permissionMode?: PermissionMode
     initialPrompt?: string
   }): Promise<string> {
-    const { sessionId } = await window.api.session.create(args)
+    const plainArgs = {
+      ...args,
+      ...(args.workspaceFolders !== undefined && {
+        workspaceFolders: toPlainWorkspaceFolders(args.workspaceFolders),
+      }),
+    }
+    const { sessionId } = await window.api.session.create(plainArgs)
     // 创建后按 create 的 backend reload——若 args.backend 未传，main 会用当前 backend，
     // 这里与 main 保持一致：用传入的 backend，否则 fallback 到当前 backend id。
     const backend = args.backend ?? (await window.api.backend.current()).id

@@ -96,6 +96,23 @@ export interface WarmupBackendArgs {
 }
 
 /** 启动 turn 参数 */
+/**
+ * 用命令而不是用户文本发起的一轮 turn。
+ *
+ * 为什么走 StartTurnArgs 而不是新开一个旁路方法：codex 的 `thread/compact/start`
+ * **实测会发出 `turn/started` 和 `item/started`**——它就是一个 turn。绕过 startTurn
+ * 直接发这个 RPC，事件会挂在 PerTurnCoordinator 不认识的 turnId 上，于是 watchdog、
+ * cooperative cancel、exactly-one-terminal 三个保证同时失效，而且绕过 per-session
+ * 串行化：compact 会跟用户正在跑的 turn 并发。当成 turn 走，这些全部自动继承。
+ *
+ * 只有把斜杠命令实现成**动作**的后端才用得上（codex）。claude 的斜杠命令是文本，
+ * CLI 自己拦截，走普通 prompt 即可，不设 command。
+ */
+export type TurnCommand = {
+  /** 压缩上下文。codex → thread/compact/start */
+  kind: 'compact'
+}
+
 export interface StartTurnArgs {
   /**
    * backend 内部线程 id——claude 用它作 `--resume <id>`，codex 用它 thread/send。
@@ -126,6 +143,15 @@ export interface StartTurnArgs {
   model?: string
   effort?: EffortLevel
   permissionMode?: PermissionMode
+  /**
+   * 把这一轮当作命令执行，而不是把 prompt 发给模型。
+   *
+   * 设了它，adapter 应忽略 prompt 的语义（prompt 仍会带着可读文本如 `/compact`，
+   * 供 turn_runs 列表和会话预览显示，别让记录里出现空字符串）。
+   * adapter 不认识某个 kind 时应当报错而不是静默降级成普通消息——静默降级的表现
+   * 是"命令发出去了，模型茫然地回问你要干什么"，比直接报错难查得多。
+   */
+  command?: TurnCommand
 }
 
 export interface WorkspaceFolderContext {
@@ -610,9 +636,10 @@ export interface AgentBackend {
    * 列出该 cwd 下可用的斜杠命令（含项目/用户 Skill），供输入框联想使用。
    *
    * 按 cwd 而不是全局：项目级 Skill 来自 `<cwd>/.claude/skills/`，换目录内容就变。
-   * 只有把斜杠命令当**文本**处理的后端才实现——claude 是（CLI 自己拦截 `/xxx`），
-   * codex 不是（它的斜杠命令是 TUI 本地功能，各自对应不同的 JSON-RPC，
-   * 当文本发过去只会被原样交给模型）。不实现 = 该后端没有斜杠命令。
+   * 只有把斜杠命令当**文本**处理的后端才实现——claude 是（CLI 自己拦截 `/xxx`）。
+   * codex 不实现：它的斜杠命令是动作（各自对应不同的 JSON-RPC，见 TurnCommand），
+   * 而且 app-server 上没有列命令的接口，命令表只能在 renderer 侧手工维护。
+   * 不实现 ≠ 该后端没有斜杠命令，只是没有**动态**命令表。
    */
   listSlashCommands?(cwd: string): Promise<SlashCommandInfo[]>
   getCapabilities(): BackendCapabilities

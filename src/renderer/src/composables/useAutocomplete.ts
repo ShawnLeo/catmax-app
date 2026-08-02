@@ -15,6 +15,7 @@
  */
 import type {
   DetectedTrigger,
+  SuggestionCommand,
   SuggestionContext,
   SuggestionItem,
   SuggestionRegistry,
@@ -35,6 +36,13 @@ export interface UseAutocompleteOptions {
   context: () => SuggestionContext
   /** 应用候选：把新文本写回输入框，并把光标放到 caret 处 */
   onApply: (text: string, caret: number) => void
+  /**
+   * 派发命令候选（见 SuggestionItem.command）。
+   *
+   * 一定在 onApply 之后调用——输入框要先被清干净，再执行动作。
+   * 不传 = 使用方不支持命令候选，此时命令项退化成纯文本插入。
+   */
+  onCommand?: (command: SuggestionCommand) => void
 }
 
 export interface AutocompleteApi {
@@ -53,7 +61,7 @@ export interface AutocompleteApi {
 }
 
 export function useAutocomplete(options: UseAutocompleteOptions): AutocompleteApi {
-  const { registry, context, onApply } = options
+  const { registry, context, onApply, onCommand } = options
 
   const open = ref(false)
   const items = ref<SuggestionItem[]>([])
@@ -159,6 +167,21 @@ export function useAutocomplete(options: UseAutocompleteOptions): AutocompleteAp
     const { text, match } = current
     const next = text.slice(0, match.start) + item.insert + text.slice(match.end)
     const caret = match.start + item.insert.length
+
+    if (item.command && onCommand) {
+      /*
+       * 命令候选：把触发段整段抹掉，再派发。
+       *
+       * 不走下面的 insert 分支——命令是「立刻执行」而不是「填进输入框等回车」，
+       * 留着文本会让用户再发一次（见 SuggestionItem.command）。onCommand 没接时
+       * 落到下面的普通插入，此时 insert 是正常的命令文本，还能手动回车。
+       */
+      const cleared = text.slice(0, match.start) + text.slice(match.end)
+      close()
+      onApply(cleared, match.start)
+      onCommand(item.command)
+      return
+    }
 
     if (item.keepOpen) {
       // 目录：写回后立刻按新文本重新联想，用户就能接着往下钻。

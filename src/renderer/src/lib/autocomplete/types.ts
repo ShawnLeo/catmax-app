@@ -85,6 +85,35 @@ export interface SuggestionItem {
    * 合法触发段里才有意义，否则弹层会立刻自己关掉（无害，但白闪一下）。
    */
   keepOpen?: boolean
+  /**
+   * 选中后**派发一个动作**，而不是让这段文本留在输入框里等用户回车。
+   *
+   * 存在的理由是两个后端的斜杠命令根本不是一种东西：claude 的 `/compact` 是文本，
+   * 发出去由 CLI 自己拦截；codex 的 `/compact` 对应 `thread/compact/start` 这个
+   * JSON-RPC，当文本发过去只会被原样交给模型（用户看到模型茫然地问"你要我压缩
+   * 什么"）。所以 codex 的命令必须走这条路。
+   *
+   * 派发时**触发段会被清空**，insert 不生效——否则命令都跑完了，`/compact` 还杵在
+   * 输入框里，用户会再按一次回车把它当普通消息发出去。
+   *
+   * 但 insert 仍然要填成正常的命令文本：使用方没接 onCommand 时（未接线的调用点、
+   * 测试里的裸 registry）命令项退化成普通文本插入，用户至少还能自己回车发出去。
+   * 填 `''` 的话退化路径会变成"选中候选 → 输入框被清空 → 什么都没发生"。
+   */
+  command?: SuggestionCommand
+}
+
+/**
+ * 候选项派发的动作。id 由 Composer 的使用方解释——联想层不关心它怎么执行。
+ *
+ * 刻意**没有** args 字段。看起来该有一个（`/review HEAD~1` 的 `HEAD~1`），但候选
+ * 匹配是拿整个查询词做前缀匹配的（见 provider 的 matches），用户一开始打参数，
+ * query 就不再匹配命令名，这条候选当场消失——args 永远取不到值。真要支持带参数的
+ * 命令，得连同匹配逻辑一起改（让弹层在打参数时仍开着），那会改变 claude 现有的
+ * 行为，应该在真有带参命令时一并决定，而不是先摆一个永远为空的字段在这里。
+ */
+export interface SuggestionCommand {
+  id: string
 }
 
 /** provider（检测和搜索时）能拿到的外部状态。 */
@@ -95,9 +124,9 @@ export interface SuggestionContext {
   /**
    * 当前会话所属后端。
    *
-   * 联想内容是按后端分的——同一个 `/`，claude 有一整套命令，codex 一个都没有
-   * （详见 commands/index.ts）。会话的后端不可变，打开会话时 backendStore
-   * 会切过去，所以直接取 backendStore.currentId 即可。
+   * 联想内容是按后端分的——同一个 `/`，claude 是一整套动态拉取的文本命令，codex
+   * 是一小张手工维护的动作命令表（详见 commands/index.ts）。会话的后端不可变，
+   * 打开会话时 backendStore 会切过去，所以直接取 backendStore.currentId 即可。
    */
   backendId: BackendId | undefined
 }

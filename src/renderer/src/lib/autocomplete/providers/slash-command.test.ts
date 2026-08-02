@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it } from 'vitest'
 
 import { registerSlashCommands, type SlashCommandSpec } from '../commands'
 import { CLAUDE_FALLBACK_COMMANDS } from '../commands/claude'
+import { CODEX_SLASH_COMMANDS } from '../commands/codex'
 import type { SuggestionContext, TriggerMatch } from '../types'
 
 import { slashCommandProvider } from './slash-command'
@@ -28,8 +29,9 @@ function spec(
 }
 
 afterEach(() => {
-  // 每个用例可能替换过 claude 的表，恢复成兜底表免得互相污染。
+  // 每个用例可能替换过两个后端的表，恢复成兜底表免得互相污染。
   registerSlashCommands('claude', CLAUDE_FALLBACK_COMMANDS)
+  registerSlashCommands('codex', CODEX_SLASH_COMMANDS)
 })
 
 describe('slashCommandProvider.detect', () => {
@@ -44,13 +46,18 @@ describe('slashCommandProvider.detect', () => {
   })
 
   /*
-   * codex 的 app-server 没有斜杠命令这一层（详见 commands/codex.ts），一条命令
-   * 都没有的后端里 `/` 干脆不该是触发字符——否则 codex 用户每写一条以 `/` 开头
-   * 的消息都会闪一下永远不可能有内容的空列表。
+   * 一条命令都没有的后端里 `/` 干脆不该是触发字符——否则该后端的用户每写一条以
+   * `/` 开头的消息都会闪一下永远不可能有内容的空列表。第三方 backend plugin
+   * 不注册命令表时走这条路。
    */
-  it('后端没有任何斜杠命令时（codex）根本不触发', () => {
+  it('后端没有任何斜杠命令时根本不触发', () => {
+    registerSlashCommands('codex', [])
     expect(slashCommandProvider.detect('/comp', 5, codex)).toBeNull()
     expect(slashCommandProvider.detect('/', 1, codex)).toBeNull()
+  })
+
+  it('codex 有命令表时正常触发', () => {
+    expect(slashCommandProvider.detect('/comp', 5, codex)).not.toBeNull()
   })
 
   it('后端未知时不触发', () => {
@@ -75,8 +82,52 @@ describe('slashCommandProvider.search — 匹配', () => {
     expect(await names('stat')).toEqual(['usage'])
   })
 
-  it('codex 会话下没有任何命令', async () => {
-    expect(await names('', codex)).toEqual([])
+  it('codex 有自己的一小张表，跟 claude 互不干扰', async () => {
+    expect(await names('', codex)).toEqual(['compact'])
+    registerSlashCommands('claude', [spec('other', 'builtin')])
+    expect(await names('', codex)).toEqual(['compact'])
+  })
+})
+
+describe('slashCommandProvider.search — 动作型命令', () => {
+  /*
+   * codex 的斜杠命令是动作（`/compact` → thread/compact/start），当文本发过去会被
+   * 原样交给模型。带上 command 才能让 useAutocomplete 走派发而不是插入。
+   */
+  it('codex 的命令带 command，claude 的不带', async () => {
+    const [codexCompact] = await slashCommandProvider.search(match('compact'), codex)
+    expect(codexCompact!.command).toEqual({ id: 'compact' })
+
+    const [claudeCompact] = await slashCommandProvider.search(match('compact'), claude)
+    expect(claudeCompact!.command).toBeUndefined()
+  })
+
+  /*
+   * insert 仍要填正常的命令文本：使用方没接 onCommand 时命令项退化成普通插入，
+   * 用户至少还能自己回车（ChatView 的 codexCompactFallback 会兜住）。
+   */
+  it('动作型命令的 insert 仍是可发送的文本，不是空串', async () => {
+    const [item] = await slashCommandProvider.search(match('compact'), codex)
+    expect(item!.insert).toBe('/compact')
+  })
+
+  /*
+   * 钉住「动作型命令拿不到参数」这个事实（SuggestionCommand 上有完整说明）：
+   * 匹配是拿整个查询词做前缀匹配的，用户一开始打参数，候选当场消失。所以给
+   * SuggestionCommand 加 args 字段是没用的——真要支持带参命令得先改这里。
+   */
+  it('开始打参数后候选就消失了——所以命令拿不到参数', async () => {
+    registerSlashCommands('codex', [
+      {
+        name: 'review',
+        description: '',
+        source: 'builtin',
+        argumentHint: '[范围]',
+        commandId: 'review',
+      },
+    ])
+    expect(await names('review', codex)).toEqual(['review'])
+    expect(await names('review HEAD~1', codex)).toEqual([])
   })
 })
 

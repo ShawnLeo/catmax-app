@@ -7,11 +7,10 @@
  * 发过去就行（history-mapping.ts 解析 jsonl 里的 <command-name> sentinel 就是这条
  * 链路留下的痕迹）。
  *
- * codex 不是这样：它的 app-server 根本没有斜杠命令这一层，`/compact` `/new`
- * `/diff` 全是 TUI 本地功能，各自对应不同的 JSON-RPC 方法（thread/compact、
- * thread/start、turn/diff）。把 `/compact` 当文本发给 turn/start，codex 会原样
- * 交给模型当普通消息。所以将来接 codex 时，SuggestionItem 需要一个「选中后调什么」
- * 的动作概念，而不是只有 insert 文本——那时再加，现在不预留空壳。
+ * codex 不是这样：它的斜杠命令是 TUI 本地功能，各自对应不同的 JSON-RPC 方法
+ * （thread/compact/start、review/start、gitDiffToRemote…）。把 `/compact` 当文本发给
+ * turn/start，codex 会原样交给模型当普通消息。所以 codex 的每条命令都要带 commandId，
+ * 走 SuggestionItem.command 那条派发路径。
  */
 import type { SlashCommandSource } from '@shared/backend/slash-commands'
 import type { Component } from 'vue'
@@ -44,4 +43,11 @@ export interface SlashCommandSpec {
    * （见 providers/slash-command.ts 的 iconFor）。
    */
   icon?: Component
+  /**
+   * 选中后派发的动作 id；不设 = 这条命令是纯文本（claude 的全部命令都是）。
+   *
+   * 由 Composer 的使用方（ChatView）解释成具体动作。这一层只负责把它带到
+   * SuggestionItem.command 上，不关心它怎么执行。
+   */
+  commandId?: string
 }
