@@ -255,6 +255,9 @@ const {
   // backendStore 会切过去）都要立刻反映到候选内容上。
   context: () => ({
     workspaceId: workspaceStore.currentWorkspace?.id,
+    ...(workspaceStore.currentWorkspace?.folders !== undefined && {
+      workspaceFolders: workspaceStore.currentWorkspace.folders,
+    }),
     backendId: backendStore.currentId,
   }),
   onApply: (text, caret) => {

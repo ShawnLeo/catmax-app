@@ -34,28 +34,66 @@ export const fileSuggestionProvider: SuggestionProvider = {
   emptyText: '没有匹配的文件',
 
   async search(match: TriggerMatch, ctx: SuggestionContext): Promise<SuggestionItem[]> {
-    const { workspaceId } = ctx
+    const { workspaceFolders = [], workspaceId } = ctx
     if (!workspaceId) return []
     const query = match.query
 
-    // 浏览语义：`@` 刚打下（空 query）列根目录，`@src/` 列 src 这一层。
+    if (query === '' && workspaceFolders.length > 1) {
+      return workspaceFolders.slice(0, MAX_RESULTS).map((folder) => ({
+        id: folder.id,
+        label: folder.alias,
+        detail: folder.role === 'primary' ? '主文件夹' : '次文件夹',
+        icon: { kind: 'file', name: folder.alias, isDirectory: true },
+        insert: formatFileMention(`${folder.alias}/`),
+        keepOpen: true,
+      }))
+    }
+
+    const qualified = resolveFolderQuery(query, workspaceFolders)
+
+    // 浏览语义：单根工作区从 `@` 开始；多根工作区从 `@alias/` 开始。
     if (query === '' || query.endsWith('/')) {
-      const entries = await listDirectory(workspaceId, query)
+      const entries = await listDirectory(
+        workspaceId,
+        qualified?.relativeQuery ?? query,
+        qualified?.folderId,
+      )
       // 目录不存在时（用户手打了个不存在的路径）回退到搜索，而不是给个空列表
-      if (entries) return entries.slice(0, MAX_RESULTS).map(toItem)
+      if (entries) {
+        return entries.slice(0, MAX_RESULTS).map((entry) => toItem(entry, qualified?.alias))
+      }
       if (query === '') return []
     }
 
-    const entries = await window.api.fs.searchFiles({ workspaceId, query, limit: MAX_RESULTS })
-    return entries.map(toItem)
+    const entries = await window.api.fs.searchFiles({
+      workspaceId,
+      query: qualified?.relativeQuery ?? query,
+      limit: MAX_RESULTS,
+      ...(qualified
+        ? { folderId: qualified.folderId }
+        : workspaceFolders.length > 1
+          ? { allFolders: true }
+          : {}),
+    })
+    return entries.map((entry) =>
+      toItem(
+        entry,
+        workspaceFolders.length > 1 ? (entry.folderAlias ?? qualified?.alias) : qualified?.alias,
+      ),
+    )
   },
 }
 
 /** 列一层目录；路径不存在或读不了返回 null（交给调用方决定回退）。 */
-async function listDirectory(workspaceId: string, query: string): Promise<DirEntry[] | null> {
+async function listDirectory(
+  workspaceId: string,
+  query: string,
+  folderId?: string,
+): Promise<DirEntry[] | null> {
   try {
     return await window.api.fs.readDirectory({
       workspaceId,
+      ...(folderId !== undefined && { folderId }),
       relativePath: query.replace(/\/+$/, ''),
     })
   } catch {
@@ -63,10 +101,11 @@ async function listDirectory(workspaceId: string, query: string): Promise<DirEnt
   }
 }
 
-function toItem(entry: DirEntry): SuggestionItem {
+function toItem(entry: DirEntry, alias?: string): SuggestionItem {
   // 目录路径带上尾随 `/`：既是给用户看的「这还能往下走」，也让下一轮 search
   // 走进上面的浏览分支。
-  const path = entry.isDirectory ? `${entry.relativePath}/` : entry.relativePath
+  const relativePath = entry.isDirectory ? `${entry.relativePath}/` : entry.relativePath
+  const path = alias ? `${alias}/${relativePath}` : relativePath
   const parent = dirname(entry.relativePath)
   /*
    * 含空格的路径会被 formatFileMention 包成 `@"a b/"`，那个收尾的引号让触发段
@@ -75,7 +114,7 @@ function toItem(entry: DirEntry): SuggestionItem {
    */
   const keepOpen = entry.isDirectory && !/[\s"]/.test(path)
   return {
-    id: entry.relativePath,
+    id: alias ? `${alias}/${entry.relativePath}` : entry.relativePath,
     label: entry.name,
     ...(parent ? { detail: parent } : {}),
     icon: { kind: 'file', name: entry.name, isDirectory: entry.isDirectory },
@@ -84,4 +123,15 @@ function toItem(entry: DirEntry): SuggestionItem {
     insert: keepOpen ? formatFileMention(path) : `${formatFileMention(path)} `,
     ...(keepOpen && { keepOpen: true }),
   }
+}
+
+function resolveFolderQuery(
+  query: string,
+  folders: NonNullable<SuggestionContext['workspaceFolders']>,
+): { alias: string; folderId: string; relativeQuery: string } | null {
+  const slash = query.indexOf('/')
+  if (slash < 0) return null
+  const alias = query.slice(0, slash)
+  const folder = folders.find((item) => item.alias === alias)
+  return folder ? { alias, folderId: folder.id, relativeQuery: query.slice(slash + 1) } : null
 }

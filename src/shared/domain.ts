@@ -7,10 +7,25 @@ import type { BackendId, EditorId } from './constants'
 
 export interface WorkspaceRecord {
   id: string
+  /** 主文件夹路径的兼容镜像；新代码优先通过 primaryFolder/folders 取目录。 */
   path: string
   name: string
+  folders: WorkspaceFolderRecord[]
   preferredEditor: EditorId | null
   lastOpenedAt: number
+  createdAt: number
+}
+
+export type WorkspaceFolderRole = 'primary' | 'secondary'
+
+export interface WorkspaceFolderRecord {
+  id: string
+  workspaceId: string
+  path: string
+  /** 工作区内唯一、用于文件引用的稳定短名称。 */
+  alias: string
+  role: WorkspaceFolderRole
+  sortOrder: number
   createdAt: number
 }
 

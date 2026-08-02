@@ -33,6 +33,59 @@ function match(query: string): TriggerMatch {
 const ctx = { workspaceId: 'ws-1', backendId: 'claude' }
 
 describe('fileSuggestionProvider', () => {
+  const multiCtx = {
+    ...ctx,
+    workspaceFolders: [
+      {
+        id: 'primary',
+        workspaceId: 'ws-1',
+        path: '/code/app',
+        alias: 'app',
+        role: 'primary' as const,
+        sortOrder: 0,
+        createdAt: 1,
+      },
+      {
+        id: 'docs',
+        workspaceId: 'ws-1',
+        path: '/code/docs',
+        alias: 'docs',
+        role: 'secondary' as const,
+        sortOrder: 1,
+        createdAt: 1,
+      },
+    ],
+  }
+
+  it('多根工作区空 query 先列主/次文件夹别名', async () => {
+    const items = await fileSuggestionProvider.search(match(''), multiCtx)
+    expect(items.map((item) => item.insert)).toEqual(['@app/', '@docs/'])
+    expect(readDirectory).not.toHaveBeenCalled()
+  })
+
+  it('多根工作区按 alias 浏览指定文件夹', async () => {
+    readDirectory.mockResolvedValue([entry('guide.md')])
+    const items = await fileSuggestionProvider.search(match('docs/'), multiCtx)
+    expect(readDirectory).toHaveBeenCalledWith({
+      workspaceId: 'ws-1',
+      folderId: 'docs',
+      relativePath: '',
+    })
+    expect(items[0]?.insert).toBe('@docs/guide.md ')
+  })
+
+  it('未指定 alias 时跨全部文件夹搜索并返回限定路径', async () => {
+    searchFiles.mockResolvedValue([{ ...entry('guide.md'), folderId: 'docs', folderAlias: 'docs' }])
+    const items = await fileSuggestionProvider.search(match('guide'), multiCtx)
+    expect(searchFiles).toHaveBeenCalledWith({
+      workspaceId: 'ws-1',
+      query: 'guide',
+      limit: 30,
+      allFolders: true,
+    })
+    expect(items[0]?.id).toBe('docs/guide.md')
+  })
+
   it('没有工作区时什么都不查', async () => {
     const empty = { workspaceId: undefined, backendId: 'claude' }
     expect(await fileSuggestionProvider.search(match('a'), empty)).toEqual([])

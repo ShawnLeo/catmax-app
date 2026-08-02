@@ -80,6 +80,7 @@ export interface BackendStatus {
 /** 启动会话参数 */
 export interface StartSessionArgs {
   cwd: string
+  workspaceFolders?: WorkspaceFolderContext[]
   model?: string
   effort?: EffortLevel
   permissionMode?: PermissionMode
@@ -89,6 +90,7 @@ export interface StartSessionArgs {
 /** 后端预热参数。预热只建立共享缓存，不创建 Catmax 用户会话。 */
 export interface WarmupBackendArgs {
   cwd: string
+  workspaceFolders?: WorkspaceFolderContext[]
   model?: string
   effort?: EffortLevel
 }
@@ -120,9 +122,17 @@ export interface StartTurnArgs {
    *   2) 历史文件 ~/.claude/projects/<encoded-cwd>/ 存错地方，--resume 找不到
    */
   cwd?: string
+  workspaceFolders?: WorkspaceFolderContext[]
   model?: string
   effort?: EffortLevel
   permissionMode?: PermissionMode
+}
+
+export interface WorkspaceFolderContext {
+  id: string
+  path: string
+  alias: string
+  role: 'primary' | 'secondary'
 }
 
 /** 工具调用描述（归一化） */

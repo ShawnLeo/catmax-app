@@ -20,8 +20,16 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     }
   }
 
-  async function add(path: string, name?: string): Promise<WorkspaceRecord> {
-    const args = name === undefined ? { path } : { path, name }
+  async function add(
+    path: string,
+    name?: string,
+    secondaryPaths?: string[],
+  ): Promise<WorkspaceRecord> {
+    const args = {
+      path,
+      ...(name !== undefined && { name }),
+      ...(secondaryPaths !== undefined && { secondaryPaths }),
+    }
     const ws = await window.api.workspace.add(args)
     workspaces.value.unshift(ws)
     // 添加完自动切到新工作区——用户显式添加的意图就是想用它。

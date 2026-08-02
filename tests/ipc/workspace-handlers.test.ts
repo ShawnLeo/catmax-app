@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync, mkdirSync, writeFileSync } from 'node:fs'
+import { mkdtempSync, realpathSync, rmSync, mkdirSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -42,12 +42,48 @@ afterEach(() => {
 })
 
 describe('workspace handlers', () => {
+  test('addWorkspace 保存一个主文件夹和多个次文件夹', async () => {
+    const primary = mkdtempSync(join(tmpdir(), 'catmax-ws-primary-'))
+    const secondaryA = mkdtempSync(join(tmpdir(), 'catmax-ws-secondary-a-'))
+    const secondaryB = mkdtempSync(join(tmpdir(), 'catmax-ws-secondary-b-'))
+    try {
+      const ws = await addWorkspace({
+        path: primary,
+        name: 'multi-root',
+        secondaryPaths: [secondaryA, secondaryB],
+      })
+      expect(ws.folders).toHaveLength(3)
+      expect(ws.folders[0]).toMatchObject({ role: 'primary', sortOrder: 0 })
+      expect(ws.folders.slice(1).every((folder) => folder.role === 'secondary')).toBe(true)
+      expect((await listWorkspaces()).find((item) => item.id === ws.id)?.folders).toHaveLength(3)
+    } finally {
+      rmSync(primary, { recursive: true, force: true })
+      rmSync(secondaryA, { recursive: true, force: true })
+      rmSync(secondaryB, { recursive: true, force: true })
+    }
+  })
+
+  test('addWorkspace 拒绝主文件夹内部的冗余次文件夹', async () => {
+    const primary = mkdtempSync(join(tmpdir(), 'catmax-ws-nested-'))
+    const nested = join(primary, 'packages', 'ui')
+    mkdirSync(nested, { recursive: true })
+    try {
+      await expect(addWorkspace({ path: primary, secondaryPaths: [nested] })).rejects.toMatchObject(
+        {
+          code: 'invalid-path',
+        },
+      )
+    } finally {
+      rmSync(primary, { recursive: true, force: true })
+    }
+  })
+
   test('addWorkspace 创建合法目录的 workspace', async () => {
     const tempDir = mkdtempSync(join(tmpdir(), 'catmax-ws-add-'))
     try {
       const ws = await addWorkspace({ path: tempDir })
       expect(ws.id).toBeTruthy()
-      expect(ws.path).toBe(tempDir)
+      expect(ws.path).toBe(realpathSync.native(tempDir))
       expect(ws.name).toBeTruthy()
     } finally {
       rmSync(tempDir, { recursive: true, force: true })

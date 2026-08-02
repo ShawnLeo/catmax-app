@@ -54,25 +54,32 @@
         </div>
         <button
           class="w-full flex items-center gap-2 px-3 py-2 border-t border-border hover:bg-muted text-left text-[length:var(--ui-text-base)] cursor-pointer"
-          @click="addWorkspace"
+          @click="openCreateWorkspace"
         >
           <PlusIcon class="w-4 h-4" />
           <span>添加工作区</span>
         </button>
       </div>
     </Teleport>
+    <CreateWorkspaceDialog
+      :open="showCreateWorkspace"
+      @close="showCreateWorkspace = false"
+      @created="finishCreateWorkspace"
+    />
   </div>
 </template>
 
 <script setup lang="ts">
 import CatmaxLogo from '@renderer/components/icons/CatmaxLogo.vue'
 import TitleBarControls from '@renderer/components/TitleBarControls.vue'
+import CreateWorkspaceDialog from '@renderer/components/workspace/CreateWorkspaceDialog.vue'
 import { useWorkspaceStore } from '@renderer/stores/workspace'
 import { FolderIcon, ChevronDownIcon, PlusIcon } from 'lucide-vue-next'
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 
 const workspaceStore = useWorkspaceStore()
 const showPicker = ref(false)
+const showCreateWorkspace = ref(false)
 const dropdownRef = ref<HTMLElement | null>(null)
 const triggerRef = ref<HTMLElement | null>(null)
 
@@ -144,15 +151,13 @@ async function selectWorkspace(id: string): Promise<void> {
   }
 }
 
-async function addWorkspace(): Promise<void> {
-  const result = await window.api.system.openDialog({
-    title: '选择工作区文件夹',
-    properties: ['openDirectory'],
-  })
-  if (!result.canceled && result.filePaths.length > 0) {
-    await workspaceStore.add(result.filePaths[0]!)
-    showPicker.value = false
-  }
+function openCreateWorkspace(): void {
+  showPicker.value = false
+  showCreateWorkspace.value = true
+}
+
+function finishCreateWorkspace(): void {
+  showCreateWorkspace.value = false
 }
 </script>
 

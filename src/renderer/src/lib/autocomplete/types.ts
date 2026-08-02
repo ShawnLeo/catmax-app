@@ -13,6 +13,7 @@
  *   provider 才能在测试里脱离 Pinia 单独跑。
  */
 import type { BackendId } from '@shared/constants'
+import type { WorkspaceFolderRecord } from '@shared/domain'
 import type { Component } from 'vue'
 
 /** 光标所处的触发段——`@src/comp` 中 `@` 到光标之间的那一截。 */
@@ -90,6 +91,7 @@ export interface SuggestionItem {
 export interface SuggestionContext {
   /** 当前工作区 id；没打开工作区时为 undefined，provider 应返回空结果 */
   workspaceId: string | undefined
+  workspaceFolders?: WorkspaceFolderRecord[]
   /**
    * 当前会话所属后端。
    *

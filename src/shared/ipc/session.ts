@@ -1,7 +1,12 @@
 /**
  * session domain IPC 契约。
  */
-import type { EffortLevel, NormalizedMessage, PermissionMode } from '../backend/types'
+import type {
+  EffortLevel,
+  NormalizedMessage,
+  PermissionMode,
+  WorkspaceFolderContext,
+} from '../backend/types'
 import type { BackendId } from '../constants'
 import type { SessionView } from '../domain'
 
@@ -9,6 +14,7 @@ export interface CreateSessionArgs {
   workspaceId: string
   backend?: BackendId
   cwd: string
+  workspaceFolders?: WorkspaceFolderContext[]
   model?: string
   effort?: EffortLevel
   permissionMode?: PermissionMode

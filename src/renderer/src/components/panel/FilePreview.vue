@@ -8,28 +8,28 @@
     >
       <div
         v-for="tab in filesStore.previewTabs"
-        :key="tab.relativePath"
+        :key="tab.id"
         :class="[
           'group/tab min-w-0 max-w-48 shrink-0 relative flex items-center border-r border-border/70',
           // File Preview Tabs Active State: 活动项用底部短强调条 + 实底背景，避免与主 Tab
           // 头部的选中下划线在上下边界处交叠。
-          tab.relativePath === filesStore.activePreviewPath
+          tab.id === filesStore.activePreviewPath
             ? 'bg-background text-foreground preview-tab-active'
             : 'bg-card/60 text-muted-foreground/70 hover:bg-muted/40 hover:text-foreground/90',
         ]"
-        @mousedown.middle.prevent="filesStore.closePreview(tab.relativePath)"
-        @contextmenu.prevent="onTabContextMenu($event, tab.relativePath)"
-        @dblclick="filesStore.pinPreviewTab(tab.relativePath)"
+        @mousedown.middle.prevent="filesStore.closePreview(tab.id)"
+        @contextmenu.prevent="onTabContextMenu($event, tab.id)"
+        @dblclick="filesStore.pinPreviewTab(tab.id)"
       >
         <button
           type="button"
           role="tab"
-          :aria-selected="tab.relativePath === filesStore.activePreviewPath"
+          :aria-selected="tab.id === filesStore.activePreviewPath"
           :title="
             tab.isTransient ? `${fileName(tab.relativePath)}（预览，双击常驻）` : tab.relativePath
           "
           class="h-full min-w-0 flex-1 flex items-center gap-1.5 pl-2.5 pr-1 text-[length:var(--ui-text-d3)]"
-          @click="filesStore.selectPreview(tab.relativePath)"
+          @click="filesStore.selectPreview(tab.id)"
         >
           <FileTypeIcon
             :name="tab.preview?.name ?? fileName(tab.relativePath)"
@@ -45,13 +45,13 @@
           type="button"
           class="w-6 h-6 mr-1 grid place-items-center rounded hover:bg-muted/80 focus:opacity-100"
           :class="
-            tab.relativePath === filesStore.activePreviewPath
+            tab.id === filesStore.activePreviewPath
               ? 'opacity-60'
               : 'opacity-0 group-hover/tab:opacity-60'
           "
           :aria-label="`关闭 ${fileName(tab.relativePath)}`"
           title="关闭文件"
-          @click.stop="filesStore.closePreview(tab.relativePath)"
+          @click.stop="filesStore.closePreview(tab.id)"
         >
           <XIcon class="w-3 h-3" />
         </button>
@@ -330,8 +330,8 @@ const filesStore = useFilesStore()
 const workspaceStore = useWorkspaceStore()
 const chatInput = useChatInputStore()
 const preview = computed(() => filesStore.currentPreview)
-const activePath = computed(() => filesStore.activePreviewPath ?? '')
 const activeTab = computed(() => filesStore.activePreviewTab)
+const activePath = computed(() => activeTab.value?.relativePath ?? '')
 // Outside Workspace Display: 工作区外文件（如 ~/.claude.json）走绝对路径展示，
 // 不套用"工作区名/相对路径"逻辑。
 const isOutsideWorkspace = computed(() => !!activeTab.value?.absolutePath)
@@ -340,7 +340,7 @@ const parentPath = computed(() => pathParts.value.slice(0, -1).join('/'))
 const fullPath = computed(() =>
   isOutsideWorkspace.value
     ? (activeTab.value?.absolutePath ?? activePath.value)
-    : `${workspaceStore.currentWorkspace?.name ?? '工作区'}/${activePath.value}`,
+    : `${activeTab.value?.folderAlias ?? workspaceStore.currentWorkspace?.name ?? '工作区'}/${activePath.value}`,
 )
 const highlighted = ref('')
 const markdownMode = ref<'preview' | 'source'>('preview')
@@ -507,6 +507,9 @@ async function reload(): Promise<void> {
     preview.value.relativePath,
     true,
     activeTab.value?.absolutePath,
+    false,
+    activeTab.value?.folderId,
+    activeTab.value?.folderAlias,
   )
 }
 
@@ -518,6 +521,7 @@ async function openInEditor(): Promise<void> {
     preview.value.relativePath,
     undefined,
     activeTab.value?.absolutePath,
+    activeTab.value?.folderId,
   )
   if (!result.launched && result.error) window.alert(result.error)
 }

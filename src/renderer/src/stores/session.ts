@@ -1,4 +1,4 @@
-import type { EffortLevel, PermissionMode } from '@shared/backend/types'
+import type { EffortLevel, PermissionMode, WorkspaceFolderContext } from '@shared/backend/types'
 import { type BackendId } from '@shared/constants'
 import type { SessionView } from '@shared/domain'
 import { defineStore } from 'pinia'
@@ -54,6 +54,7 @@ export const useSessionStore = defineStore('session', () => {
   async function create(args: {
     workspaceId: string
     cwd: string
+    workspaceFolders?: WorkspaceFolderContext[]
     backend?: BackendId
     model?: string
     effort?: EffortLevel

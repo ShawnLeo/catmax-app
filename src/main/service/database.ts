@@ -6,6 +6,7 @@ import type {
   SessionRecord,
   TurnRunRecord,
   TurnRunStatus,
+  WorkspaceFolderRecord,
   WorkspaceRecord,
 } from '@shared/domain'
 import Database from 'better-sqlite3'
@@ -25,11 +26,34 @@ interface WorkspaceRow {
   created_at: number
 }
 
-function rowToRecord(row: WorkspaceRow): WorkspaceRecord {
+interface WorkspaceFolderRow {
+  id: string
+  workspace_id: string
+  path: string
+  alias: string
+  role: string
+  sort_order: number
+  created_at: number
+}
+
+function rowToFolderRecord(row: WorkspaceFolderRow): WorkspaceFolderRecord {
+  return {
+    id: row.id,
+    workspaceId: row.workspace_id,
+    path: row.path,
+    alias: row.alias,
+    role: row.role as WorkspaceFolderRecord['role'],
+    sortOrder: row.sort_order,
+    createdAt: row.created_at,
+  }
+}
+
+function rowToRecord(row: WorkspaceRow, folders: WorkspaceFolderRecord[]): WorkspaceRecord {
   return {
     id: row.id,
     path: row.path,
     name: row.name,
+    folders,
     preferredEditor: row.preferred_editor as WorkspaceRecord['preferredEditor'],
     lastOpenedAt: row.last_opened_at,
     createdAt: row.created_at,
@@ -71,7 +95,20 @@ export class DatabaseService {
     // 从 Finder/Dock 启动时 cwd 是 /，迁移必然失败且窗口永远不显示。
     this.db.exec(schemaSql)
     this.migrateAddColumns()
+    this.migrateWorkspaceFolders()
     log.info('migrated')
+  }
+
+  /** 旧版一条 workspace=一个目录；首次升级时把它登记为主文件夹。 */
+  private migrateWorkspaceFolders(): void {
+    this.db
+      .prepare(
+        `INSERT OR IGNORE INTO workspace_folders
+           (id, workspace_id, path, alias, role, sort_order, created_at)
+         SELECT id || ':primary', id, path, name, 'primary', 0, created_at
+         FROM workspaces`,
+      )
+      .run()
   }
 
   /**
@@ -107,35 +144,67 @@ export class DatabaseService {
     const rows = this.db
       .prepare('SELECT * FROM workspaces ORDER BY last_opened_at DESC, rowid DESC')
       .all() as WorkspaceRow[]
-    return rows.map(rowToRecord)
+    return rows.map((row) => rowToRecord(row, this.listWorkspaceFolders(row.id)))
   }
 
   findWorkspaceByPath(path: string): WorkspaceRecord | null {
     const row = this.db.prepare('SELECT * FROM workspaces WHERE path = ?').get(path) as
       WorkspaceRow | undefined
-    return row ? rowToRecord(row) : null
+    return row ? rowToRecord(row, this.listWorkspaceFolders(row.id)) : null
   }
 
   findWorkspaceById(id: string): WorkspaceRecord | null {
     const row = this.db.prepare('SELECT * FROM workspaces WHERE id = ?').get(id) as
       WorkspaceRow | undefined
-    return row ? rowToRecord(row) : null
+    return row ? rowToRecord(row, this.listWorkspaceFolders(row.id)) : null
+  }
+
+  listWorkspaceFolders(workspaceId: string): WorkspaceFolderRecord[] {
+    const rows = this.db
+      .prepare('SELECT * FROM workspace_folders WHERE workspace_id = ? ORDER BY sort_order, rowid')
+      .all(workspaceId) as WorkspaceFolderRow[]
+    return rows.map(rowToFolderRecord)
+  }
+
+  findWorkspaceFolderById(folderId: string): WorkspaceFolderRecord | null {
+    const row = this.db.prepare('SELECT * FROM workspace_folders WHERE id = ?').get(folderId) as
+      WorkspaceFolderRow | undefined
+    return row ? rowToFolderRecord(row) : null
   }
 
   insertWorkspace(record: WorkspaceRecord): WorkspaceRecord {
-    this.db
-      .prepare(
-        `INSERT INTO workspaces (id, path, name, preferred_editor, last_opened_at, created_at)
-         VALUES (?, ?, ?, ?, ?, ?)`,
+    const insert = this.db.transaction(() => {
+      this.db
+        .prepare(
+          `INSERT INTO workspaces (id, path, name, preferred_editor, last_opened_at, created_at)
+           VALUES (?, ?, ?, ?, ?, ?)`,
+        )
+        .run(
+          record.id,
+          record.path,
+          record.name,
+          record.preferredEditor,
+          record.lastOpenedAt,
+          record.createdAt,
+        )
+      const statement = this.db.prepare(
+        `INSERT INTO workspace_folders
+           (id, workspace_id, path, alias, role, sort_order, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`,
       )
-      .run(
-        record.id,
-        record.path,
-        record.name,
-        record.preferredEditor,
-        record.lastOpenedAt,
-        record.createdAt,
-      )
+      for (const folder of record.folders) {
+        statement.run(
+          folder.id,
+          record.id,
+          folder.path,
+          folder.alias,
+          folder.role,
+          folder.sortOrder,
+          folder.createdAt,
+        )
+      }
+    })
+    insert()
     return record
   }
 

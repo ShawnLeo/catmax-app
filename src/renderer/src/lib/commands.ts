@@ -8,7 +8,6 @@ import { commandRegistry } from './commandRegistry'
 
 export async function registerDefaultCommands(): Promise<void> {
   // 动态 import 避免循环依赖
-  const { useWorkspaceStore } = await import('@renderer/stores/workspace')
   const { useBackendStore } = await import('@renderer/stores/backend')
   const { useSessionStore } = await import('@renderer/stores/session')
   const { useUiStore } = await import('@renderer/stores/ui')
@@ -38,19 +37,11 @@ export async function registerDefaultCommands(): Promise<void> {
 
   commandRegistry.register({
     id: 'workspace.add',
-    title: '添加工作区',
+    title: '创建工作区',
     category: 'Workspace',
     keywords: ['workspace', 'add', 'folder', 'open'],
-    action: async () => {
-      const ws = useWorkspaceStore()
-      const result = await window.api.system.openDialog({
-        title: '选择工作区文件夹',
-        properties: ['openDirectory'],
-      })
-      if (!result.canceled && result.filePaths.length > 0) {
-        await ws.add(result.filePaths[0]!)
-        void router.push('/chat')
-      }
+    action: () => {
+      void router.push('/')
     },
   })
 
