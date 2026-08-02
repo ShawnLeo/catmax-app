@@ -36,6 +36,12 @@
       @scroll="syncScroll"
       @keydown="emit('keydown', $event)"
       @paste="emit('paste', $event)"
+      @keyup="emitCaret"
+      @click="emitCaret"
+      @focus="emitCaret"
+      @blur="emit('blur')"
+      @compositionstart="composing = true"
+      @compositionend="onCompositionEnd"
     />
   </div>
 </template>
@@ -60,15 +66,46 @@ const emit = defineEmits<{
   'update:modelValue': [value: string]
   keydown: [event: KeyboardEvent]
   paste: [event: ClipboardEvent]
+  blur: []
+  /**
+   * Composer Autocomplete: 光标位置变了。
+   *
+   * 联想要判断「光标是不是落在某个 `@…` 里」，光有文本不够——同一份文本，光标
+   * 在 token 里和在句尾是两种状态。textarea 没有现成的「光标变了」事件，只能从
+   * 输入 / 按键抬起 / 点击 / 聚焦四处推。
+   */
+  caret: [position: number]
 }>()
 
 const textareaRef = ref<HTMLTextAreaElement | null>(null)
 const highlightRef = ref<HTMLElement | null>(null)
 
+/**
+ * 输入法组合中。组合期间不报光标——那时候文本里躺着的是未确认的拼音，
+ * 拿它去搜文件既搜不到，还会让弹层在每个拼音字母上闪一次。
+ */
+const composing = ref(false)
+
 const segments = computed(() => segmentFileMentions(props.modelValue))
 
 function onInput(e: Event): void {
-  emit('update:modelValue', (e.target as HTMLTextAreaElement).value)
+  const el = e.target as HTMLTextAreaElement
+  // 顺序不能反：update 的接收方是 computed setter，同步就把新文本写进了 store，
+  // 之后发的 caret 才和它配得上。反过来会让联想拿旧文本 + 新光标去算触发段。
+  emit('update:modelValue', el.value)
+  if (!composing.value) emit('caret', el.selectionStart)
+}
+
+function emitCaret(): void {
+  const el = textareaRef.value
+  if (!el || composing.value) return
+  emit('caret', el.selectionStart)
+}
+
+function onCompositionEnd(): void {
+  composing.value = false
+  // 组合结束后 Chromium 还会补一次 input，这里主动报一次是为了万一没补上。
+  emitCaret()
 }
 
 /** 文本超过可视高度后 textarea 会滚动，垫在底下的那层必须跟着滚，否则立刻错位。 */
@@ -86,6 +123,17 @@ watch(() => props.modelValue, syncScroll, { flush: 'post' })
 defineExpose({
   focus: () => textareaRef.value?.focus(),
   el: textareaRef,
+  /**
+   * 把光标放到指定位置——联想应用候选之后必须调，否则光标会停在文本末尾，
+   * 而插入点可能在句子中间。
+   */
+  setCaret: (position: number) => {
+    const el = textareaRef.value
+    if (!el) return
+    el.focus()
+    el.setSelectionRange(position, position)
+    emit('caret', position)
+  },
 })
 </script>
 

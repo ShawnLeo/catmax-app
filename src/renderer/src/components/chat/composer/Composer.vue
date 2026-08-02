@@ -22,9 +22,22 @@
            容器自身圆角不会露出直角。-->
       <!-- File Preview Tabs: 输入容器背景与左侧会话列表统一(bg-sidebar),
            跟主体聊天区(--background)形成轻微对比,呼应侧边栏的层次感。 -->
+      <!-- relative:联想弹层(SuggestionPopover)以此为定位锚，贴在输入框正上方 -->
       <div
-        class="rounded-2xl border border-border bg-sidebar focus-within:border-primary/50 transition-colors @container"
+        class="relative rounded-2xl border border-border bg-sidebar focus-within:border-primary/50 transition-colors @container"
       >
+        <!-- Composer Autocomplete: `@` 文件联想。候选来源由 lib/autocomplete 的
+             registry 决定，这里只负责摆位置和转发事件。 -->
+        <SuggestionPopover
+          v-if="suggestOpen"
+          :items="suggestItems"
+          :active-index="suggestIndex"
+          :loading="suggestLoading"
+          :empty-text="suggestEmptyText"
+          @select="applySuggestion"
+          @hover="setSuggestActive"
+        />
+
         <!-- 附件区 -->
         <AttachmentBar
           :attachments="chatInput.pendingAttachments"
@@ -35,12 +48,15 @@
 
         <!-- textarea（带 @路径 高亮，见 MentionTextarea） -->
         <MentionTextarea
+          ref="mentionInput"
           v-model="prompt"
           :placeholder="disabled ? '后端未连接...' : hint"
           :disabled="disabled"
           :rows="3"
           @keydown="onKeyDown"
           @paste="onPaste"
+          @caret="onCaret"
+          @blur="closeSuggestions"
         />
 
         <!-- 底部配置行：Model / Effort / 权限(盾牌) + 发送按钮。
@@ -163,9 +179,12 @@
 import AttachmentBar from '@renderer/components/chat/composer/AttachmentBar.vue'
 import MentionTextarea from '@renderer/components/chat/composer/MentionTextarea.vue'
 import PermissionShieldButton from '@renderer/components/chat/composer/PermissionShieldButton.vue'
+import SuggestionPopover from '@renderer/components/chat/composer/SuggestionPopover.vue'
 import ThinkingSlider from '@renderer/components/chat/composer/ThinkingSlider.vue'
 import { Button } from '@renderer/components/ui/button'
 import { DropdownMenu } from '@renderer/components/ui/dropdown-menu'
+import { useAutocomplete } from '@renderer/composables/useAutocomplete'
+import { composerSuggestions } from '@renderer/lib/autocomplete'
 import { chatContentWidthClass } from '@renderer/lib/chat-layout'
 import { shuffledHints } from '@renderer/lib/composer-hints'
 import { mentionPathFor } from '@renderer/lib/mention-path'
@@ -176,7 +195,7 @@ import { useSettingsStore } from '@renderer/stores/settings'
 import { useWorkspaceStore } from '@renderer/stores/workspace'
 import type { ContextBlock, EffortLevel, PermissionMode } from '@shared/backend/types'
 import { ArrowUpIcon, PlusIcon, RefreshCwIcon, SquareIcon } from 'lucide-vue-next'
-import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 
 interface RuntimeConfigValue {
   model: string | null
@@ -207,6 +226,41 @@ const prompt = computed({
     chatInput.text = value
   },
 })
+
+/*
+ * Composer Autocomplete: `@` 文件联想。
+ *
+ * Composer 在这条链路上只做三件事——把光标位置转进去、把按键优先让给它、
+ * 把它算好的文本写回来。搜什么、怎么排、插入什么形态全在 lib/autocomplete 里，
+ * 下一期加 `/` 命令时这段接线一行都不用改。
+ */
+const mentionInput = ref<InstanceType<typeof MentionTextarea> | null>(null)
+
+const {
+  open: suggestOpen,
+  items: suggestItems,
+  activeIndex: suggestIndex,
+  loading: suggestLoading,
+  emptyText: suggestEmptyText,
+  refresh: refreshSuggestions,
+  handleKeydown: handleSuggestKeydown,
+  applyAt: applySuggestion,
+  setActive: setSuggestActive,
+  close: closeSuggestions,
+} = useAutocomplete({
+  registry: composerSuggestions,
+  context: () => ({ workspaceId: workspaceStore.currentWorkspace?.id }),
+  onApply: (text, caret) => {
+    prompt.value = text
+    // 等 textarea 拿到新文本再挪光标——DOM 还是旧值时 setSelectionRange 会被
+    // 随后的值更新重置到末尾。
+    void nextTick(() => mentionInput.value?.setCaret(caret))
+  },
+})
+
+function onCaret(caret: number): void {
+  refreshSuggestions(prompt.value, caret)
+}
 
 /*
  * Composer Hints: 占位符定时轮换，见 lib/composer-hints.ts。
@@ -308,6 +362,10 @@ function permissionLabel(m: PermissionMode): string {
 }
 
 function onKeyDown(e: KeyboardEvent): void {
+  // 联想弹层开着时它先吃键(↑↓ 选择、Enter/Tab 确认、Esc 关闭)。返回 true =
+  // 已消费，下面的发送逻辑必须让开——否则选候选会变成发消息。
+  if (handleSuggestKeydown(e)) return
+
   const sendOnEnter = settingsStore.settings?.sendOnEnter ?? true
   if (e.key === 'Enter') {
     if (e.shiftKey) {
@@ -336,6 +394,7 @@ function onSend(): void {
   }))
   const attachments = [...chatInput.drain(), ...mentionBlocks]
   prompt.value = ''
+  closeSuggestions()
   emit('send', text, attachments)
 }
 
