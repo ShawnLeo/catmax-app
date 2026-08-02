@@ -9,6 +9,7 @@ import type {
   ConfigSyntaxResult,
 } from '../backend/config-files'
 import type { BackendInstallProgress, BackendInstallResult } from '../backend/install'
+import type { SlashCommandInfo } from '../backend/slash-commands'
 import type {
   AgentAnswer,
   ApprovalDecision,
@@ -51,6 +52,14 @@ export type BackendHandlers = {
    */
   'backend.refreshModelsFor': (args: { id: BackendId }) => Promise<ModelOption[]>
   'backend.warmup': (args: { id: BackendId; config: WarmupBackendArgs }) => Promise<void>
+  /**
+   * 列出某后端在该 cwd 下可用的斜杠命令（含项目/用户 Skill），供输入框联想。
+   *
+   * 后端不支持斜杠命令（codex）或拉取失败时返回空数组——renderer 会退回静态兜底表。
+   * 首次拉取要冷启一次握手（claude 实测 2.1–2.6 秒），所以调用方应在打开工作区时
+   * 就预取，而不是等用户敲下 `/`。
+   */
+  'backend.slashCommands': (args: { id: BackendId; cwd: string }) => Promise<SlashCommandInfo[]>
   'backend.startTurn': (args: CoordinatedStartTurnArgs) => Promise<{ turnId: string }>
   'backend.interruptTurn': (args: { turnId: string }) => Promise<void>
   'backend.steerTurn': (args: { turnId: string; prompt: string }) => Promise<void>

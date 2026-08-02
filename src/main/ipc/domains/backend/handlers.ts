@@ -65,6 +65,10 @@ export const warmupBackend = async (args: { id: BackendId; config: WarmupBackend
   await ctx.backendManager.warmupBackend(args.id, args.config)
 }
 
+export const slashCommands = async (args: { id: BackendId; cwd: string }) => {
+  return ctx.backendManager.listSlashCommands(args.id, args.cwd)
+}
+
 export const startTurn = async (args: CoordinatedStartTurnArgs) => {
   return ctx.backendManager.startTurn(args)
 }

@@ -21,7 +21,12 @@ export const composerSuggestions = new SuggestionRegistry()
 composerSuggestions.register(fileSuggestionProvider)
 composerSuggestions.register(slashCommandProvider)
 
-export { registerSlashCommands, slashCommandsFor, type SlashCommandSpec } from './commands'
+export {
+  registerSlashCommands,
+  slashCommandsFor,
+  toSlashCommandSpecs,
+  type SlashCommandSpec,
+} from './commands'
 export { charTrigger, type CharTriggerOptions } from './trigger'
 export { type DetectedTrigger, SuggestionRegistry } from './registry'
 export type {

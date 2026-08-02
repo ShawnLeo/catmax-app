@@ -2,20 +2,42 @@
  * Composer Autocomplete: 斜杠命令联想。
  *
  * 这一层是后端无关的：命令名和说明全部来自 commands/ 下按后端分的表，这里只负责
- * 「什么时候算触发 → 怎么匹配 → 插成什么文本」。
+ * 「什么时候算触发 → 怎么匹配排序 → 插成什么文本」。
  *
  * 跟文件联想的两个明显差异，都是命令的性质决定的：
  *   - 触发要求在整段文本最开头（`atTextStart`）。`/compact` 只有作为整条消息才是
  *     命令，句中的 `and/or`、`每秒 3/4 帧` 都不该弹。
- *   - 是本地静态表的过滤，不发 IPC，所以不需要担心慢查询——防抖那层照样管着。
+ *   - 是本地静态表的过滤，不发 IPC，所以不需要担心慢查询——命令表由
+ *     stores/slash-commands.ts 提前预取好，这里永远是同步数据。
  */
-import { SquareSlashIcon } from 'lucide-vue-next'
+import { SLASH_COMMAND_SOURCE_ORDER, type SlashCommandSource } from '@shared/backend/slash-commands'
+import { FolderCodeIcon, SparklesIcon, SquareSlashIcon } from 'lucide-vue-next'
+import type { Component } from 'vue'
 
 import { slashCommandsFor, type SlashCommandSpec } from '../commands'
 import { charTrigger } from '../trigger'
 import type { SuggestionItem, SuggestionProvider, TriggerMatch } from '../types'
 
 const detectSlash = charTrigger({ char: '/', atTextStart: true })
+
+/**
+ * 按来源给默认图标。
+ *
+ * 动态列表有几十条，逐条配图标既不现实也没意义——用户真正需要一眼区分的是
+ * 「这是内置命令还是我自己的 Skill」，那正好就是 source。
+ */
+const SOURCE_ICONS: Record<SlashCommandSource, Component> = {
+  builtin: SquareSlashIcon,
+  project: FolderCodeIcon,
+  user: SparklesIcon,
+}
+
+/** 分组标题——弹层按 source 分段展示时用。 */
+export const SLASH_COMMAND_GROUP_LABELS: Record<SlashCommandSource, string> = {
+  builtin: '内置命令',
+  project: '项目技能',
+  user: '用户技能',
+}
 
 export const slashCommandProvider: SuggestionProvider = {
   id: 'slash-command',
@@ -37,6 +59,7 @@ export const slashCommandProvider: SuggestionProvider = {
     const query = match.query.toLowerCase()
     return slashCommandsFor(ctx.backendId)
       .filter((spec) => matches(spec, query))
+      .sort(compare)
       .map((spec) => toItem(spec, match))
   },
 }
@@ -46,6 +69,19 @@ function matches(spec: SlashCommandSpec, query: string): boolean {
   if (query === '') return true
   if (spec.name.toLowerCase().startsWith(query)) return true
   return (spec.aliases ?? []).some((alias) => alias.toLowerCase().startsWith(query))
+}
+
+/**
+ * 内置命令 → 项目技能 → 用户技能，组内按名字。
+ *
+ * 用户 Skill 数量最多（本机 36 条 vs 内置 42 条里能放行的一部分），不压到后面的话
+ * 敲 `/co` 先看到的是 `/cloudflare` 而不是 `/compact`。
+ */
+function compare(a: SlashCommandSpec, b: SlashCommandSpec): number {
+  const bySource =
+    SLASH_COMMAND_SOURCE_ORDER.indexOf(a.source) - SLASH_COMMAND_SOURCE_ORDER.indexOf(b.source)
+  if (bySource !== 0) return bySource
+  return a.name.localeCompare(b.name)
 }
 
 function toItem(spec: SlashCommandSpec, match: TriggerMatch): SuggestionItem {
@@ -65,7 +101,8 @@ function toItem(spec: SlashCommandSpec, match: TriggerMatch): SuggestionItem {
       ? `${match.char}${spec.name} ${spec.argumentHint}`
       : `${match.char}${spec.name}`,
     detail: spec.description,
-    icon: { kind: 'lucide', component: spec.icon ?? SquareSlashIcon },
+    icon: { kind: 'lucide', component: spec.icon ?? SOURCE_ICONS[spec.source] },
     insert,
+    group: SLASH_COMMAND_GROUP_LABELS[spec.source],
   }
 }

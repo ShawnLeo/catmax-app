@@ -192,6 +192,7 @@ import { useBackendStore } from '@renderer/stores/backend'
 import { useChatInputStore } from '@renderer/stores/chat-input'
 import { useMessageStore } from '@renderer/stores/message'
 import { useSettingsStore } from '@renderer/stores/settings'
+import { useSlashCommandStore } from '@renderer/stores/slash-commands'
 import { useWorkspaceStore } from '@renderer/stores/workspace'
 import type { ContextBlock, EffortLevel, PermissionMode } from '@shared/backend/types'
 import { ArrowUpIcon, PlusIcon, RefreshCwIcon, SquareIcon } from 'lucide-vue-next'
@@ -218,6 +219,7 @@ const settingsStore = useSettingsStore()
 const backendStore = useBackendStore()
 const workspaceStore = useWorkspaceStore()
 const chatInput = useChatInputStore()
+const slashCommandStore = useSlashCommandStore()
 // File Mention: 输入框文本住在 store 里——拖放遮罩、文件树右键菜单这些跟 Composer
 // 没有父子关系的地方都要往里写引用，见 chat-input store 的说明。
 const prompt = computed({
@@ -228,11 +230,11 @@ const prompt = computed({
 })
 
 /*
- * Composer Autocomplete: `@` 文件联想。
+ * Composer Autocomplete: `@` 文件联想 + `/` 斜杠命令。
  *
  * Composer 在这条链路上只做三件事——把光标位置转进去、把按键优先让给它、
  * 把它算好的文本写回来。搜什么、怎么排、插入什么形态全在 lib/autocomplete 里，
- * 下一期加 `/` 命令时这段接线一行都不用改。
+ * 再加一种联想时这段接线一行都不用改。
  */
 const mentionInput = ref<InstanceType<typeof MentionTextarea> | null>(null)
 
@@ -266,6 +268,25 @@ const {
 function onCaret(caret: number): void {
   refreshSuggestions(prompt.value, caret)
 }
+
+/*
+ * Composer Autocomplete: 斜杠命令表预取。
+ *
+ * 首次取要冷启一次 SDK 握手（实测 2.1–2.6 秒），等用户敲下 `/` 再拉的话弹层会先
+ * 空着两秒。所以在后端/工作区确定的那一刻就后台拉，用户打字时命令表已经是热的。
+ *
+ * immediate + watch 而不是 onMounted：Composer 挂载时工作区可能还没加载完，
+ * 而切工作区、切会话（会话的后端不可变，打开会话时 backendStore 会切过去）
+ * 都要重新取——项目级 Skill 来自 <cwd>/.claude/skills/，换目录内容就变。
+ */
+watch(
+  () => [backendStore.currentId, workspaceStore.currentWorkspace?.path] as const,
+  ([backendId, cwd]) => {
+    if (!cwd) return
+    void slashCommandStore.prefetch(backendId, cwd)
+  },
+  { immediate: true },
+)
 
 /*
  * Composer Hints: 占位符定时轮换，见 lib/composer-hints.ts。

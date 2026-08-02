@@ -23,6 +23,7 @@ import {
   revealBackendConfigFile,
   setBridgeCredential,
   testBridgeUpstream,
+  slashCommands,
   startTurn,
   steerTurn,
   stopBackgroundTask,
@@ -51,6 +52,10 @@ export function registerBackendHandlers(): void {
     refreshModelsFor,
   )
   handleRendererRequest<BackendHandlers, 'backend.warmup'>('backend.warmup', warmupBackend)
+  handleRendererRequest<BackendHandlers, 'backend.slashCommands'>(
+    'backend.slashCommands',
+    slashCommands,
+  )
   handleRendererRequest<BackendHandlers, 'backend.startTurn'>('backend.startTurn', startTurn)
   handleRendererRequest<BackendHandlers, 'backend.interruptTurn'>(
     'backend.interruptTurn',

@@ -15,45 +15,54 @@
       class="max-h-60 overflow-y-auto rounded-lg border border-border bg-popover py-1 shadow-lg"
       role="listbox"
     >
-      <button
-        v-for="(item, i) in items"
-        :key="item.id"
-        type="button"
-        role="option"
-        :data-index="i"
-        :aria-selected="i === activeIndex"
-        :class="[
-          'flex w-full cursor-pointer items-center gap-2 px-3 py-1.5 text-left',
-          i === activeIndex ? 'bg-accent text-accent-foreground' : 'hover:bg-muted',
-        ]"
-        @mouseenter="emit('hover', i)"
-        @mousedown.prevent="emit('select', i)"
-      >
-        <!-- mousedown.prevent 而不是 click：click 之前 textarea 会先失焦，
-             失焦会把弹层关掉，等 click 到达时已经没有这一项了。 -->
-        <FileTypeIcon
-          v-if="item.icon && item.icon.kind === 'file'"
-          :name="item.icon.name"
-          :is-directory="item.icon.isDirectory"
-          class="h-4 w-4 flex-shrink-0"
-        />
-        <component
-          :is="item.icon.component"
-          v-else-if="item.icon && item.icon.kind === 'lucide'"
-          class="h-4 w-4 flex-shrink-0 text-muted-foreground"
-        />
-
-        <span class="truncate font-mono text-[length:var(--chat-text-d1)] text-foreground">
-          {{ item.label }}
-        </span>
-        <!-- 次要信息靠右，且优先被压缩——文件名才是用来认人的那一段 -->
-        <span
-          v-if="item.detail"
-          class="ml-auto min-w-0 truncate text-[length:var(--ui-text-d3)] text-muted-foreground"
+      <template v-for="(item, i) in items" :key="item.id">
+        <!-- 分组标题：只在这一段的第一条上出现。provider 保证同组相邻（见 types.ts）。 -->
+        <div
+          v-if="item.group && item.group !== items[i - 1]?.group"
+          class="px-3 pb-0.5 pt-1.5 text-[length:var(--ui-text-d3)] font-medium text-muted-foreground"
         >
-          {{ item.detail }}
-        </span>
-      </button>
+          {{ item.group }}
+        </div>
+        <button
+          type="button"
+          role="option"
+          :data-index="i"
+          :aria-selected="i === activeIndex"
+          :class="[
+            'flex w-full cursor-pointer items-center gap-2 px-3 py-1.5 text-left',
+            i === activeIndex ? 'bg-accent text-accent-foreground' : 'hover:bg-muted',
+          ]"
+          @mouseenter="emit('hover', i)"
+          @mousedown.prevent="emit('select', i)"
+        >
+          <!-- mousedown.prevent 而不是 click：click 之前 textarea 会先失焦，
+               失焦会把弹层关掉，等 click 到达时已经没有这一项了。 -->
+          <FileTypeIcon
+            v-if="item.icon && item.icon.kind === 'file'"
+            :name="item.icon.name"
+            :is-directory="item.icon.isDirectory"
+            class="h-4 w-4 flex-shrink-0"
+          />
+          <component
+            :is="item.icon.component"
+            v-else-if="item.icon && item.icon.kind === 'lucide'"
+            class="h-4 w-4 flex-shrink-0 text-muted-foreground"
+          />
+
+          <span
+            class="flex-shrink-0 truncate font-mono text-[length:var(--chat-text-d1)] text-foreground"
+          >
+            {{ item.label }}
+          </span>
+          <!-- 次要信息靠右，且优先被压缩——命令名/文件名才是用来认人的那一段 -->
+          <span
+            v-if="item.detail"
+            class="ml-auto min-w-0 truncate text-[length:var(--ui-text-d3)] text-muted-foreground"
+          >
+            {{ item.detail }}
+          </span>
+        </button>
+      </template>
 
       <div
         v-if="items.length === 0"

@@ -32,6 +32,7 @@ import {
   type SDKUserMessage,
 } from '@anthropic-ai/claude-agent-sdk'
 import { CLAUDE_CAPABILITIES } from '@shared/backend/builtin-capabilities'
+import type { SlashCommandInfo } from '@shared/backend/slash-commands'
 import {
   BackendError,
   type AgentAnswer,
@@ -74,6 +75,7 @@ import {
   sdkSystemSessionId,
   sdkUserToolResultToEvents,
 } from './sdk-mapping'
+import { normalizeSlashCommands, type RawSlashCommand } from './slash-commands'
 import { WARMUP_PROMPT } from './warmup-transcript'
 
 const log = logger.domain('claude-adapter')
@@ -81,6 +83,26 @@ const WARMUP_CACHE_TTL_MS = 4 * 60 * 1000
 const WARMUP_TIMEOUT_MS = 30_000
 /** dispose 等预热清理 transcript 的上限——退出路径，不能无限等（见 dispose） */
 const WARMUP_DISPOSE_GRACE_MS = 3_000
+/**
+ * 专门拉命令表时的握手超时。
+ *
+ * 实测冷启握手 2.1–2.6 秒，给到 15 秒是留足机器慢/首次解包的余量；拿不到就退回
+ * 静态兜底表，不值得让用户对着弹层干等。
+ */
+const SLASH_COMMANDS_TIMEOUT_MS = 15_000
+
+/**
+ * 一条永远不产出消息的 prompt 流。
+ *
+ * 取斜杠命令表只需要握手——命令表在 initialize 的响应里，发任何消息都是白花 token。
+ * 但 query() 必须给 prompt，给一个空数组它会立刻结束、`initializationResult()` 就
+ * 拿不到了。所以给一条永远 pending 的流，靠调用方的 abortController 收尾。
+ */
+function neverEndingPrompt(): AsyncIterable<SDKUserMessage> {
+  return {
+    [Symbol.asyncIterator]: () => ({ next: () => new Promise<never>(() => {}) }),
+  }
+}
 
 /**
  * ask_user 工具的 system prompt 引导语——追加到 Claude Code 默认 system prompt 之后。
@@ -179,6 +201,21 @@ export class ClaudeAdapter implements AgentBackend {
    * 用于判断缓存是否新鲜），这个只装"此刻还没跑完的"，结束即移除。
    */
   private inFlightWarmups = new Map<string, { abort: AbortController; done: Promise<void> }>()
+  /**
+   * 斜杠命令表缓存，**按 cwd 分**。
+   *
+   * 跟 modelsCache 的单例形成对比，这个差异很容易踩：模型列表跟 cwd 无关，
+   * 但命令表包含项目 Skill（<cwd>/.claude/skills/），换个目录内容就变了。
+   * 本机实测 cwd=catmax-app 时 79 条、cwd=~ 时 78 条，差的就是 catmax-conventions。
+   */
+  private slashCommandsCache = new Map<string, SlashCommandInfo[]>()
+  /**
+   * 正在拉取的命令表，按 cwd 去重。
+   *
+   * 冷启一次握手实测 2.1–2.6 秒，且要 spawn 一个 claude 进程。打开工作区时预取和
+   * 用户敲下 `/` 时的按需拉取会撞在一起，不去重就是两个进程做同一件事。
+   */
+  private slashCommandsInFlight = new Map<string, Promise<SlashCommandInfo[]>>()
 
   constructor(opts: ClaudeAdapterOptions = {}) {
     this.opts = opts
@@ -261,6 +298,75 @@ export class ClaudeAdapter implements AgentBackend {
 
   invalidateModelsCache(): void {
     this.modelsCache = undefined
+  }
+
+  /**
+   * 列出该 cwd 下可用的斜杠命令（含项目/用户 Skill）。
+   *
+   * 缓存命中就同步返回；没命中要冷启一次握手（实测 2.1–2.6 秒），所以调用方
+   * 应该在打开工作区时就提前调一次，别等用户敲下 `/`。拉失败返回空数组——
+   * renderer 侧会退回静态兜底表，用户不会看到空弹层。
+   */
+  async listSlashCommands(cwd: string): Promise<SlashCommandInfo[]> {
+    const cached = this.slashCommandsCache.get(cwd)
+    if (cached) return cached
+
+    const inFlight = this.slashCommandsInFlight.get(cwd)
+    if (inFlight) return inFlight
+
+    const promise = this.fetchSlashCommands(cwd).finally(() => {
+      this.slashCommandsInFlight.delete(cwd)
+    })
+    this.slashCommandsInFlight.set(cwd, promise)
+    return promise
+  }
+
+  /**
+   * 把一次已有连接的 initializationResult 顺手存进缓存。
+   *
+   * warmup 和正式 turn 结束时都会调 initializationResult() 拿模型列表，命令表就在
+   * 同一个响应里——在那两处捎带一下是零额外开销，能让大部分情况根本走不到上面
+   * 那条要花 2 秒的冷启路径。
+   */
+  private cacheSlashCommandsFrom(cwd: string, commands: RawSlashCommand[] | undefined): void {
+    if (!commands || commands.length === 0) return
+    if (this.slashCommandsCache.has(cwd)) return
+    const normalized = normalizeSlashCommands(commands)
+    this.slashCommandsCache.set(cwd, normalized)
+    log.info('cached', normalized.length, 'slash commands for', cwd)
+  }
+
+  /** 专门为取命令表建一次连接：不发任何 prompt，握完手就中断。 */
+  private async fetchSlashCommands(cwd: string): Promise<SlashCommandInfo[]> {
+    const abortController = new AbortController()
+    const timeout = setTimeout(() => abortController.abort(), SLASH_COMMANDS_TIMEOUT_MS)
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const options: Record<string, any> = {
+        abortController,
+        cwd,
+        env: { ...process.env, ...this.extraEnv },
+        permissionMode: 'default',
+      }
+      this.applyOverrideSettings(options)
+      const binaryPath = this.resolveSdkBinaryPath()
+      if (binaryPath !== undefined) options.pathToClaudeCodeExecutable = binaryPath
+
+      const sdkQuery = query({ prompt: neverEndingPrompt(), options })
+      const init = await sdkQuery.initializationResult()
+      const normalized = normalizeSlashCommands(
+        (init.commands ?? []) as unknown as RawSlashCommand[],
+      )
+      this.slashCommandsCache.set(cwd, normalized)
+      log.info('fetched', normalized.length, 'slash commands for', cwd)
+      return normalized
+    } catch (error) {
+      log.debug('listSlashCommands failed for', cwd, error)
+      return []
+    } finally {
+      clearTimeout(timeout)
+      abortController.abort()
+    }
   }
 
   /** SDK 的 effort 等级 → catmax 的 EffortLevel（补 'none'） */
@@ -385,10 +491,18 @@ export class ClaudeAdapter implements AgentBackend {
             isError: result.is_error ?? false,
           })
         }
-        if (isSdkInitMessage(message) && !this.modelsCache) {
+        if (
+          isSdkInitMessage(message) &&
+          (!this.modelsCache || !this.slashCommandsCache.has(args.cwd))
+        ) {
           try {
             const init = await sdkQuery.initializationResult()
             if (init.models.length > 0) this.modelsCache = init.models
+            // 命令表跟模型在同一个响应里，捎带存下来——省掉后面一次 2 秒的冷启。
+            this.cacheSlashCommandsFrom(
+              args.cwd,
+              init.commands as unknown as RawSlashCommand[] | undefined,
+            )
           } catch (error) {
             log.debug('warmup initializationResult failed:', error)
           }
@@ -774,12 +888,20 @@ export class ClaudeAdapter implements AgentBackend {
         }
         // turn 正常结束后，缓存可用模型列表（initializationResult 复用首次连接结果，零额外开销）
         // 这样下次 listModels() 能返回真实列表而非静态 fallback。
-        if (!this.modelsCache) {
+        const turnCwd = args.cwd
+        if (!this.modelsCache || (turnCwd && !this.slashCommandsCache.has(turnCwd))) {
           try {
             const init = await sdkQuery.initializationResult()
             if (init.models && init.models.length > 0) {
               this.modelsCache = init.models
               log.info('cached', init.models.length, 'models from initializationResult')
+            }
+            // 命令表跟模型同来源。用户发过一条消息之后，斜杠联想就已经是热的了。
+            if (turnCwd) {
+              this.cacheSlashCommandsFrom(
+                turnCwd,
+                init.commands as unknown as RawSlashCommand[] | undefined,
+              )
             }
           } catch (e) {
             log.debug('initializationResult for models cache failed:', e)
@@ -879,6 +1001,26 @@ export class ClaudeAdapter implements AgentBackend {
         case 'task_notification': {
           for (const task of backgroundTasks.handle(msg)) {
             events.push({ type: 'background_task_updated', turnId, task })
+          }
+          return events
+        }
+        /*
+         * 本地斜杠命令的输出（SDK 注释点名 /voice、/usage）。
+         *
+         * 这类消息不走 assistant 通道，不接就被静默丢掉——用户按下命令后看到的是
+         * 「消息发出去了，什么都没发生」。实测当前 CLI 下 /context、/usage、/config
+         * 都还走普通 assistant 文本，所以这里是兜底而非主路径；但 SDK 明确定义了
+         * 这条通道，版本一变就会用上。
+         *
+         * 当成一段 assistant 文本发出去（SDK 自己的说法也是 "Displayed as
+         * assistant-style text in the transcript"）。
+         */
+        case 'local_command_output': {
+          const text = (msg as { content?: unknown }).content
+          if (typeof text === 'string' && text.length > 0) {
+            const itemId = (msg as { uuid?: string }).uuid ?? randomUUID()
+            markStreamed()
+            events.push({ type: 'text_delta', turnId, itemId, text })
           }
           return events
         }

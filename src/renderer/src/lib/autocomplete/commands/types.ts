@@ -13,6 +13,7 @@
  * 交给模型当普通消息。所以将来接 codex 时，SuggestionItem 需要一个「选中后调什么」
  * 的动作概念，而不是只有 insert 文本——那时再加，现在不预留空壳。
  */
+import type { SlashCommandSource } from '@shared/backend/slash-commands'
 import type { Component } from 'vue'
 
 export interface SlashCommandSpec {
@@ -29,6 +30,18 @@ export interface SlashCommandSpec {
   argumentHint?: string
   /** 别名，参与匹配但不单独成为一条候选（如 /cost 命中 /usage） */
   aliases?: string[]
-  /** 候选项左侧图标，缺省用一个通用斜杠图标 */
+  /**
+   * 来源，决定弹层里的分组和默认图标。
+   *
+   * 用户 Skill 可能有几十条（本机 36 条），跟内置命令混在一个平铺列表里会把
+   * `/compact` 这种常用命令淹掉，所以必须分组，内置在前。
+   */
+  source: SlashCommandSource
+  /**
+   * 候选项左侧图标。
+   *
+   * 只有静态兜底表会逐条指定——动态列表有几十条，按 source 给默认图标即可
+   * （见 providers/slash-command.ts 的 iconFor）。
+   */
   icon?: Component
 }

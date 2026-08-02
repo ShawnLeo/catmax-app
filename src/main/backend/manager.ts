@@ -12,6 +12,7 @@ import { randomUUID } from 'node:crypto'
 
 import { ctx } from '@main/context'
 import { logger } from '@main/service/logger'
+import type { SlashCommandInfo } from '@shared/backend/slash-commands'
 import {
   BackendError,
   type AgentAnswer,
@@ -306,6 +307,24 @@ export class BackendManager {
       effort: args.effort ?? 'default',
     })
     await adapter.warmup(args)
+  }
+
+  /**
+   * 列出某后端在该 cwd 下的斜杠命令。
+   *
+   * 后端没实现（codex）就返回空数组，而不是抛错——「这个后端没有斜杠命令」是一个
+   * 正常状态，不是故障。拉取失败同样吞掉：输入框联想退回静态兜底表就行，
+   * 不该让一次可选的补充查询把调用方带崩。
+   */
+  async listSlashCommands(id: BackendId, cwd: string): Promise<SlashCommandInfo[]> {
+    const adapter = this.adapters.get(id)
+    if (!adapter?.listSlashCommands) return []
+    try {
+      return await adapter.listSlashCommands(cwd)
+    } catch (error) {
+      log.debug('listSlashCommands failed', id, error)
+      return []
+    }
   }
 
   /** 启动会话 */

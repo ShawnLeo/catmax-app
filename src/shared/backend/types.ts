@@ -7,6 +7,7 @@ import type { BackendId } from '../constants'
 
 import type { ContentBlock } from './blocks'
 import type { ContextBlock } from './context-tag-types'
+import type { SlashCommandInfo } from './slash-commands'
 
 // re-export：renderer/main 已经按惯例从 types.ts 引所有 NormalizedMessage 相关类型，
 // ContextBlock 也走同一入口，避免到处改 import 路径。
@@ -595,6 +596,15 @@ export interface AgentBackend {
    * - 用户点了 UI 上的"刷新模型"按钮
    */
   invalidateModelsCache?(): void
+  /**
+   * 列出该 cwd 下可用的斜杠命令（含项目/用户 Skill），供输入框联想使用。
+   *
+   * 按 cwd 而不是全局：项目级 Skill 来自 `<cwd>/.claude/skills/`，换目录内容就变。
+   * 只有把斜杠命令当**文本**处理的后端才实现——claude 是（CLI 自己拦截 `/xxx`），
+   * codex 不是（它的斜杠命令是 TUI 本地功能，各自对应不同的 JSON-RPC，
+   * 当文本发过去只会被原样交给模型）。不实现 = 该后端没有斜杠命令。
+   */
+  listSlashCommands?(cwd: string): Promise<SlashCommandInfo[]>
   getCapabilities(): BackendCapabilities
 
   startSession(args: StartSessionArgs): Promise<{ sessionId: string; backendThreadId: string }>

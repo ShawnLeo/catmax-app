@@ -86,6 +86,9 @@ export const api = {
       IPC.BACKEND_REFRESH_MODELS_FOR,
     ),
     warmup: requestMain<BackendHandlers, 'backend.warmup'>(IPC.BACKEND_WARMUP),
+    slashCommands: requestMain<BackendHandlers, 'backend.slashCommands'>(
+      IPC.BACKEND_SLASH_COMMANDS,
+    ),
     startTurn: requestMain<BackendHandlers, 'backend.startTurn'>(IPC.BACKEND_START_TURN),
     interruptTurn: requestMain<BackendHandlers, 'backend.interruptTurn'>(
       IPC.BACKEND_INTERRUPT_TURN,

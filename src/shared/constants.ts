@@ -48,6 +48,7 @@ export const IPC = {
   BACKEND_REFRESH_MODELS: 'backend.refreshModels',
   BACKEND_REFRESH_MODELS_FOR: 'backend.refreshModelsFor',
   BACKEND_WARMUP: 'backend.warmup',
+  BACKEND_SLASH_COMMANDS: 'backend.slashCommands',
   BACKEND_START_TURN: 'backend.startTurn',
   BACKEND_INTERRUPT_TURN: 'backend.interruptTurn',
   BACKEND_STEER_TURN: 'backend.steerTurn',
