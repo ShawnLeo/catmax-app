@@ -145,6 +145,19 @@ export const windowIsMaximized = async (): Promise<boolean> => {
   return process.platform === 'darwin' ? win.isFullScreen() : win.isMaximized()
 }
 
+/** 窗口控制：切换始终置顶，并把主进程中的真实状态返回给渲染层。 */
+export const windowToggleAlwaysOnTop = async (): Promise<boolean> => {
+  const win = ctx.getMainWindow()
+  if (!win) return false
+  win.setAlwaysOnTop(!win.isAlwaysOnTop())
+  return win.isAlwaysOnTop()
+}
+
+/** 窗口控制：检查是否始终置顶。 */
+export const windowIsAlwaysOnTop = async (): Promise<boolean> => {
+  return ctx.getMainWindow()?.isAlwaysOnTop() ?? false
+}
+
 /**
  * 保存图片到用户选择的路径。
  *

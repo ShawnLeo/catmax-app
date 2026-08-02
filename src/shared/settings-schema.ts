@@ -114,6 +114,33 @@ const protocolBridgeSchema = z.object({
 })
 export type ProtocolBridgeSettings = z.infer<typeof protocolBridgeSchema>
 
+/** 主窗口上次关闭时的原生状态；坐标允许为负数（左侧/上方的外接显示器）。 */
+export const windowStateSchema = z.object({
+  x: z.number().int(),
+  y: z.number().int(),
+  width: z.number().int().positive(),
+  height: z.number().int().positive(),
+  maximized: z.boolean().default(false),
+  fullScreen: z.boolean().default(false),
+  alwaysOnTop: z.boolean().default(false),
+})
+export type WindowState = z.infer<typeof windowStateSchema>
+
+/**
+ * 面板尺寸的持久化上下限。
+ *
+ * 这组数只负责挡住明显不合法的值（负数、NaN、几千像素的脏数据），不承担布局策略——
+ * 用户实际能拖到哪由运行时按容器算（见 ChatView 的 sidebarMax / rightPanelMax /
+ * bottomPanelMax）。两边曾经各写各的数：UI 允许拖到容器的 78%，schema 却卡在 800，
+ * 超出的宽度在 settings.update 时被 Zod 打回，控制台刷 ZodError 而拖拽当下毫无反馈，
+ * 重启后宽度还退回旧值。所以上限取"任何屏幕都够用"的量级，并由 ui store 在写入口兜底 clamp。
+ */
+export const PANEL_SIZE_LIMITS = {
+  sidebarWidth: { min: 200, max: 2000 },
+  rightPanelWidth: { min: 200, max: 4000 },
+  bottomPanelHeight: { min: 100, max: 2000 },
+} as const
+
 export const appSettingsSchema = z.object({
   defaultBackend: z
     .string()
@@ -145,8 +172,25 @@ export const appSettingsSchema = z.object({
   language: z.enum(['zh-CN', 'en-US']).default('zh-CN'),
   sendOnEnter: z.boolean().default(true),
   showReasoningByDefault: z.boolean().default(false),
-  sidebarWidth: z.number().int().min(200).max(600).default(240),
-  rightPanelWidth: z.number().int().min(200).max(800).default(320),
-  bottomPanelHeight: z.number().int().min(100).max(600).default(320),
+  sidebarWidth: z
+    .number()
+    .int()
+    .min(PANEL_SIZE_LIMITS.sidebarWidth.min)
+    .max(PANEL_SIZE_LIMITS.sidebarWidth.max)
+    .default(240),
+  rightPanelWidth: z
+    .number()
+    .int()
+    .min(PANEL_SIZE_LIMITS.rightPanelWidth.min)
+    .max(PANEL_SIZE_LIMITS.rightPanelWidth.max)
+    .default(320),
+  bottomPanelHeight: z
+    .number()
+    .int()
+    .min(PANEL_SIZE_LIMITS.bottomPanelHeight.min)
+    .max(PANEL_SIZE_LIMITS.bottomPanelHeight.max)
+    .default(320),
+  /** Window State Persistence: 尺寸、位置、窗口模式与置顶状态。 */
+  windowState: windowStateSchema.nullable().default(null),
 })
 export type AppSettings = z.infer<typeof appSettingsSchema>

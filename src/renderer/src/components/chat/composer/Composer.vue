@@ -28,17 +28,17 @@
         <!-- 附件区 -->
         <AttachmentBar
           :attachments="chatInput.pendingAttachments"
+          :file-mentions="chatInput.fileMentions"
           @remove="chatInput.removeAttachment"
+          @remove-mention="chatInput.removeFileMention"
         />
 
-        <!-- textarea -->
-        <textarea
-          ref="textarea"
+        <!-- textarea（带 @路径 高亮，见 MentionTextarea） -->
+        <MentionTextarea
           v-model="prompt"
-          :placeholder="disabled ? '后端未连接...' : '发送消息...（Shift+Enter 换行）'"
+          :placeholder="disabled ? '后端未连接...' : hint"
           :disabled="disabled"
-          rows="3"
-          class="w-full bg-transparent font-chat text-[length:var(--chat-text-u2)] text-foreground px-4 py-3 resize-none focus:outline-none placeholder:text-muted-foreground/60 disabled:opacity-50"
+          :rows="3"
           @keydown="onKeyDown"
           @paste="onPaste"
         />
@@ -47,9 +47,24 @@
              用 @container 响应自身宽度(非视口),右面板挤压时优雅折叠:
                - 正常(宽):全部显示,带文字标签
                - 紧凑:Model 隐藏文字只留 chevron、Effort 隐藏文字+chevron 只留脑图标
-               - 极窄:隐藏刷新按钮 + 辅助提示文字
+               - 极窄:隐藏刷新按钮
                权限盾牌 + Model + Effort + 发送按钮 永不隐藏 -->
         <div class="flex items-center gap-2 px-3 py-2">
+          <!--
+            File Mention: 加号 = 选文件加进对话。拖放没有可见入口，这是它的
+            按钮形态入口；跟 Model 一样永不折叠，窄屏下它只占一个图标的宽度。
+          -->
+          <button
+            type="button"
+            class="composer-add text-secondary-foreground/70 hover:text-secondary-foreground hover:bg-accent transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+            :disabled="disabled"
+            title="添加文件到对话"
+            aria-label="添加文件到对话"
+            @click="onPickFiles"
+          >
+            <PlusIcon class="w-4 h-4" />
+          </button>
+
           <!-- Model(最高优先级,几乎一直显示;窄时只显图标) -->
           <DropdownMenu
             :model-value="modelValue.model"
@@ -106,12 +121,11 @@
 
           <div class="flex-1" />
 
-          <!-- 提示文字:窄屏隐藏(composer-hint) -->
-          <span
-            class="composer-hint font-sans text-[length:var(--chat-text-d2)] text-muted-foreground hidden sm:inline"
-          >
-            Shift+Enter 换行
-          </span>
+          <!--
+            这里原本有一条写死的「Shift+Enter 换行」。提示改成在占位符里轮换后
+            它就成了重复信息，而且是唯一一条永远不变的——留着反而显得占位符
+            在乱跳。提示只有一个出口。
+          -->
 
           <!--
             发送 / 停止按钮——方形带圆角（非纯圆）。
@@ -147,18 +161,22 @@
 
 <script setup lang="ts">
 import AttachmentBar from '@renderer/components/chat/composer/AttachmentBar.vue'
+import MentionTextarea from '@renderer/components/chat/composer/MentionTextarea.vue'
 import PermissionShieldButton from '@renderer/components/chat/composer/PermissionShieldButton.vue'
 import ThinkingSlider from '@renderer/components/chat/composer/ThinkingSlider.vue'
 import { Button } from '@renderer/components/ui/button'
 import { DropdownMenu } from '@renderer/components/ui/dropdown-menu'
 import { chatContentWidthClass } from '@renderer/lib/chat-layout'
+import { shuffledHints } from '@renderer/lib/composer-hints'
+import { mentionPathFor } from '@renderer/lib/mention-path'
 import { useBackendStore } from '@renderer/stores/backend'
 import { useChatInputStore } from '@renderer/stores/chat-input'
 import { useMessageStore } from '@renderer/stores/message'
 import { useSettingsStore } from '@renderer/stores/settings'
+import { useWorkspaceStore } from '@renderer/stores/workspace'
 import type { ContextBlock, EffortLevel, PermissionMode } from '@shared/backend/types'
-import { ArrowUpIcon, RefreshCwIcon, SquareIcon } from 'lucide-vue-next'
-import { ref, computed } from 'vue'
+import { ArrowUpIcon, PlusIcon, RefreshCwIcon, SquareIcon } from 'lucide-vue-next'
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 
 interface RuntimeConfigValue {
   model: string | null
@@ -179,8 +197,71 @@ const emit = defineEmits<{
 const messageStore = useMessageStore()
 const settingsStore = useSettingsStore()
 const backendStore = useBackendStore()
+const workspaceStore = useWorkspaceStore()
 const chatInput = useChatInputStore()
-const prompt = ref('')
+// File Mention: 输入框文本住在 store 里——拖放遮罩、文件树右键菜单这些跟 Composer
+// 没有父子关系的地方都要往里写引用，见 chat-input store 的说明。
+const prompt = computed({
+  get: () => chatInput.text,
+  set: (value: string) => {
+    chatInput.text = value
+  },
+})
+
+/*
+ * Composer Hints: 占位符定时轮换，见 lib/composer-hints.ts。
+ *
+ * 只在输入框为空时走——有文字时占位符本来就看不见，转它纯属白转，
+ * 而且用户回到空输入框时看到的会是一条刚换过的，像没轮换。
+ */
+const hints = ref<string[]>([])
+const hintIndex = ref(0)
+const hint = computed(() => hints.value[hintIndex.value % hints.value.length] ?? '发送消息…')
+
+let hintTimer: ReturnType<typeof setInterval> | null = null
+const HINT_ROTATE_MS = 9000
+
+// 设置里的「回车发送」决定 Shift+Enter 那条成不成立，改了要重新组装提示池。
+watch(
+  () => settingsStore.settings?.sendOnEnter ?? true,
+  (sendOnEnter) => {
+    hints.value = shuffledHints(sendOnEnter)
+    hintIndex.value = 0
+  },
+  { immediate: true },
+)
+
+onMounted(() => {
+  hintTimer = setInterval(() => {
+    if (prompt.value.length > 0) return
+    hintIndex.value = (hintIndex.value + 1) % hints.value.length
+  }, HINT_ROTATE_MS)
+})
+
+onUnmounted(() => {
+  if (hintTimer) clearInterval(hintTimer)
+})
+
+/**
+ * File Mention: 「+」按钮——选文件加进对话。
+ *
+ * 走的是跟拖放同一个落地路径（mentionPathFor + addFileMention），所以同一个文件
+ * 不管从哪个入口进来，写进输入框的都是同一条引用，不会出现两个看着不同的 pill。
+ *
+ * 对话框只开 openFile：macOS 允许一个对话框同时选文件和目录，Windows 不允许，
+ * 混着写会在 Windows 上静默退化。目录仍可以拖进来或在文件树上右键添加。
+ */
+async function onPickFiles(): Promise<void> {
+  const result = await window.api.system.openDialog({
+    title: '选择要加入对话的文件',
+    properties: ['openFile', 'multiSelections'],
+  })
+  if (result.canceled) return
+  const workspaceId = workspaceStore.currentWorkspace?.id
+  for (const absolutePath of result.filePaths) {
+    chatInput.addFileMention(await mentionPathFor(workspaceId, absolutePath))
+  }
+}
 
 const refreshing = ref(false)
 async function onRefreshModels(): Promise<void> {
@@ -243,7 +324,17 @@ function onKeyDown(e: KeyboardEvent): void {
 function onSend(): void {
   if (!canSend.value) return
   const text = prompt.value.trim()
-  const attachments = chatInput.drain()
+  /*
+   * File Mention: 文本里的 `@路径` 原样留在 prompt 里，另外再附一份结构化的
+   * ide_opened_file。两者都要——`@路径` 保住引用在句子里的位置（"照着 @a.ts
+   * 改 @b.ts" 换成一串标签就读不出谁是谁了），而标签让后端拿到明确的文件清单，
+   * 也让消息气泡能渲染出可点击的文件 pill（复用已有的 FilePill）。
+   */
+  const mentionBlocks = chatInput.fileMentions.map<ContextBlock>((m) => ({
+    tag: 'ide_opened_file',
+    data: { filePath: m.path },
+  }))
+  const attachments = [...chatInput.drain(), ...mentionBlocks]
   prompt.value = ''
   emit('send', text, attachments)
 }
@@ -339,8 +430,9 @@ function onPermissionModeSelect(value: PermissionMode): void {
   color: var(--color-accent-foreground);
 }
 
-/* 刷新按钮也统一高度 + 透明背景 */
-.composer-refresh {
+/* 刷新按钮和加号按钮也统一高度 + 透明背景 */
+.composer-refresh,
+.composer-add {
   height: 1.75rem;
   width: 1.75rem;
   display: inline-flex;
@@ -359,17 +451,10 @@ function onPermissionModeSelect(value: PermissionMode): void {
  *
  * 折叠策略(按容器实际宽度,从宽到窄逐级折叠):
  *   - ≥512px (32rem):全部正常显示
- *   - 紧凑:Model/Effort trigger 收窄,辅助提示隐藏
+ *   - 紧凑:Model/Effort trigger 收窄
  *   - 极窄:刷新按钮隐藏
  *   权限盾牌 + Model + Effort + 发送按钮 永不隐藏
  */
-
-/* ---- 辅助提示文字:< 32rem 隐藏 ---- */
-.composer-hint {
-  @container (width < 32rem) {
-    display: none;
-  }
-}
 
 /* ---- 刷新按钮:< 28rem 隐藏(优先级低于 Model/Effort/权限) ---- */
 .composer-refresh {

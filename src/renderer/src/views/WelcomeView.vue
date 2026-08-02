@@ -14,7 +14,7 @@
 
     <!-- 主体：居中内容 -->
     <div class="flex-1 flex flex-col items-center justify-center gap-6 p-8">
-      <div class="flex flex-col items-center gap-4">
+      <div class="welcome-logo-glow flex flex-col items-center gap-4">
         <CatmaxLogo variant="plain" class="w-20 h-20" />
         <div class="text-center">
           <h1 class="text-[length:var(--ui-text-display)] font-bold text-foreground">Catmax</h1>
@@ -26,7 +26,10 @@
         {{ adding ? '添加中...' : '选择工作区' }}
       </Button>
 
-      <div v-if="workspaceStore.workspaces.length > 0" class="w-full max-w-md">
+      <div
+        v-if="workspaceStore.workspaces.length > 0"
+        class="welcome-workspaces-glow w-full max-w-md"
+      >
         <h2 class="text-[length:var(--ui-text-base)] font-medium text-muted-foreground mb-2">
           最近工作区
         </h2>
@@ -99,5 +102,49 @@ async function openWorkspace(id: string): Promise<void> {
 
 .interactive {
   -webkit-app-region: no-drag;
+}
+
+/* Welcome Ambience: 与新会话空状态一致的低对比径向光晕，不形成可见卡片边界。 */
+.welcome-logo-glow,
+.welcome-workspaces-glow {
+  position: relative;
+  isolation: isolate;
+}
+
+.welcome-logo-glow::before,
+.welcome-workspaces-glow::before {
+  position: absolute;
+  z-index: -1;
+  border-radius: 9999px;
+  content: '';
+  pointer-events: none;
+}
+
+.welcome-logo-glow::before {
+  top: 40%;
+  left: 50%;
+  width: 300px;
+  height: 300px;
+  background: radial-gradient(
+    circle,
+    color-mix(in oklch, var(--foreground) 5%, transparent) 0,
+    color-mix(in oklch, var(--foreground) 2%, transparent) 43%,
+    transparent 72%
+  );
+  transform: translate(-50%, -50%);
+}
+
+.welcome-workspaces-glow::before {
+  top: 48%;
+  left: 50%;
+  width: min(620px, 125%);
+  height: min(420px, 120%);
+  background: radial-gradient(
+    ellipse,
+    color-mix(in oklch, var(--foreground) 3.5%, transparent) 0,
+    color-mix(in oklch, var(--foreground) 1.5%, transparent) 48%,
+    transparent 76%
+  );
+  transform: translate(-50%, -50%);
 }
 </style>

@@ -1,5 +1,6 @@
 import type { DiffStats } from '@renderer/lib/diff-stats'
 import type { ReviewFile } from '@renderer/lib/review'
+import { PANEL_SIZE_LIMITS } from '@shared/settings-schema'
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
 
@@ -9,9 +10,11 @@ const DEFAULT_FILE_PREVIEW_WIDTH = 520
 const DEFAULT_BOTTOM_PANEL_HEIGHT = 320
 
 // Pointer coordinates can be fractional under display scaling. Persisted panel dimensions are
-// integer pixels, so normalize them at the store boundary before they can reach settings.update.
-function normalizePanelSize(size: number): number {
-  return Math.round(size)
+// integer pixels within a fixed range, so normalize them at the store boundary before they can
+// reach settings.update —— 越界的值会被 Zod 打回，而写入方（拖拽结束）不看返回值，
+// 表现是主进程刷 ZodError、这次拖出来的宽度存不进去，拖拽当下却没有任何提示。
+function normalizePanelSize(size: number, limits: { min: number; max: number }): number {
+  return Math.min(limits.max, Math.max(limits.min, Math.round(size)))
 }
 
 /**
@@ -30,11 +33,16 @@ export const useUiStore = defineStore('ui', () => {
   // 它跟 sidebarCollapsed 是两个独立状态——peek 只是临时借看一眼会话列表，
   // 收回时折叠状态不变（真正展开仍然只能靠 toggleSidebar）。
   const sidebarPeeking = ref(false)
+  // Sidebar Overlay: toggleSidebar 的调用计数。窄窗口下侧栏展开是浮层形态（抽屉式，
+  // 点侧栏外面收起），而顶栏的「切换侧栏」按钮本身也在侧栏外面——这个序号让"点外部"
+  // 能分辨"用户想收起侧栏"和"用户点的正是切换按钮（它自己会翻转状态）"，后者不该
+  // 被 outside-close 再插一手（否则刚点开的浮层立刻又被收起）。跟 rightPanelOpenSeq 同构。
+  const sidebarToggleSeq = ref(0)
   const settingsDialogOpen = ref(false)
   const rightPanelVisible = ref(false)
   const bottomPanelVisible = ref(false)
   const commandPaletteVisible = ref(false)
-  const rightPanelTab = ref<RightPanelTab>('git')
+  const rightPanelTab = ref<RightPanelTab>('files')
   // Right Panel Overlay: showRightPanel 的调用计数。浮层形态是抽屉式的（点面板外面收起），
   // 而消息流里的「审查」「后台任务」入口本身也在面板外面——这个序号让"点外部"能分辨
   // "用户想关掉面板"和"用户点的正是打开面板的入口"，后者不该先关一次再弹回来。
@@ -82,12 +90,12 @@ export const useUiStore = defineStore('ui', () => {
   }
 
   function setSidebarWidth(width: number): void {
-    sidebarWidth.value = normalizePanelSize(width)
+    sidebarWidth.value = normalizePanelSize(width, PANEL_SIZE_LIMITS.sidebarWidth)
     if (!panelDragging.value) saveWidths()
   }
 
   function setRightPanelWidth(width: number): void {
-    rightPanelWidth.value = normalizePanelSize(width)
+    rightPanelWidth.value = normalizePanelSize(width, PANEL_SIZE_LIMITS.rightPanelWidth)
     if (!panelDragging.value) saveWidths()
   }
 
@@ -100,7 +108,7 @@ export const useUiStore = defineStore('ui', () => {
   }
 
   function setBottomPanelHeight(height: number): void {
-    bottomPanelHeight.value = normalizePanelSize(height)
+    bottomPanelHeight.value = normalizePanelSize(height, PANEL_SIZE_LIMITS.bottomPanelHeight)
     if (!panelDragging.value) saveWidths()
   }
 
@@ -134,6 +142,7 @@ export const useUiStore = defineStore('ui', () => {
 
   function toggleSidebar(): void {
     sidebarCollapsed.value = !sidebarCollapsed.value
+    sidebarToggleSeq.value += 1
     // 展开/折叠后 peek 一律收掉：展开时它会跟真侧栏重叠，折叠时用户刚做完显式操作，
     // 再留一层浮层在那儿只会挡住视线。
     sidebarPeeking.value = false
@@ -291,6 +300,7 @@ export const useUiStore = defineStore('ui', () => {
   return {
     sidebarCollapsed,
     sidebarPeeking,
+    sidebarToggleSeq,
     settingsDialogOpen,
     rightPanelVisible,
     bottomPanelVisible,

@@ -1,34 +1,41 @@
 <template>
   <div ref="containerRef" class="h-full flex relative">
-    <!-- 侧边栏（始终挂载，折叠通过宽度 0 过渡，见 Sidebar.vue） -->
-    <Sidebar />
-    <ResizeHandle
-      v-if="!uiStore.sidebarCollapsed"
-      side="left"
-      :min="SIDEBAR_MIN"
-      :max="sidebarMax"
-      :current="uiStore.sidebarWidth"
-      @resize="uiStore.setSidebarWidth"
-    />
+    <!--
+      侧栏停靠形态（宽窗口）：始终挂载，折叠通过宽度 0 过渡，见 Sidebar.vue。
+      窄窗口下侧栏走浮层（见下方 sidebar overlay 分支），停靠树整块隐藏。
+    -->
+    <template v-if="!sidebarOverlay">
+      <Sidebar />
+      <ResizeHandle
+        v-if="!uiStore.sidebarCollapsed"
+        side="left"
+        :min="SIDEBAR_MIN"
+        :max="sidebarMax"
+        :current="uiStore.sidebarWidth"
+        @resize="uiStore.setSidebarWidth"
+      />
+    </template>
 
     <!--
       Sidebar Peek 热区：侧栏折叠时，窗口最左边缘一条 8px 的感应带。
       指针划进来就临时划出一层浮动侧栏（会话列表 + 底部设置栏），不改变折叠状态。
+      仅停靠形态下挂——浮层形态侧栏是展开的，用不到 peek。
     -->
     <div
-      v-if="uiStore.sidebarCollapsed"
+      v-if="!sidebarOverlay && uiStore.sidebarCollapsed"
       class="absolute inset-y-0 left-0 z-30 w-2"
       aria-hidden="true"
       @pointerenter="openPeek"
     />
 
     <!--
-      划出的浮层：从顶栏下方开始（顶栏那一条 h-12 已有窗口控制按钮和标题，不重复划出），
-      内容复用同一个 Sidebar 组件的 overlay 形态，指针离开后由 useSidebarPeek 自动收回。
+      Sidebar Peek 划出的浮层（停靠形态 + 折叠态）：从顶栏下方开始（顶栏 h-12 已有窗口
+      控制按钮和标题，不重复划出），内容复用同一个 Sidebar 组件的 overlay 形态，
+      指针离开后由 useSidebarPeek 自动收回。
     -->
     <Transition name="sidebar-peek">
       <div
-        v-if="uiStore.sidebarPeeking"
+        v-if="!sidebarOverlay && uiStore.sidebarPeeking"
         ref="peekRef"
         class="absolute bottom-0 left-0 top-12 z-40 flex"
       >
@@ -36,11 +43,33 @@
       </div>
     </Transition>
 
+    <!--
+      Sidebar Overlay（窄窗口展开侧栏）：浮在聊天区之上，不占布局宽度。展开/收起由
+      顶栏切换按钮控制；点侧栏外或按 Esc 收起（抽屉式，见 useSidebarOverlay）。
+      完整侧栏（含窗口控制按钮），所以 showWorkspace=true。
+    -->
+    <Transition name="sidebar-overlay">
+      <div
+        v-if="sidebarOverlay && !uiStore.sidebarCollapsed"
+        ref="sidebarOverlayRef"
+        class="absolute inset-y-0 left-0 z-40 flex"
+      >
+        <Sidebar variant="overlay" show-workspace />
+      </div>
+    </Transition>
+
     <!-- 主聊天区:用具体 min-width 而非 min-w-0,防止被右面板挤压到低于 250px。
          sidebar 折叠时宽度为 0,不占空间;展开时由 ResizeHandle clamp 在 [SIDEBAR_MIN, 容器一半],
          加上这里的 min-w 保证主聊天区 + sidebar 不会被右面板挤没。 -->
-    <div ref="chatColumnRef" class="flex-1 flex flex-col min-w-[250px]">
-      <RuntimeConfigBar />
+    <div ref="chatColumnRef" class="relative flex-1 flex flex-col min-w-[250px]">
+      <!--
+        File Mention: 拖拽文件时的投放区，盖住整条主聊天列（含输入框）。
+        relative 是它的定位锚——遮罩用 absolute inset-0 铺满这一列，
+        不能铺到侧栏/右栏上，见 useChatFileDrop 的「生效边界 = 视觉边界」。
+      -->
+      <FileDropOverlay :active="fileDragActive" @drop="onFileDrop" />
+
+      <RuntimeConfigBar :window-draggable="!topBarCoveredByOverlay" />
 
       <MessageList
         v-if="messageStore.messages.length > 0"
@@ -60,6 +89,17 @@
           </p>
           <p class="mt-2 max-w-sm text-[length:var(--ui-text-base)] leading-relaxed">
             告诉我你想构建、修改或了解什么，我们可以从这里开始。
+          </p>
+
+          <!--
+            File Mention: 拖放是个没有可见入口的功能——不写出来就只有知道的人会用。
+            放在这里而不是输入框附近，是因为空会话页正是用户还没想好从哪下手的时刻。
+          -->
+          <p
+            class="mt-4 inline-flex items-center gap-1.5 rounded-full border border-dashed border-border px-3 py-1 text-[length:var(--ui-text-d3)] text-muted-foreground"
+          >
+            <FilePlusIcon class="h-3.5 w-3.5" />
+            把文件或文件夹拖进来，就能在对话里引用它
           </p>
 
           <div
@@ -131,7 +171,7 @@
         :current="rightPanelCurrent"
         @resize="resizeRightPanel"
       />
-      <RightPanel />
+      <RightPanel :file-split-allowed="fileSplitAllowed" />
     </template>
     <Transition v-else name="right-panel-overlay">
       <div
@@ -146,7 +186,7 @@
           :current="rightPanelCurrent"
           @resize="resizeRightPanel"
         />
-        <RightPanel variant="overlay" />
+        <RightPanel variant="overlay" :file-split-allowed="fileSplitAllowed" />
       </div>
     </Transition>
   </div>
@@ -159,16 +199,29 @@ import QuestionPanel from '@renderer/components/chat/feedback/QuestionPanel.vue'
 import BottomTerminalPanel from '@renderer/components/chat/layout/BottomTerminalPanel.vue'
 import RuntimeConfigBar from '@renderer/components/chat/layout/RuntimeConfigBar.vue'
 import MessageList from '@renderer/components/chat/messages/MessageList.vue'
+import FileDropOverlay from '@renderer/components/chat/overlays/FileDropOverlay.vue'
 import BackendIcon from '@renderer/components/icons/BackendIcon.vue'
 import CatmaxLogo from '@renderer/components/icons/CatmaxLogo.vue'
 import RightPanel from '@renderer/components/panel/RightPanel.vue'
 import Sidebar from '@renderer/components/sidebar/Sidebar.vue'
 import ResizeHandle from '@renderer/components/ui/ResizeHandle.vue'
-import { useRightPanelOverlay } from '@renderer/composables/useRightPanelOverlay'
+import { useChatFileDrop } from '@renderer/composables/useChatFileDrop'
+import {
+  OVERLAY_MAX_RATIO as RIGHT_PANEL_OVERLAY_MAX_RATIO,
+  useRightPanelOverlay,
+} from '@renderer/composables/useRightPanelOverlay'
+import { useSidebarOverlay } from '@renderer/composables/useSidebarOverlay'
 import { useSidebarPeek } from '@renderer/composables/useSidebarPeek'
 import { useStreamMessage } from '@renderer/composables/useStreamMessage'
 import { MIN_WIDTH_FOR_MESSAGE_NAV_RAIL } from '@renderer/lib/chat-layout'
 import { isNavigableUserMessage } from '@renderer/lib/message-navigation'
+import {
+  FILE_PREVIEW_MIN,
+  FILE_SPLIT_HANDLE_WIDTH,
+  FILE_TREE_MIN,
+  MIN_WIDTH_FOR_FILE_SPLIT,
+  RIGHT_PANEL_MIN,
+} from '@renderer/lib/panel-layout'
 import { randomUUID } from '@renderer/lib/utils'
 import { useBackendStore } from '@renderer/stores/backend'
 import { useFilesStore } from '@renderer/stores/files'
@@ -185,9 +238,9 @@ import type {
   PermissionMode,
   TurnConfigUpdate,
 } from '@shared/backend/types'
-import type { BackendId } from '@shared/constants'
+import { type BackendId, NARROW_WINDOW_BREAKPOINT } from '@shared/constants'
 import type { RuntimeConfigSnapshot } from '@shared/ipc/session'
-import { HouseIcon } from 'lucide-vue-next'
+import { FilePlusIcon, HouseIcon } from 'lucide-vue-next'
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 
@@ -212,9 +265,6 @@ const backendDisplayName = computed(() => {
 
 // 侧栏可拖拽宽度--min 为当前默认宽度，max 为容器一半（即最大 1:1 与聊天区同宽）
 const SIDEBAR_MIN = 280
-const RIGHT_PANEL_MIN = 320
-const FILE_PREVIEW_MIN = 360
-const FILE_PREVIEW_SPLIT_HANDLE_WIDTH = 1
 // 主聊天区最小宽度——右面板拖宽时不能把聊天区挤到低于此值。
 // 250px 保证 textarea + 发送按钮至少能正常显示,再加窄就失去可用性。
 const CHAT_AREA_MIN = 250
@@ -225,6 +275,18 @@ const chatColumnRef = ref<HTMLElement | null>(null)
 const containerWidth = ref(Number.POSITIVE_INFINITY)
 const containerHeight = ref(Number.POSITIVE_INFINITY)
 const chatColumnWidth = ref(0)
+
+// Narrow Window: 只在“跨入”手机宽度时自动收起一次。进入窄屏后用户仍可手动打开
+// 任一抽屉，不会因为后续每一帧 ResizeObserver 回调又被强制关闭。
+watch(
+  () => containerWidth.value <= NARROW_WINDOW_BREAKPOINT,
+  (narrow, wasNarrow) => {
+    if (!narrow || wasNarrow === true) return
+    if (!uiStore.sidebarCollapsed) uiStore.toggleSidebar()
+    uiStore.closeSidebarPeek()
+    uiStore.hideRightPanel()
+  },
+)
 
 const navRailVisible = computed(
   () =>
@@ -239,16 +301,51 @@ const sidebarMax = computed(() => Math.max(SIDEBAR_MIN, Math.floor(containerWidt
 const filePreviewOpen = computed(
   () => uiStore.rightPanelTab === 'files' && filesStore.previewTabs.length > 0,
 )
-const fileTreeOpen = computed(
-  () => uiStore.rightPanelTab !== 'files' || uiStore.fileTreeVisible || !filePreviewOpen.value,
+/**
+ * Right Panel Layout: 这个窗口最多能给右栏多少宽度——取「浮层上限」和「停靠上限」中
+ * 更宽松的那个，刻意不看当前是哪种形态。
+ *
+ * 形态判定（useRightPanelOverlay）本身要拿右栏的期望宽度当输入，而下面的单栏/并排
+ * 决策又会改变期望宽度，跟着形态走就成了循环依赖。取 max 是安全的：停靠放不下的时候
+ * 布局会自动切成浮层，所以真正的上限本来就是两者中较大的那个。
+ */
+const rightPanelAvailable = computed(() =>
+  Math.max(
+    Math.floor(containerWidth.value * RIGHT_PANEL_OVERLAY_MAX_RATIO),
+    containerWidth.value - (uiStore.sidebarCollapsed ? 0 : uiStore.sidebarWidth) - CHAT_AREA_MIN,
+  ),
+)
+
+// File Preview Split: 并排放不下时（可用宽度低于 MIN_WIDTH_FOR_FILE_SPLIT）退成单栏，
+// 预览和文件树同一时刻只显示一个，由 uiStore.fileTreeVisible 决定是哪一个。
+const fileSplitAllowed = computed(() => rightPanelAvailable.value >= MIN_WIDTH_FOR_FILE_SPLIT)
+const fileSplitActive = computed(
+  () => filePreviewOpen.value && uiStore.fileTreeVisible && fileSplitAllowed.value,
+)
+/** 单栏形态下当前占满右栏的是文件树（而不是预览）吗？ */
+const fileTreeSolo = computed(
+  () => uiStore.rightPanelTab === 'files' && !fileSplitActive.value && uiStore.fileTreeVisible,
 )
 const rightPanelCurrent = computed(() => {
-  if (filePreviewOpen.value && fileTreeOpen.value) {
-    return uiStore.rightPanelWidth + uiStore.filePreviewWidth + FILE_PREVIEW_SPLIT_HANDLE_WIDTH
+  if (fileSplitActive.value) {
+    return uiStore.rightPanelWidth + uiStore.filePreviewWidth + FILE_SPLIT_HANDLE_WIDTH
   }
-  return filePreviewOpen.value ? uiStore.filePreviewWidth : uiStore.rightPanelWidth
+  return filePreviewOpen.value && !fileTreeSolo.value
+    ? uiStore.filePreviewWidth
+    : uiStore.rightPanelWidth
 })
-const rightPanelMin = computed(() => (filePreviewOpen.value ? FILE_PREVIEW_MIN : RIGHT_PANEL_MIN))
+/**
+ * 拖拽下限也要向窗口让步：预览的理想下限是 360，但窗口本身只有 360 宽时，坚持这个
+ * 下限只会让面板顶出窗口——溢出的是左边那一栏，正好是用户在看的文件详情。
+ */
+const rightPanelMin = computed(() => {
+  const ideal = fileSplitActive.value
+    ? MIN_WIDTH_FOR_FILE_SPLIT
+    : filePreviewOpen.value && !fileTreeSolo.value
+      ? FILE_PREVIEW_MIN
+      : RIGHT_PANEL_MIN
+  return Math.min(ideal, rightPanelAvailable.value)
+})
 
 // Right Panel Overlay: 窗口窄到聊天区放不下时右栏改成浮层，不再挤占布局宽度。
 const {
@@ -256,6 +353,26 @@ const {
   overlayRef: rightPanelOverlayRef,
   overlayMaxWidth,
 } = useRightPanelOverlay({ containerWidth, desiredWidth: rightPanelCurrent })
+
+// Sidebar Overlay: 窗口窄到聊天区放不下时，展开侧栏也改成浮层（跟右栏对称），不挤压宽度。
+// 必须在 containerWidth 声明之后调用（同 useRightPanelOverlay）。
+const { overlayMode: sidebarOverlay, overlayRef: sidebarOverlayRef } = useSidebarOverlay({
+  containerWidth,
+})
+
+// File Mention: 拖文件进会话。这个 composable 还顺带在 window 上拦掉所有文件投放——
+// 不拦的话 Chromium 会导航到 file:// URL，整个应用白屏且无路可退。
+const { dragActive: fileDragActive, onDrop: onFileDrop } = useChatFileDrop()
+
+// Window Drag Region: 任一浮层展开时，它的标题栏就压在 RuntimeConfigBar 那条上（两者
+// 都是顶部 48px）。Electron 的拖拽区是全局矩形集合、不看 z-index，重叠会让浮层里按钮
+// 的 no-drag 洞被填回去（工作区下拉打不开、右栏 tab 点不动）——所以这时让底下那条整条
+// 退出拖拽区，重叠像素只保留浮层自己的声明。详见 RuntimeConfigBar 的 windowDraggable。
+const topBarCoveredByOverlay = computed(
+  () =>
+    (sidebarOverlay.value && !uiStore.sidebarCollapsed) ||
+    (rightPanelOverlay.value && uiStore.rightPanelVisible),
+)
 
 const rightPanelMax = computed(() => {
   // 浮层形态不占布局宽度,"挤压聊天区"这个约束不再成立——只要不铺满整个窗口即可
@@ -305,27 +422,55 @@ onUnmounted(() => {
 })
 
 function resizeRightPanel(width: number): void {
-  // File Preview Layout: 文件树宽度保持稳定，预览打开时只调整它左侧的预览区域。
-  if (filePreviewOpen.value && fileTreeOpen.value) {
-    uiStore.setFilePreviewWidth(width - uiStore.rightPanelWidth - FILE_PREVIEW_SPLIT_HANDLE_WIDTH)
-  } else if (filePreviewOpen.value) {
+  // File Preview Layout: 文件树宽度保持稳定，并排时只调整它左侧的预览区域。
+  if (fileSplitActive.value) {
+    uiStore.setFilePreviewWidth(width - uiStore.rightPanelWidth - FILE_SPLIT_HANDLE_WIDTH)
+  } else if (filePreviewOpen.value && !fileTreeSolo.value) {
     uiStore.setFilePreviewWidth(width)
   } else {
     uiStore.setRightPanelWidth(width)
   }
 }
 
-watch([filePreviewOpen, rightPanelMax], ([previewOpen, maxWidth]) => {
-  if (previewOpen && rightPanelCurrent.value > maxWidth) {
-    uiStore.setFilePreviewWidth(Math.max(FILE_PREVIEW_MIN, maxWidth - uiStore.rightPanelWidth))
-  }
-})
+/**
+ * Right Panel Layout: 把存下来的宽度收进当前窗口放得下的范围。
+ *
+ * 浮层形态没有"挤压聊天区"这个泄压阀，停靠形态下右栏又是 shrink-0，任何一种形态里
+ * 存量宽度超出可用空间都会直接溢出到窗口外——而右栏是贴着右边缘定位的，溢出的是它
+ * 最左边那一栏，也就是文件详情。窗口缩小、tab 切换、并排退成单栏都会改变可用宽度，
+ * 所以这里盯着最终生效的 rightPanelCurrent，而不是某一个具体来源。
+ */
+watch(
+  [rightPanelCurrent, rightPanelMax, rightPanelMin],
+  ([current, maxWidth, minWidth]) => {
+    if (current <= maxWidth) return
+    if (fileSplitActive.value) {
+      // 并排：先压预览（文件树已经是导航用的窄栏），压不动了再动文件树。
+      const treeWidth = uiStore.rightPanelWidth
+      const previewTarget = maxWidth - treeWidth - FILE_SPLIT_HANDLE_WIDTH
+      if (previewTarget >= FILE_PREVIEW_MIN) {
+        uiStore.setFilePreviewWidth(previewTarget)
+        return
+      }
+      uiStore.setFilePreviewWidth(FILE_PREVIEW_MIN)
+      uiStore.setRightPanelWidth(
+        Math.max(FILE_TREE_MIN, maxWidth - FILE_PREVIEW_MIN - FILE_SPLIT_HANDLE_WIDTH),
+      )
+      return
+    }
+    const target = Math.max(minWidth, maxWidth)
+    if (filePreviewOpen.value && !fileTreeSolo.value) uiStore.setFilePreviewWidth(target)
+    else uiStore.setRightPanelWidth(target)
+  },
+  { immediate: true },
+)
 
-// Right Panel Overlay: 浮层形态下面板宽度没有"挤压聊天区"这个泄压阀，窗口比面板还窄时
-// （比如审查 tab 把宽度撑到 760 之后再把窗口缩小）必须自己收进来，否则会溢出到窗口外。
-watch([rightPanelOverlay, rightPanelMax], ([overlay, maxWidth]) => {
-  if (!overlay || filePreviewOpen.value) return
-  if (uiStore.rightPanelWidth > maxWidth) uiStore.setRightPanelWidth(maxWidth)
+/**
+ * File Preview Split: 并排放不下的那一刻优先留下文件详情——文件树是导航，详情才是
+ * 用户正在读的内容。反过来空间够了不自动恢复并排，避免跟用户手动的显隐来回打架。
+ */
+watch(fileSplitAllowed, (allowed) => {
+  if (!allowed && filePreviewOpen.value) uiStore.setFileTreeVisible(false)
 })
 
 // 工作区切换时刷新 git status
@@ -792,6 +937,20 @@ async function onSend(text: string, attachments: ContextBlock[]): Promise<void> 
 
 .sidebar-peek-enter-from,
 .sidebar-peek-leave-to {
+  transform: translateX(-100%);
+  opacity: 0;
+}
+
+/* Sidebar Overlay: 窄窗口下展开侧栏的浮层，同样从左边缘滑入/滑出。 */
+.sidebar-overlay-enter-active,
+.sidebar-overlay-leave-active {
+  transition:
+    transform 200ms ease,
+    opacity 200ms ease;
+}
+
+.sidebar-overlay-enter-from,
+.sidebar-overlay-leave-to {
   transform: translateX(-100%);
   opacity: 0;
 }

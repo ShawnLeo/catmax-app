@@ -71,6 +71,8 @@ export interface ResolvedFileReference {
   absolutePath?: string
   line?: number
   column?: number
+  /** File Mention: 引用指向的是目录——仅在调用方传了 allowDirectory 时可能为 true。 */
+  isDirectory?: boolean
 }
 
 export async function readFilePreview(_args: {
@@ -102,6 +104,12 @@ export async function resolveFileReference(_args: {
   /** @see readDirectory 的 workspacePath 兼容说明。 */
   workspacePath?: string
   reference: string
+  /**
+   * File Mention: 允许解析到目录（默认 false，只认常规文件）。
+   * 预览通道必须保持 false——目录进了 readFilePreview 只会报错；
+   * 只有"引用进对话"才需要它（拖入文件夹、右键点在目录上）。
+   */
+  allowDirectory?: boolean
 }): Promise<ResolvedFileReference | null> {
   throw new Error('implemented in main')
 }
@@ -121,6 +129,36 @@ export async function pathExists(_args: { absolutePath: string }): Promise<boole
   throw new Error('implemented in main')
 }
 
+/** File Mention: 一条引用在 pill 上要显示什么，见 readMentionPreview。 */
+export interface MentionPreview {
+  /** 引用指向的是目录——pill 用它决定画文件夹图标还是文件图标 */
+  isDirectory: boolean
+  /** 图片缩略图 data URL；非图片、目录、或文件大到不值得解码时为 null */
+  thumbnail: string | null
+}
+
+/**
+ * File Mention: 一次拿全引用 pill 需要的信息；引用解析不到时返回 null。
+ *
+ * 「是不是目录」和「有没有缩略图」合在一个 IPC 里，因为它们来自同一次路径解析——
+ * 拆成两个方法等于每条 pill 都要往返两次，还得处理两次答案不一致的情况。
+ *
+ * 收的是 `reference` 而不是拆好的相对/绝对路径——调用方（引用 pill）手里只有
+ * 展示用的那一串，形态可能是工作区相对路径、`~/…` 或绝对路径，正好是
+ * resolveFileReference 已经在处理的三种。
+ *
+ * 缩放在主进程做：渲染层只需要一个 16px 的方块，没有理由让一张几 MB 的照片
+ * 以 base64 的形态进它的内存。
+ */
+export async function readMentionPreview(_args: {
+  workspaceId: string
+  reference: string
+  /** 缩略图边长上限，默认 96 */
+  maxSize?: number
+}): Promise<MentionPreview | null> {
+  throw new Error('implemented in main')
+}
+
 /** 聚合类型：所有 fs handler 的 channel → 签名映射 */
 export type FsHandlers = {
   'fs.readDirectory': typeof readDirectory
@@ -129,4 +167,5 @@ export type FsHandlers = {
   'fs.resolveFileReference': typeof resolveFileReference
   'fs.openInEditor': typeof openInEditor
   'fs.pathExists': typeof pathExists
+  'fs.readMentionPreview': typeof readMentionPreview
 }

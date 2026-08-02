@@ -7,8 +7,27 @@ import type { SessionHandlers, SessionPushEvents } from '@shared/ipc/session'
 import type { SettingsHandlers } from '@shared/ipc/settings'
 import type { SystemHandlers } from '@shared/ipc/system'
 import type { WorkspaceHandlers } from '@shared/ipc/workspace'
+import * as electron from 'electron'
 
 import { requestMain, subscribeToMainEvent } from '../main/ipc/typed'
+
+/**
+ * File Mention: 从 OS 拖进来的 File 对象取真实磁盘路径。
+ *
+ * 这是 api 里唯一不走 IPC 的成员——路径就在渲染进程手里，只是拿它需要一个
+ * 渲染层没有的 electron 模块，所以桥在 preload 而不是 main。
+ *
+ * Electron 版本兼容：`File.path` 这个非标准扩展在 32 里被移除，换成了
+ * `webUtils.getPathForFile()`；而 31（当前版本）还没有 `webUtils`。两条路都留着，
+ * 升级时这里自动切过去，调用方不用动。`webUtils` 不写成静态 import——31 的类型
+ * 定义里没有这个导出，直接 import 通不过 typecheck。
+ */
+const webUtils = (electron as { webUtils?: { getPathForFile(file: File): string } }).webUtils
+
+function getPathForFile(file: File): string {
+  if (webUtils) return webUtils.getPathForFile(file)
+  return (file as File & { path?: string }).path ?? ''
+}
 
 /**
  * 暴露给渲染层的 api 对象。
@@ -43,6 +62,12 @@ export const api = {
     windowClose: requestMain<SystemHandlers, 'system.windowClose'>(IPC.SYSTEM_WINDOW_CLOSE),
     windowIsMaximized: requestMain<SystemHandlers, 'system.windowIsMaximized'>(
       IPC.SYSTEM_WINDOW_IS_MAXIMIZED,
+    ),
+    windowToggleAlwaysOnTop: requestMain<SystemHandlers, 'system.windowToggleAlwaysOnTop'>(
+      IPC.SYSTEM_WINDOW_TOGGLE_ALWAYS_ON_TOP,
+    ),
+    windowIsAlwaysOnTop: requestMain<SystemHandlers, 'system.windowIsAlwaysOnTop'>(
+      IPC.SYSTEM_WINDOW_IS_ALWAYS_ON_TOP,
     ),
     saveImage: requestMain<SystemHandlers, 'system.saveImage'>(IPC.SYSTEM_SAVE_IMAGE),
   },
@@ -175,6 +200,10 @@ export const api = {
     ),
     openInEditor: requestMain<FsHandlers, 'fs.openInEditor'>(IPC.FS_OPEN_IN_EDITOR),
     pathExists: requestMain<FsHandlers, 'fs.pathExists'>(IPC.FS_PATH_EXISTS),
+    readMentionPreview: requestMain<FsHandlers, 'fs.readMentionPreview'>(
+      IPC.FS_READ_MENTION_PREVIEW,
+    ),
+    getPathForFile,
   },
   pty: {
     create: requestMain<PtyHandlers, 'pty.create'>(IPC.PTY_CREATE),

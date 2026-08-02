@@ -7,6 +7,7 @@ import {
   pathExistsHandler,
   readDirectoryHandler,
   readFilePreviewHandler,
+  readMentionPreviewHandler,
   resolveFileReferenceHandler,
   searchFilesHandler,
 } from './handlers'
@@ -25,6 +26,10 @@ export function registerFsHandlers(): void {
   )
   handleRendererRequest<FsHandlers, 'fs.openInEditor'>('fs.openInEditor', openInEditorHandler)
   handleRendererRequest<FsHandlers, 'fs.pathExists'>('fs.pathExists', pathExistsHandler)
+  handleRendererRequest<FsHandlers, 'fs.readMentionPreview'>(
+    'fs.readMentionPreview',
+    readMentionPreviewHandler,
+  )
 }
 
 export type { FsHandlers } from '@shared/ipc/fs'

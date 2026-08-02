@@ -9,9 +9,11 @@ import {
   openExternal,
   saveImage,
   windowClose,
+  windowIsAlwaysOnTop,
   windowIsMaximized,
   windowMaximize,
   windowMinimize,
+  windowToggleAlwaysOnTop,
 } from './handlers'
 
 export function registerSystemHandlers(): void {
@@ -34,6 +36,14 @@ export function registerSystemHandlers(): void {
   handleRendererRequest<SystemHandlers, 'system.windowIsMaximized'>(
     'system.windowIsMaximized',
     windowIsMaximized,
+  )
+  handleRendererRequest<SystemHandlers, 'system.windowToggleAlwaysOnTop'>(
+    'system.windowToggleAlwaysOnTop',
+    windowToggleAlwaysOnTop,
+  )
+  handleRendererRequest<SystemHandlers, 'system.windowIsAlwaysOnTop'>(
+    'system.windowIsAlwaysOnTop',
+    windowIsAlwaysOnTop,
   )
   handleRendererRequest<SystemHandlers, 'system.saveImage'>('system.saveImage', saveImage)
 }

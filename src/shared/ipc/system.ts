@@ -40,6 +40,9 @@ export type SystemHandlers = {
   'system.windowMaximize': () => Promise<void>
   'system.windowClose': () => Promise<void>
   'system.windowIsMaximized': () => Promise<boolean>
+  /** 切换窗口置顶状态，返回切换后的状态 */
+  'system.windowToggleAlwaysOnTop': () => Promise<boolean>
+  'system.windowIsAlwaysOnTop': () => Promise<boolean>
   /**
    * 把 data:URL 或 http(s) URL 的图片保存到用户选择的路径。
    * 返回最终保存路径；用户取消返回 null。

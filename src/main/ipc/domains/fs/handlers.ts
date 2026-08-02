@@ -1,4 +1,5 @@
 import { existsSync } from 'node:fs'
+import { join } from 'node:path'
 
 import { ctx } from '@main/context'
 import { launchInEditor } from '@main/service/editor-launcher'
@@ -9,8 +10,9 @@ import {
   resolveWorkspaceEntry,
   searchWorkspace,
 } from '@main/service/file-tree'
+import { readImageThumbnail } from '@main/service/image-thumbnail'
 import { DEFAULT_EDITOR } from '@shared/constants'
-import type { DirEntry, FilePreview } from '@shared/ipc/fs'
+import type { DirEntry, FilePreview, MentionPreview, ResolvedFileReference } from '@shared/ipc/fs'
 
 // File Tree IPC: renderer 只提交 workspaceId，主进程从数据库取得可信工作区根目录。
 export const readDirectoryHandler = async (args: {
@@ -43,9 +45,28 @@ export const searchFilesHandler = async (args: {
 export const resolveFileReferenceHandler = async (args: {
   workspaceId: string
   reference: string
-}): Promise<{ relativePath: string; line?: number; column?: number } | null> => {
+  allowDirectory?: boolean
+}): Promise<ResolvedFileReference | null> => {
   const workspace = requireWorkspace(args.workspaceId)
-  return resolveFileReference(workspace.path, args.reference)
+  return resolveFileReference(workspace.path, args.reference, {
+    allowDirectory: args.allowDirectory === true,
+  })
+}
+
+export const readMentionPreviewHandler = async (args: {
+  workspaceId: string
+  reference: string
+  maxSize?: number
+}): Promise<MentionPreview | null> => {
+  const workspace = requireWorkspace(args.workspaceId)
+  const resolved = await resolveFileReference(workspace.path, args.reference, {
+    allowDirectory: true,
+  })
+  if (!resolved) return null
+  if (resolved.isDirectory) return { isDirectory: true, thumbnail: null }
+  // 工作区内的引用只带相对路径，拼回工作区根；区外的 absolutePath 才是真身。
+  const absolutePath = resolved.absolutePath ?? join(workspace.path, resolved.relativePath)
+  return { isDirectory: false, thumbnail: await readImageThumbnail(absolutePath, args.maxSize) }
 }
 
 export const openInEditorHandler = async (args: {

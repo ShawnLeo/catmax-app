@@ -2,7 +2,11 @@
   <!-- 顶部配置条：侧栏切换 + 会话标题 + backend 状态 + 右栏切换。
        窗口控制按钮和当前工作区名已移到侧栏顶部（WorkspaceSwitcher）。 -->
   <div
-    class="border-b border-border px-4 h-12 flex items-center gap-2 bg-background window-drag-region"
+    :class="[
+      'border-b border-border px-4 h-12 flex items-center gap-2 bg-background',
+      // Window Drag Region: 有浮层盖住这一条时必须整条退出拖拽区，见 windowDraggable。
+      windowDraggable ? 'window-drag-region' : '',
+    ]"
   >
     <!-- 窗口控制按钮：仅在侧栏折叠时出现（侧栏展开时由 WorkspaceSwitcher 顶条显示） -->
     <TitleBarControls v-if="uiStore.sidebarCollapsed" />
@@ -22,6 +26,18 @@
     </h1>
 
     <div class="flex-1" />
+
+    <!-- 窗口置顶开关：常驻右侧工具组、底部面板按钮之前。 -->
+    <button
+      class="p-1.5 rounded-md transition-colors"
+      :class="isAlwaysOnTop ? 'text-foreground' : 'text-muted-foreground hover:text-foreground'"
+      :title="isAlwaysOnTop ? '取消置顶' : '置顶窗口'"
+      :aria-label="isAlwaysOnTop ? '取消置顶' : '置顶窗口'"
+      :aria-pressed="isAlwaysOnTop"
+      @click="toggleAlwaysOnTop"
+    >
+      <PinIcon class="w-4 h-4" :fill="isAlwaysOnTop ? 'currentColor' : 'none'" />
+    </button>
 
     <!-- 底部终端面板切换按钮（在右栏切换按钮前） -->
     <button
@@ -97,11 +113,43 @@ import {
   PanelBottomIcon,
   PanelLeftIcon,
   PanelRightIcon,
+  PinIcon,
 } from 'lucide-vue-next'
+import { onMounted, ref } from 'vue'
+
+interface Props {
+  /**
+   * Window Drag Region: 这一条是否声明为窗口拖拽区。
+   *
+   * Electron 的拖拽区不走 DOM 命中测试——渲染层把所有 `-webkit-app-region` 矩形交给
+   * 主进程，主进程把它们合并成一个 SkRegion（drag 并集、no-drag 差集），命中只看点
+   * 落没落在这个集合里，跟 z-index、跟谁盖着谁完全无关。
+   *
+   * 窄窗口下侧栏/右栏切成浮层后会盖住这一条（两者都是顶部 48px，完全重叠），于是同一
+   * 片像素上有两个组件各自声明 drag 和 no-drag。合并结果由矩形顺序决定，浮层内部按钮
+   * 挖出的 no-drag 洞会被这一条整宽的 drag 填回去——按钮点上去只是在拖窗口，事件根本
+   * 到不了渲染层（表现为工作区下拉打不开、右栏 tab 点不动）。
+   *
+   * 解法是让重叠区域只有一个声明者：浮层展开时这一条整条退出（既不 union 也不
+   * difference），浮层自己的标题栏继续负责拖拽。
+   */
+  windowDraggable?: boolean
+}
+
+withDefaults(defineProps<Props>(), { windowDraggable: true })
 
 const sessionStore = useSessionStore()
 const uiStore = useUiStore()
 const messageStore = useMessageStore()
+const isAlwaysOnTop = ref(false)
+
+onMounted(async () => {
+  isAlwaysOnTop.value = await window.api.system.windowIsAlwaysOnTop()
+})
+
+async function toggleAlwaysOnTop(): Promise<void> {
+  isAlwaysOnTop.value = await window.api.system.windowToggleAlwaysOnTop()
+}
 </script>
 
 <style scoped>

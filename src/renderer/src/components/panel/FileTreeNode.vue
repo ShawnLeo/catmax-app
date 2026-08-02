@@ -9,8 +9,11 @@
       ]"
       :style="{ paddingLeft: `${depth * 14 + 6}px` }"
       :title="entry.isSymlink ? `${entry.relativePath}（符号链接）` : entry.relativePath"
+      draggable="true"
       @click="onClick"
       @dblclick="onDoubleClick"
+      @dragstart="onDragStart"
+      @contextmenu.prevent="openContextMenu($event)"
     >
       <span class="w-4 h-4 grid place-items-center flex-shrink-0">
         <LoaderCircleIcon v-if="loading" class="w-3 h-3 text-muted-foreground animate-spin" />
@@ -63,11 +66,13 @@
 </template>
 
 <script setup lang="ts">
+import { CATMAX_FILE_MIME, type CatmaxDragPayload } from '@renderer/lib/drag-file-paths'
 import { useFilesStore } from '@renderer/stores/files'
 import type { DirEntry } from '@shared/ipc/fs'
 import { ChevronRightIcon, Link2Icon, LoaderCircleIcon } from 'lucide-vue-next'
-import { computed, onBeforeUnmount } from 'vue'
+import { computed, inject, onBeforeUnmount } from 'vue'
 
+import { FILE_TREE_MENU_KEY } from './file-tree-menu'
 import FileTypeIcon from './FileTypeIcon.vue'
 
 const props = defineProps<{
@@ -75,6 +80,33 @@ const props = defineProps<{
   entry: DirEntry
   depth: number
 }>()
+
+/*
+ * File Mention: 右键菜单由 FileTree（树根）统一持有一份，节点通过 inject 拿到开启
+ * 回调。递归组件不能用 emit——菜单要从任意深度冒到根，每多一层就多一次转发，
+ * 而 provide/inject 跟层数无关。inject 不到（组件被单独用在别处）就当没有菜单。
+ */
+const openMenu = inject(FILE_TREE_MENU_KEY, null)
+
+function openContextMenu(event: MouseEvent): void {
+  openMenu?.(props.entry, event)
+}
+
+/**
+ * File Mention: 拖出去时同时写两种载荷。
+ * - 私有 MIME：应用内投放走它，路径已经是工作区相对的，落地时不用再解析一次。
+ * - text/plain：拖到外部程序（终端、编辑器）时至少还是一条有意义的路径。
+ * 不写 text/uri-list——那会让外部程序以为这是一次真实的文件拖拽（可能触发复制/移动）。
+ */
+function onDragStart(event: DragEvent): void {
+  const payload: CatmaxDragPayload = {
+    relativePath: props.entry.relativePath,
+    isDirectory: props.entry.isDirectory,
+  }
+  event.dataTransfer?.setData(CATMAX_FILE_MIME, JSON.stringify(payload))
+  event.dataTransfer?.setData('text/plain', props.entry.relativePath)
+  if (event.dataTransfer) event.dataTransfer.effectAllowed = 'copy'
+}
 
 const filesStore = useFilesStore()
 // File Tree Node: 递归节点只从 store 读取共享缓存，避免每层重复发起 IPC。

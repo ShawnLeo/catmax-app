@@ -25,10 +25,14 @@
       <!-- 右侧内阴影只覆盖工作区 + 会话列表，不延伸到底部用户/设置栏。 -->
       <div class="sidebar-content flex min-h-0 flex-1 flex-col border-r border-sidebar-border">
         <!--
-          顶部：工作区切换。overlay 形态不带这一条——折叠时顶栏（RuntimeConfigBar）
-          已经在同一位置显示窗口控制按钮和会话标题，浮层再划出一条工作区栏会跟它重叠。
+          顶部：工作区切换。两种 overlay 用法对它的需求不同：
+          - peek（折叠态临时瞥看）：不渲染——浮层从顶栏下方开始（top-12），工作区位置
+            已被 RuntimeConfigBar 的窗口控制按钮占用，重复划出一条会重叠。
+          - expansion（窄窗口展开）：渲染——这是完整侧栏体验，需要窗口控制按钮
+            （展开态 RuntimeConfigBar 不显示 TitleBarControls，否则窗口控制按钮丢失）。
+          docked 始终渲染。
         -->
-        <WorkspaceSwitcher v-if="!isOverlay" />
+        <WorkspaceSwitcher v-if="showWorkspace" />
 
         <!-- 中部：会话列表（含 tab + 新建按钮，内部自己管滚动） -->
         <SessionList class="flex-1 overflow-hidden" />
@@ -49,15 +53,30 @@ import SidebarFooter from './SidebarFooter.vue'
 import WorkspaceSwitcher from './WorkspaceSwitcher.vue'
 
 interface Props {
-  /** docked = 参与布局的常驻侧栏；overlay = Sidebar Peek 划出的浮层 */
+  /**
+   * docked = 参与布局的常驻侧栏；
+   * overlay = 浮层形态，外层容器负责定位，自己只负责内容和右侧投影。
+   * overlay 形态分两种用法（用 showWorkspace 区分），见下方。
+   */
   variant?: 'docked' | 'overlay'
+  /**
+   * overlay 形态下是否渲染顶栏工作区切换器。
+   * - peek（折叠态临时瞥看）：false，浮层从顶栏下方开始，不重复划出工作区栏。
+   * - expansion（窄窗口展开）：true，作为完整侧栏，需要保留窗口控制按钮入口。
+   * docked 形态忽略此 prop（恒渲染）。
+   */
+  showWorkspace?: boolean
 }
 
-const props = withDefaults(defineProps<Props>(), { variant: 'docked' })
+const props = withDefaults(defineProps<Props>(), {
+  variant: 'docked',
+  showWorkspace: false,
+})
 
 const uiStore = useUiStore()
 
 const isOverlay = computed(() => props.variant === 'overlay')
+const showWorkspace = computed(() => !isOverlay.value || props.showWorkspace)
 
 // overlay 是折叠状态下才出现的浮层，宽度不能再跟着 sidebarCollapsed 收成 0。
 const outerWidth = computed(() => {

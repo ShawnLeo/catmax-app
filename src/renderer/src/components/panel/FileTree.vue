@@ -12,6 +12,20 @@
             {{ workspaceStore.currentWorkspace?.path }}
           </div>
         </div>
+        <!--
+          File Preview Split: 单栏形态（窗口放不下预览 + 文件树并排）下，文件树占满整条
+          面板，这是回到文件详情的唯一入口——并排时两边都在，按钮不出现。
+        -->
+        <button
+          v-if="showPreviewButton"
+          type="button"
+          class="icon-button"
+          title="返回文件详情"
+          aria-label="返回文件详情"
+          @click="emit('showPreview')"
+        >
+          <PanelLeftIcon class="w-3.5 h-3.5" />
+        </button>
         <button type="button" class="icon-button" title="折叠全部" @click="filesStore.collapseAll">
           <ListTreeIcon class="w-3.5 h-3.5" />
         </button>
@@ -81,6 +95,7 @@
           type="button"
           class="w-full flex items-center gap-2 px-2 py-1.5 rounded-md hover:bg-muted/70 text-left"
           @click="openSearchResult(entry)"
+          @contextmenu.prevent="openContextMenu(entry, $event)"
         >
           <FileTypeIcon
             :name="entry.name"
@@ -128,10 +143,25 @@
       <span v-else>{{ rootEntries.length }} 个顶层项目</span>
       <span class="ml-auto">单击预览 · 双击常驻</span>
     </div>
+
+    <!--
+      File Mention: 整棵树共用一个右键菜单实例（含递归节点和搜索结果），
+      由 provide 下发开启回调，见 file-tree-menu.ts。
+    -->
+    <ContextMenu
+      v-if="contextMenu"
+      :x="contextMenu.x"
+      :y="contextMenu.y"
+      :items="contextMenuItems"
+      @select="onContextMenuSelect"
+      @close="contextMenu = null"
+    />
   </div>
 </template>
 
 <script setup lang="ts">
+import { ContextMenu, type ContextMenuItem } from '@renderer/components/ui/context-menu'
+import { useChatInputStore } from '@renderer/stores/chat-input'
 import { useFilesStore } from '@renderer/stores/files'
 import { useWorkspaceStore } from '@renderer/stores/workspace'
 import type { DirEntry } from '@shared/ipc/fs'
@@ -140,19 +170,47 @@ import {
   FolderOpenIcon,
   ListTreeIcon,
   LoaderCircleIcon,
+  MessageSquarePlusIcon,
+  PanelLeftIcon,
   RefreshCwIcon,
   SearchIcon,
   SearchXIcon,
   XIcon,
 } from 'lucide-vue-next'
-import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
+import { computed, onMounted, onUnmounted, provide, ref, watch } from 'vue'
 
+import { FILE_TREE_MENU_KEY } from './file-tree-menu'
 import FileTreeNode from './FileTreeNode.vue'
 import FileTypeIcon from './FileTypeIcon.vue'
 
+defineProps<{
+  /** File Preview Split: 单栏形态下显示"返回文件详情"按钮，见 RightPanel。 */
+  showPreviewButton?: boolean
+}>()
+const emit = defineEmits<{ showPreview: [] }>()
+
 const workspaceStore = useWorkspaceStore()
 const filesStore = useFilesStore()
+const chatInput = useChatInputStore()
 const query = ref('')
+
+// File Mention: 右键菜单——树里任意节点和搜索结果共用这一个实例。
+const contextMenu = ref<{ x: number; y: number; entry: DirEntry } | null>(null)
+
+const contextMenuItems = computed<ContextMenuItem[]>(() => [
+  { key: 'mention', label: '添加到对话', icon: MessageSquarePlusIcon },
+])
+
+function openContextMenu(entry: DirEntry, event: MouseEvent): void {
+  contextMenu.value = { x: event.clientX, y: event.clientY, entry }
+}
+provide(FILE_TREE_MENU_KEY, openContextMenu)
+
+function onContextMenuSelect(key: string): void {
+  const entry = contextMenu.value?.entry
+  if (!entry) return
+  if (key === 'mention') chatInput.addFileMention(entry.relativePath)
+}
 const refreshing = ref(false)
 let searchTimer: ReturnType<typeof setTimeout> | null = null
 

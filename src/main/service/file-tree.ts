@@ -311,7 +311,11 @@ export async function readFilePreview(
 export async function resolveFileReference(
   workspacePath: string,
   reference: string,
+  options?: { allowDirectory?: boolean },
 ): Promise<ResolvedFileReference | null> {
+  // File Mention: 默认只认常规文件——预览器打不开目录，放行会让 readFilePreview 报错。
+  // 只有"把路径引用进对话"这条路径（拖入文件夹、右键点在目录上）才 opt-in 打开它。
+  const allowDirectory = options?.allowDirectory === true
   let cleaned = reference.trim()
   const leadingPunctuation = new Set(["'", '"', '`', '(', '<', '['])
   const trailingPunctuation = new Set(["'", '"', '`', ')', '>', ']', '.', ',', ';'])
@@ -351,22 +355,28 @@ export async function resolveFileReference(
       const realCandidate = await fs.realpath(absoluteInput)
       assertWithinRoot(root, realCandidate)
       const stat = await fs.stat(realCandidate)
-      if (stat.isFile()) {
-        return resolvedFileLocation(toPosixPath(relative(root, realCandidate)), line, column)
+      if (stat.isFile() || (allowDirectory && stat.isDirectory())) {
+        return resolvedFileLocation(
+          toPosixPath(relative(root, realCandidate)),
+          line,
+          column,
+          undefined,
+          stat.isDirectory(),
+        )
       }
     } catch {
       // 不在工作区内或文件不存在，继续尝试工作区外直读
     }
     // 工作区外文件：直接 stat 确认是常规文件后返回 absolutePath
-    return resolveOutsideWorkspace(absoluteInput, pathPart, line, column)
+    return resolveOutsideWorkspace(absoluteInput, pathPart, line, column, allowDirectory)
   }
 
   // 相对路径分支：原有工作区内解析 + 模糊回退
   try {
     const resolved = await resolveWorkspaceEntry(workspacePath, pathPart)
     const stat = await fs.stat(resolved.absolutePath)
-    if (!stat.isFile()) return null
-    return resolvedFileLocation(resolved.relativePath, line, column)
+    if (!stat.isFile() && !(allowDirectory && stat.isDirectory())) return null
+    return resolvedFileLocation(resolved.relativePath, line, column, undefined, stat.isDirectory())
   } catch {
     // Claude History File Reference:
     // 历史回复常把工具路径缩写成 `FilePreview.vue` 或 `components/FilePreview.vue`。
@@ -396,12 +406,13 @@ async function resolveOutsideWorkspace(
   displayPath: string,
   line?: number,
   column?: number,
+  allowDirectory = false,
 ): Promise<ResolvedFileReference | null> {
   try {
     const real = await fs.realpath(absolutePath)
     const stat = await fs.stat(real)
-    if (!stat.isFile()) return null
-    return resolvedFileLocation(displayPath, line, column, real)
+    if (!stat.isFile() && !(allowDirectory && stat.isDirectory())) return null
+    return resolvedFileLocation(displayPath, line, column, real, stat.isDirectory())
   } catch {
     return null
   }
@@ -412,12 +423,14 @@ function resolvedFileLocation(
   line?: number,
   column?: number,
   absolutePath?: string,
+  isDirectory?: boolean,
 ): ResolvedFileReference {
   return {
     relativePath,
     ...(absolutePath !== undefined && { absolutePath }),
     ...(line !== undefined && { line }),
     ...(column !== undefined && { column }),
+    ...(isDirectory === true && { isDirectory: true }),
   }
 }
 
@@ -626,6 +639,16 @@ function previewResult(
     encoding: fields.isBinary ? 'binary' : 'utf-8',
     modifiedAt: stat.mtimeMs,
   }
+}
+
+/**
+ * 扩展名 → 图片 MIME，不是图片返回 null。
+ *
+ * 导出给 image-thumbnail 用——「哪些扩展名算图片」只该有一份，
+ * 缩略图那边再抄一张表迟早会跟这里长歪。
+ */
+export function imageMimeType(extension: string): string | null {
+  return IMAGE_MIME[extension] ?? null
 }
 
 function mediaType(

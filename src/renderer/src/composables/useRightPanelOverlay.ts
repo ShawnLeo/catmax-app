@@ -26,7 +26,7 @@ import { computed, onBeforeUnmount, type Ref, ref, watch } from 'vue'
 const CHAT_AREA_COMFORT = MIN_WIDTH_FOR_MESSAGE_NAV_RAIL
 
 /** 浮层最宽占窗口的比例——留一条边让用户看得见聊天区，也点得到（点外部收起）。 */
-const OVERLAY_MAX_RATIO = 0.85
+export const OVERLAY_MAX_RATIO = 0.85
 
 export function useRightPanelOverlay(options: {
   /** ChatView 容器宽度 */
@@ -120,6 +120,7 @@ export function useRightPanelOverlay(options: {
         detach()
       }
     },
+    { immediate: true },
   )
 
   onBeforeUnmount(detach)

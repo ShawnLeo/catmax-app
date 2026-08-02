@@ -78,6 +78,22 @@ describe('SettingsStore', () => {
     expect(newStore.load().defaultBackend).toBe('claude')
   })
 
+  test('窗口状态写盘后可完整恢复', () => {
+    const windowState = {
+      x: -1200,
+      y: 80,
+      width: 900,
+      height: 700,
+      maximized: false,
+      fullScreen: false,
+      alwaysOnTop: true,
+    }
+    store.update({ windowState })
+
+    const newStore = new SettingsStore(join(tempDir, 'settings.json'))
+    expect(newStore.load().windowState).toEqual(windowState)
+  })
+
   test('reset 恢复默认', () => {
     store.update({ defaultBackend: 'claude', sendOnEnter: false })
     const reset = store.reset()

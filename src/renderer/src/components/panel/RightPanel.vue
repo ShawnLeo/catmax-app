@@ -66,16 +66,19 @@
         <ReviewPanel v-else-if="uiStore.rightPanelTab === 'review'" />
         <TasksPanel v-else-if="uiStore.rightPanelTab === 'tasks'" />
         <div v-else class="h-full min-w-0 flex">
-          <!-- File Preview Split: 预览区固定在文件树左侧；无打开文件时仅保留文件树。 -->
+          <!--
+            File Preview Split: 空间够时预览区固定在文件树左侧；不够时（splitActive=false）
+            退成单栏——只渲染其中一个并铺满整条面板，两者靠各自标题栏上的按钮互相切换。
+          -->
           <FilePreview
-            v-if="previewVisible"
-            class="shrink-0"
-            :style="{ width: uiStore.filePreviewWidth + 'px' }"
+            v-if="previewPaneVisible"
+            :class="splitActive ? 'shrink-0' : 'flex-1 min-w-0'"
+            :style="splitActive ? { width: uiStore.filePreviewWidth + 'px' } : undefined"
             :show-file-tree-button="!uiStore.fileTreeVisible"
             @show-file-tree="uiStore.setFileTreeVisible(true)"
           />
           <ResizeHandle
-            v-if="previewVisible && uiStore.fileTreeVisible"
+            v-if="splitActive"
             side="left"
             :min="FILE_PREVIEW_MIN"
             :max="filePreviewMax"
@@ -84,9 +87,11 @@
             @reach-max="uiStore.setFileTreeVisible(false)"
           />
           <FileTree
-            v-if="uiStore.fileTreeVisible || !previewAvailable"
-            class="shrink-0"
-            :style="{ width: uiStore.rightPanelWidth + 'px' }"
+            v-if="treePaneVisible"
+            :class="splitActive ? 'shrink-0' : 'flex-1 min-w-0'"
+            :style="splitActive ? { width: uiStore.rightPanelWidth + 'px' } : undefined"
+            :show-preview-button="!splitActive && previewAvailable"
+            @show-preview="uiStore.setFileTreeVisible(false)"
           />
         </div>
       </div>
@@ -95,6 +100,11 @@
 </template>
 
 <script setup lang="ts">
+import {
+  FILE_PREVIEW_MIN,
+  FILE_SPLIT_HANDLE_WIDTH,
+  FILE_TREE_MIN,
+} from '@renderer/lib/panel-layout'
 import { useFilesStore } from '@renderer/stores/files'
 import { useGitStore } from '@renderer/stores/git'
 import { useMessageStore } from '@renderer/stores/message'
@@ -113,9 +123,17 @@ import TasksPanel from './TasksPanel.vue'
 interface Props {
   /** docked = 参与布局的常驻右栏；overlay = 窄窗口下浮在聊天区之上的形态 */
   variant?: 'docked' | 'overlay'
+  /**
+   * File Preview Split: 当前窗口放得下"预览 + 文件树"并排吗？由 ChatView 按可用宽度
+   * 判定（见 MIN_WIDTH_FOR_FILE_SPLIT）。为 false 时退成单栏，同一时刻只显示一个。
+   */
+  fileSplitAllowed?: boolean
 }
 
-const props = withDefaults(defineProps<Props>(), { variant: 'docked' })
+const props = withDefaults(defineProps<Props>(), {
+  variant: 'docked',
+  fileSplitAllowed: true,
+})
 
 const isOverlay = computed(() => props.variant === 'overlay')
 
@@ -123,21 +141,30 @@ const uiStore = useUiStore()
 const gitStore = useGitStore()
 const filesStore = useFilesStore()
 const messageStore = useMessageStore()
-const FILE_PREVIEW_MIN = 360
-const FILE_TREE_MIN = 240
-const SPLIT_HANDLE_WIDTH = 1
-
 // File Preview Split: 外层面板宽度等于预览区与文件树宽度之和。
 // Review tab 自带左右 split（文件树 + diff），不叠加 filePreviewWidth，宽度即 rightPanelWidth。
 const previewAvailable = computed(() => filesStore.previewTabs.length > 0)
 const previewVisible = computed(() => uiStore.rightPanelTab === 'files' && previewAvailable.value)
+
+/** 预览和文件树真的并排显示（空间够 + 用户没手动收起文件树）。 */
+const splitActive = computed(
+  () => previewVisible.value && uiStore.fileTreeVisible && props.fileSplitAllowed,
+)
+// 单栏形态下 fileTreeVisible 的含义从"是否并排显示文件树"变成"这一栏是树还是预览"。
+const previewPaneVisible = computed(
+  () => previewVisible.value && (splitActive.value || !uiStore.fileTreeVisible),
+)
+const treePaneVisible = computed(
+  () => uiStore.rightPanelTab === 'files' && (!previewAvailable.value || uiStore.fileTreeVisible),
+)
+
 const panelWidth = computed(() => {
-  if (uiStore.rightPanelTab === 'review') return uiStore.rightPanelWidth
   if (uiStore.rightPanelTab !== 'files') return uiStore.rightPanelWidth
-  const previewWidth = previewVisible.value ? uiStore.filePreviewWidth : 0
-  const treeWidth = uiStore.fileTreeVisible || !previewAvailable.value ? uiStore.rightPanelWidth : 0
-  const handleWidth = previewVisible.value && uiStore.fileTreeVisible ? SPLIT_HANDLE_WIDTH : 0
-  return previewWidth + treeWidth + handleWidth
+  if (splitActive.value) {
+    return uiStore.filePreviewWidth + uiStore.rightPanelWidth + FILE_SPLIT_HANDLE_WIDTH
+  }
+  // 单栏：整条面板就是那一栏，宽度取它自己的。
+  return previewPaneVisible.value ? uiStore.filePreviewWidth : uiStore.rightPanelWidth
 })
 const filePreviewMax = computed(
   () => uiStore.filePreviewWidth + uiStore.rightPanelWidth - FILE_TREE_MIN,
@@ -167,6 +194,17 @@ function resizeFilePreview(width: number): void {
   uiStore.setRightPanelWidth(combinedWidth - width)
 }
 
+// File Preview Split: 单栏形态下从文件树里打开一个文件，得自己让位给预览——否则用户
+// 点了文件却停在原来的树上，像是没反应。并排时两边同时可见，不需要切换。
+watch(
+  () => filesStore.activePreviewPath,
+  (path) => {
+    if (!path || props.fileSplitAllowed) return
+    if (uiStore.rightPanelTab !== 'files') return
+    uiStore.setFileTreeVisible(false)
+  },
+)
+
 async function onTitlebarDoubleClick(event: MouseEvent): Promise<void> {
   // Electron Titlebar: 交互控件不参与窗口放大；仅标题栏空白区域响应双击。
   if ((event.target as HTMLElement).closest('button')) return
@@ -175,12 +213,6 @@ async function onTitlebarDoubleClick(event: MouseEvent): Promise<void> {
 
 const tabs = computed(() => {
   const items: PanelTab[] = [
-    {
-      id: 'git' as const,
-      label: 'Git',
-      icon: GitBranchIcon,
-      badge: gitStore.totalChanges > 0 ? gitStore.totalChanges : undefined,
-    },
     {
       id: 'files' as const,
       label: '文件',
@@ -212,6 +244,14 @@ const tabs = computed(() => {
       badge: uiStore.reviewFiles.length,
     })
   }
+
+  // Right Panel Tab Order: 文件固定在最前，Git 固定收在最后；条件 tab 插在两者之间。
+  items.push({
+    id: 'git' as const,
+    label: 'Git',
+    icon: GitBranchIcon,
+    badge: gitStore.totalChanges > 0 ? gitStore.totalChanges : undefined,
+  })
 
   return items
 })
