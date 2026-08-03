@@ -81,7 +81,7 @@
         v-else
         class="new-session flex-1 flex items-center justify-center px-6 text-muted-foreground"
       >
-        <div class="relative z-10 flex max-w-md flex-col items-center text-center">
+        <div class="relative z-10 flex max-w-2xl flex-col items-center text-center">
           <CatmaxLogo variant="plain" class="mb-7 h-28 w-28" />
 
           <p class="text-[length:var(--ui-text-u3)] font-semibold tracking-tight text-foreground">
@@ -217,6 +217,7 @@ import {
 import { useSidebarOverlay } from '@renderer/composables/useSidebarOverlay'
 import { useSidebarPeek } from '@renderer/composables/useSidebarPeek'
 import { useStreamMessage } from '@renderer/composables/useStreamMessage'
+import { useTurnRunReconcile } from '@renderer/composables/useTurnRunReconcile'
 import type { SuggestionCommand } from '@renderer/lib/autocomplete'
 import { MIN_WIDTH_FOR_MESSAGE_NAV_RAIL } from '@renderer/lib/chat-layout'
 import { isNavigableUserMessage } from '@renderer/lib/message-navigation'
@@ -261,6 +262,8 @@ const gitStore = useGitStore()
 const uiStore = useUiStore()
 const settingsStore = useSettingsStore()
 useStreamMessage()
+// HMR / 切窗口 / 切回 session 后，用后端权威 turn 状态对齐卡住的 isRunning。
+useTurnRunReconcile()
 // Sidebar Peek: 折叠态下从左边缘划出的临时侧栏，收回逻辑（含 Teleport 出去的菜单）在 composable 里
 const { peekRef, openPeek } = useSidebarPeek()
 

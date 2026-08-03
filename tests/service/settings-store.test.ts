@@ -20,7 +20,8 @@ afterEach(() => {
 describe('SettingsStore', () => {
   test('load 文件不存在时返回默认值', () => {
     const settings = store.load()
-    expect(settings.defaultBackend).toBe('codex')
+    // 默认 claude——它随 SDK 内置打包、恒可用；codex 未安装时不能做默认后端
+    expect(settings.defaultBackend).toBe('claude')
     expect(settings.defaultEditor).toBe('vscode')
     expect(settings.theme.mode).toBe('system')
     expect(settings.sendOnEnter).toBe(true)
@@ -29,7 +30,7 @@ describe('SettingsStore', () => {
   test('load 损坏 JSON 时回退到默认值', () => {
     writeFileSync(join(tempDir, 'settings.json'), '{ not valid json')
     const settings = store.load()
-    expect(settings.defaultBackend).toBe('codex')
+    expect(settings.defaultBackend).toBe('claude')
   })
 
   test('load 不符合 schema 时回退到默认值', () => {
@@ -38,7 +39,7 @@ describe('SettingsStore', () => {
       JSON.stringify({ defaultBackend: '../invalid-backend' }),
     )
     const settings = store.load()
-    expect(settings.defaultBackend).toBe('codex') // 回退
+    expect(settings.defaultBackend).toBe('claude') // 回退
   })
 
   test('update 部分更新（浅 merge 嵌套对象）', () => {
@@ -95,9 +96,9 @@ describe('SettingsStore', () => {
   })
 
   test('reset 恢复默认', () => {
-    store.update({ defaultBackend: 'claude', sendOnEnter: false })
+    store.update({ defaultBackend: 'codex', sendOnEnter: false })
     const reset = store.reset()
-    expect(reset.defaultBackend).toBe('codex')
+    expect(reset.defaultBackend).toBe('claude')
     expect(reset.sendOnEnter).toBe(true)
   })
 })

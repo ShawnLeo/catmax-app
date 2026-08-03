@@ -1,3 +1,4 @@
+import type { TurnRunRecord } from '@shared/domain'
 import { createPinia, setActivePinia } from 'pinia'
 import { beforeEach, describe, expect, test } from 'vitest'
 
@@ -545,5 +546,128 @@ describe('message store Claude background tasks', () => {
       store.setCurrentSession('session-1')
       expect(store.backgroundTasks).toHaveLength(1)
     })
+  })
+})
+
+describe('message store reconcileTurnRun', () => {
+  beforeEach(() => {
+    setActivePinia(createPinia())
+  })
+
+  // TurnRunRecord 工厂——只填 reconcile 关心的字段。
+  function makeRecord(
+    status: 'queued' | 'running' | 'cancelling' | 'completed' | 'interrupted' | 'error',
+    overrides: Partial<{ id: string; error: string | null }> = {},
+  ): TurnRunRecord {
+    return {
+      id: overrides.id ?? 'turn-backend-1',
+      sessionId: 'session-1',
+      backend: 'claude',
+      backendTurnId: null,
+      status,
+      backgroundTasks: [],
+      createdAt: 1000,
+      startedAt: 1000,
+      lastEventAt: 2000,
+      completedAt: status === 'completed' || status === 'error' ? 3000 : null,
+      error: overrides.error ?? null,
+    }
+  }
+
+  test('后端仍在跑→保持 isRunning 并采纳后端 turnId', () => {
+    const store = useMessageStore()
+    store.setCurrentSession('session-1')
+    // 内存乐观标记了一个 clientTurnId，但热更新后可能丢失——reconcile 应用后端真相。
+    store.markTurnStarting('session-1', 'client-turn-x')
+
+    store.reconcileTurnRun('session-1', makeRecord('running', { id: 'backend-turn-1' }))
+
+    expect(store.isRunning).toBe(true)
+    expect(store.currentTurnId).toBe('backend-turn-1')
+    expect(store.lastError).toBeNull()
+  })
+
+  test('后端 completed→清掉卡住的 isRunning', () => {
+    const store = useMessageStore()
+    store.setCurrentSession('session-1')
+    store.markTurnStarting('session-1', 'client-turn-x')
+    expect(store.isRunning).toBe(true)
+
+    store.reconcileTurnRun('session-1', makeRecord('completed'))
+
+    expect(store.isRunning).toBe(false)
+    expect(store.currentTurnId).toBeNull()
+  })
+
+  test('后端 error→清 isRunning 并补上可读 lastError', () => {
+    const store = useMessageStore()
+    store.setCurrentSession('session-1')
+    store.markTurnStarting('session-1', 'client-turn-x')
+
+    store.reconcileTurnRun('session-1', makeRecord('error', { error: 'boom' }))
+
+    expect(store.isRunning).toBe(false)
+    expect(store.currentTurnId).toBeNull()
+    expect(store.lastError).toBe('boom')
+  })
+
+  test('后端 interrupted→清 isRunning（重启后遗留的 running 会被 main 推进 interrupted）', () => {
+    const store = useMessageStore()
+    store.setCurrentSession('session-1')
+    store.markTurnStarting('session-1', 'client-turn-x')
+
+    store.reconcileTurnRun('session-1', makeRecord('interrupted'))
+
+    expect(store.isRunning).toBe(false)
+  })
+
+  test('后端无记录（undefined）→清掉卡住的 isRunning', () => {
+    const store = useMessageStore()
+    store.setCurrentSession('session-1')
+    store.markTurnStarting('session-1', 'client-turn-x')
+
+    store.reconcileTurnRun('session-1', undefined)
+
+    expect(store.isRunning).toBe(false)
+  })
+
+  test('内存本来就没在跑→无副作用，不打扰后端状态', () => {
+    const store = useMessageStore()
+    store.setCurrentSession('session-1')
+    // 不 markTurnStarting——isRunning 默认 false
+    expect(store.isRunning).toBe(false)
+
+    store.reconcileTurnRun('session-1', makeRecord('completed'))
+
+    expect(store.isRunning).toBe(false)
+    expect(store.currentTurnId).toBeNull()
+  })
+
+  test('内存里没有该 session 状态→不凭空创建', () => {
+    const store = useMessageStore()
+    // 不 setCurrentSession，session-1 状态不存在
+    store.reconcileTurnRun('session-1', makeRecord('running'))
+
+    // 不应创建 sessionStates 条目
+    expect(store.sessionStates.get('session-1')).toBeUndefined()
+  })
+
+  test('清 isRunning 时兜底结束未完成的 reasoning 块', () => {
+    const store = useMessageStore()
+    store.setCurrentSession('session-1')
+    store.markTurnStarting('session-1', 'turn-x')
+    // 推一条带未结束 reasoning 的 assistant 消息（模拟 turn 事件丢失前的状态）
+    store.applyEvent('session-1', {
+      type: 'content_block_upsert',
+      turnId: 'turn-x',
+      block: { id: 'r-1', type: 'reasoning', text: '思考中', startedAt: 1000 },
+    })
+
+    store.reconcileTurnRun('session-1', makeRecord('completed'))
+
+    expect(store.isRunning).toBe(false)
+    // reasoning 块应被 markReasoningEnded 兜底结束
+    const reasoning = store.messages[0]?.blocks?.find((b) => b.type === 'reasoning')
+    expect(reasoning?.endedAt).not.toBeUndefined()
   })
 })

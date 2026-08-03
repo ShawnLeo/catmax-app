@@ -4,7 +4,8 @@ import { describe, expect, test } from 'vitest'
 describe('settings-schema', () => {
   test('空对象解析为完整默认值', () => {
     const result = appSettingsSchema.parse({})
-    expect(result.defaultBackend).toBe('codex')
+    // 默认 claude——内置打包后端恒可用；codex 未安装时不能做默认后端
+    expect(result.defaultBackend).toBe('claude')
     expect(result.defaultEditor).toBe('vscode')
     expect(result.theme.mode).toBe('system')
     // 三条字号基准（界面 / 对话 / 等宽），与 themes.css 里同名 CSS 变量的兜底值一一对应

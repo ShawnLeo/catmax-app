@@ -93,3 +93,15 @@ export interface TurnRunRecord {
   completedAt: number | null
   error: string | null
 }
+
+/**
+ * Turn 是否仍活跃（未进入终态）。
+ *
+ * 与 main 侧 turn_runs 表的 recoverable 集合（database.ts 的
+ * `WHERE status IN ('queued','running','cancelling')`）和协调器终态集合
+ * （per-turn-coordinator.ts 的 `Extract<..., 'completed'|'interrupted'|'error'>`）
+ * 保持同一划分——renderer reconcile 时据此判断"后端说还在跑吗"。
+ */
+export function isActiveTurnRun(status: TurnRunStatus): boolean {
+  return status === 'running' || status === 'queued' || status === 'cancelling'
+}

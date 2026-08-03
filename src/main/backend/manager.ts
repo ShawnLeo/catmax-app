@@ -49,7 +49,8 @@ export interface BackendManagerOptions {
 export class BackendManager {
   private adapters = new Map<BackendId, AgentBackend>()
   private plugins = new Map<BackendId, MainBackendPlugin>()
-  private currentBackendId: BackendId = 'codex'
+  // 默认 claude——它是内置打包后端（恒可用），codex 未安装时不能用做兜底默认值。
+  private currentBackendId: BackendId = 'claude'
   private readonly turnCoordinator: PerTurnCoordinator
   /**
    * claude 内部 sessionId（startSession 生成的占位 UUID）→ claude 真实 session_id 的映射。
@@ -101,7 +102,7 @@ export class BackendManager {
       this.adapters.set(plugin.manifest.id, adapter)
     }
     if (!this.adapters.has(this.currentBackendId)) {
-      this.currentBackendId = this.adapters.keys().next().value ?? 'codex'
+      this.currentBackendId = this.adapters.keys().next().value ?? 'claude'
     }
   }
 

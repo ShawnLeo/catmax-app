@@ -31,15 +31,15 @@ afterEach(() => {
 describe('settings handlers', () => {
   test('getSettings 返回默认值', async () => {
     const s = await getSettings()
-    expect(s.defaultBackend).toBe('codex')
+    expect(s.defaultBackend).toBe('claude')
     expect(s.theme.mode).toBe('system')
   })
 
   test('updateSettings 更新部分字段', async () => {
-    const updated = await updateSettings({ patch: { defaultBackend: 'claude' } })
-    expect(updated.defaultBackend).toBe('claude')
+    const updated = await updateSettings({ patch: { defaultBackend: 'codex' } })
+    expect(updated.defaultBackend).toBe('codex')
     const again = await getSettings()
-    expect(again.defaultBackend).toBe('claude')
+    expect(again.defaultBackend).toBe('codex')
   })
 
   test('updateSettings 浅 merge theme 嵌套对象', async () => {
@@ -52,8 +52,8 @@ describe('settings handlers', () => {
   })
 
   test('resetSettings 恢复默认', async () => {
-    await updateSettings({ patch: { defaultBackend: 'claude' } })
+    await updateSettings({ patch: { defaultBackend: 'codex' } })
     const reset = await resetSettings()
-    expect(reset.defaultBackend).toBe('codex')
+    expect(reset.defaultBackend).toBe('claude')
   })
 })

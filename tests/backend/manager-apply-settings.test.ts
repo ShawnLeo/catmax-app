@@ -32,29 +32,31 @@ function makeSettings(overrides: Partial<AppSettings> = {}): AppSettings {
 describe('Bug A: BackendManager.applySettings', () => {
   test('applySettings 把 defaultBackend 应用到 currentBackendId', () => {
     const mgr = new BackendManager()
-    expect(mgr.getCurrentId()).toBe('codex') // 初始默认
-
-    mgr.applySettings(makeSettings({ defaultBackend: 'claude' }))
+    // 初始默认 claude（内置打包后端，恒可用；codex 未安装时不能做默认）
     expect(mgr.getCurrentId()).toBe('claude')
+
+    // apply 一个不同于初值的 backend，才真正验证「应用」逻辑
+    mgr.applySettings(makeSettings({ defaultBackend: 'codex' }))
+    expect(mgr.getCurrentId()).toBe('codex')
   })
 
   test('applySettings 不主动 initialize（lazy）—— 切换不阻塞', () => {
     const mgr = new BackendManager()
     // initialize 是异步且会 spawn 真子进程；applySettings 必须同步完成
     const start = Date.now()
-    mgr.applySettings(makeSettings({ defaultBackend: 'claude' }))
+    mgr.applySettings(makeSettings({ defaultBackend: 'codex' }))
     const elapsed = Date.now() - start
     // <50ms = 没 spawn 任何子进程（spawn 至少要几 ms，且会失败因为没 mock spawner）
     expect(elapsed).toBeLessThan(50)
-    expect(mgr.getCurrentId()).toBe('claude')
+    expect(mgr.getCurrentId()).toBe('codex')
   })
 
   test('applySettings 多次调用幂等', () => {
     const mgr = new BackendManager()
-    mgr.applySettings(makeSettings({ defaultBackend: 'claude' }))
-    expect(mgr.getCurrentId()).toBe('claude')
-    mgr.applySettings(makeSettings({ defaultBackend: 'claude' }))
-    expect(mgr.getCurrentId()).toBe('claude')
+    mgr.applySettings(makeSettings({ defaultBackend: 'codex' }))
+    expect(mgr.getCurrentId()).toBe('codex')
+    mgr.applySettings(makeSettings({ defaultBackend: 'codex' }))
+    expect(mgr.getCurrentId()).toBe('codex')
   })
 
   test('applySettings 把 backendPaths 注入 codex adapter', () => {
