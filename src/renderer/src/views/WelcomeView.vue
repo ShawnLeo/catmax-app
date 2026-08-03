@@ -10,6 +10,18 @@
       <Button variant="ghost" size="sm" class="interactive" @click="router.push('/settings')">
         设置
       </Button>
+      <!-- 内测登录态：欢迎页顶部提供退出登录入口 -->
+      <Button
+        v-if="authStore.loggedIn"
+        variant="ghost"
+        size="sm"
+        class="interactive"
+        title="退出登录"
+        @click="onLogout"
+      >
+        <LogOutIcon class="w-4 h-4" />
+        退出登录
+      </Button>
     </div>
 
     <!-- 主体：居中内容 -->
@@ -61,12 +73,15 @@ import CatmaxLogo from '@renderer/components/icons/CatmaxLogo.vue'
 import TitleBarControls from '@renderer/components/TitleBarControls.vue'
 import { Button } from '@renderer/components/ui/button'
 import CreateWorkspaceDialog from '@renderer/components/workspace/CreateWorkspaceDialog.vue'
+import { useAuthStore } from '@renderer/stores/auth'
 import { useWorkspaceStore } from '@renderer/stores/workspace'
+import { LogOutIcon } from 'lucide-vue-next'
 import { ref, computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 
 const router = useRouter()
 const workspaceStore = useWorkspaceStore()
+const authStore = useAuthStore()
 const showCreateWorkspace = ref(false)
 
 // 后端 list 已按 last_opened_at DESC 排序，取前 20 即最近的工作区。
@@ -84,6 +99,12 @@ function openCreatedWorkspace(): void {
 async function openWorkspace(id: string): Promise<void> {
   await workspaceStore.setCurrent(id)
   router.push('/chat')
+}
+
+async function onLogout(): Promise<void> {
+  if (!window.confirm('确定退出登录吗？退出后需要重新输入密钥才能使用。')) return
+  await authStore.logout()
+  // 退出后路由守卫自动重定向到 /login
 }
 </script>
 

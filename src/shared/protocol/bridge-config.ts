@@ -30,6 +30,16 @@ export type BridgeCredentialSource = 'env' | 'stored'
  */
 export type BridgeModelListMode = 'auto' | 'manual'
 
+/**
+ * 上游认证头方案。
+ *
+ * `x-api-key`：标准 Anthropic 风格——`x-api-key: <key>` + `anthropic-version`（默认，保现有行为）。
+ * `bearer`：`Authorization: Bearer <key>` + `anthropic-version`——catmax.cn 等
+ *           用 Bearer token 的 Anthropic 兼容端点用这个。
+ * anthropic-version 在两种模式下都保留——Anthropic 协议兼容端点通常需要，多发无害。
+ */
+export type BridgeAuthScheme = 'x-api-key' | 'bearer'
+
 export interface BridgeUpstreamConfig {
   /** 上游说什么协议 */
   protocol: BridgeUpstreamProtocol
@@ -54,6 +64,8 @@ export interface BridgeUpstreamConfig {
   credentialSource: BridgeCredentialSource
   /** credentialSource === 'env' 时使用的环境变量名 */
   credentialEnvVar: string
+  /** 认证头方案：x-api-key（标准 Anthropic）或 bearer（Authorization: Bearer） */
+  authScheme: BridgeAuthScheme
   /** 上游能力/怪癖 */
   capabilities: UpstreamCapabilities
   /** 模型列表获取方式；auto=拉取上游接口，manual=用手填列表 */
@@ -122,6 +134,7 @@ export const BRIDGE_UPSTREAM_PRESETS: readonly BridgeUpstreamPreset[] = [
       modelsUrl: 'https://api.deepseek.com/models',
       model: 'deepseek-v4-pro',
       credentialEnvVar: 'DEEPSEEK_API_KEY',
+      authScheme: 'x-api-key',
       capabilities: {
         // 官方兼容性表：Images / Documents 明确列为 Not Supported
         supportsImages: false,
@@ -151,6 +164,7 @@ export const BRIDGE_UPSTREAM_PRESETS: readonly BridgeUpstreamPreset[] = [
       modelsUrl: 'https://api.anthropic.com/v1/models',
       model: null,
       credentialEnvVar: 'ANTHROPIC_API_KEY',
+      authScheme: 'x-api-key',
       capabilities: {
         ...DEFAULT_UPSTREAM_CAPABILITIES,
         // 唯一开这个开关的预设：官方 Anthropic 在 tool use 多轮里要求 thinking 块
@@ -176,6 +190,7 @@ export const BRIDGE_UPSTREAM_PRESETS: readonly BridgeUpstreamPreset[] = [
       model: 'glm-5.2',
       // 用厂商语义名，避免和 Anthropic 官方的 ANTHROPIC_API_KEY 混淆
       credentialEnvVar: 'ZHIPUAI_API_KEY',
+      authScheme: 'x-api-key',
       capabilities: {
         // 编程套餐通用模型不一定支持视觉（仅 GLM-4.6V 支持），保守关
         supportsImages: false,
@@ -202,6 +217,7 @@ export const BRIDGE_UPSTREAM_PRESETS: readonly BridgeUpstreamPreset[] = [
       modelsUrl: '',
       model: null,
       credentialEnvVar: '',
+      authScheme: 'x-api-key',
       capabilities: { ...DEFAULT_UPSTREAM_CAPABILITIES, supportsImages: false },
       modelListMode: 'auto',
       manualModels: [],
@@ -232,6 +248,44 @@ export function createProviderFromPreset(
     createdAt: Date.now(),
     ...preset.config,
     credentialSource,
+  }
+}
+
+/**
+ * Internal Beta Login: 内测版登录时自动创建的桥 provider 的稳定 id（固定值，非 UUID）。
+ *
+ * 用固定 id 而非每次 randomUUID()——这样重新登录能识别并更新同一份配置（id 不变只换密钥），
+ * logout 能按 id 精准清除，不会每次登录堆积新 provider。
+ */
+export const INTERNAL_BETA_PROVIDER_ID = 'catmax-internal-beta'
+
+/** Internal Beta: 内测版桥 provider 的显示名（"Catmax Agent 套餐"） */
+export const INTERNAL_BETA_PROVIDER_NAME = 'Catmax Agent 套餐'
+
+/**
+ * Internal Beta Login: 构造内测版默认桥 provider。
+ *
+ * 复用 zhipu preset 的能力配置（supportsImages:false / preserveThinkingSignature:false 等
+ * ——第三方 Anthropic 兼容实现的通用保守设置），但：
+ * - baseUrl 指向内测中转 https://www.catmax.cn
+ * - credentialSource=stored（密钥存 0600 文件，由 AuthStore.login 写入）
+ * - 用固定 id（INTERNAL_BETA_PROVIDER_ID）便于重新登录识别同一份、logout 精准清除
+ *
+ * 模型列表 manualModels=['glm-5.2','glm-5-turbo','glm-4.7']、兜底 model='glm-5.2'
+ * 都来自 zhipu preset，与内测版 Claude 那套的模型映射一致。
+ */
+export function createInternalBetaProvider(): BridgeProvider {
+  const zhipu = bridgeUpstreamPreset('zhipu')!
+  return {
+    id: INTERNAL_BETA_PROVIDER_ID,
+    name: INTERNAL_BETA_PROVIDER_NAME,
+    presetId: 'zhipu', // 复用智谱 preset 的能力模板
+    createdAt: 0, // 固定 provider，不参与按时间排序的插入顺序
+    ...zhipu.config,
+    baseUrl: 'https://www.catmax.cn', // 覆盖为内测地址
+    credentialSource: 'stored', // 密钥存 0600 文件，不读环境变量
+    credentialEnvVar: '', // stored 模式下不用
+    authScheme: 'bearer', // catmax.cn 用 Authorization: Bearer 认证（非标准 x-api-key）
   }
 }
 

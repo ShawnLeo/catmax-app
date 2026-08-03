@@ -6,6 +6,7 @@ import type { BrowserWindow } from 'electron'
 
 import { BackendManager } from './backend/manager'
 import { DatabaseTurnRunRepository } from './backend/turn/turn-run-repository'
+import { AuthStore } from './service/auth-store'
 import { DatabaseService } from './service/database'
 import { logger } from './service/logger'
 import { PtyManager } from './service/pty-manager'
@@ -17,12 +18,14 @@ class Context {
   readonly windows = new Map<string, BrowserWindow>()
   readonly db: DatabaseService
   readonly settingsStore: SettingsStore
+  readonly authStore: AuthStore
   readonly backendManager: BackendManager
   readonly ptyManager: PtyManager
 
   constructor() {
     this.db = new DatabaseService()
     this.settingsStore = new SettingsStore()
+    this.authStore = new AuthStore()
     this.backendManager = new BackendManager(undefined, {
       turnCoordinatorOptions: {
         repository: new DatabaseTurnRunRepository(this.db),

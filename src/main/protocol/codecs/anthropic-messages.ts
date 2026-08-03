@@ -560,8 +560,14 @@ export const anthropicMessagesCodec: ProtocolCodec = {
   createStreamDecoder: () => new AnthropicStreamDecoder(),
   decodeResponse: decodeAnthropicResponse,
   upstreamPath: () => '/v1/messages',
-  authHeaders: (apiKey) => ({
-    'x-api-key': apiKey,
-    'anthropic-version': ANTHROPIC_VERSION,
-  }),
+  authHeaders: (apiKey, scheme) =>
+    scheme === 'bearer'
+      ? {
+          authorization: `Bearer ${apiKey}`,
+          'anthropic-version': ANTHROPIC_VERSION,
+        }
+      : {
+          'x-api-key': apiKey,
+          'anthropic-version': ANTHROPIC_VERSION,
+        },
 }

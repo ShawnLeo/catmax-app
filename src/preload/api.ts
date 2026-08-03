@@ -1,4 +1,5 @@
 import { IPC, PUSH } from '@shared/constants'
+import type { AuthHandlers } from '@shared/ipc/auth'
 import type { BackendHandlers, BackendPushEvents } from '@shared/ipc/backend'
 import type { FsHandlers } from '@shared/ipc/fs'
 import type { GitHandlers } from '@shared/ipc/git'
@@ -51,6 +52,11 @@ export const api = {
     get: requestMain<SettingsHandlers, 'settings.get'>(IPC.SETTINGS_GET),
     update: requestMain<SettingsHandlers, 'settings.update'>(IPC.SETTINGS_UPDATE),
     reset: requestMain<SettingsHandlers, 'settings.reset'>(IPC.SETTINGS_RESET),
+  },
+  auth: {
+    getStatus: requestMain<AuthHandlers, 'auth.getStatus'>(IPC.AUTH_GET_STATUS),
+    login: requestMain<AuthHandlers, 'auth.login'>(IPC.AUTH_LOGIN),
+    logout: requestMain<AuthHandlers, 'auth.logout'>(IPC.AUTH_LOGOUT),
   },
   system: {
     platformInfo: requestMain<SystemHandlers, 'system.platformInfo'>(IPC.SYSTEM_PLATFORM_INFO),

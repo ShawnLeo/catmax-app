@@ -27,6 +27,10 @@ export const IPC = {
   SETTINGS_GET: 'settings.get',
   SETTINGS_UPDATE: 'settings.update',
   SETTINGS_RESET: 'settings.reset',
+  // auth（内测登录态：密钥本地不校验，仅记录登录态）
+  AUTH_GET_STATUS: 'auth.getStatus',
+  AUTH_LOGIN: 'auth.login',
+  AUTH_LOGOUT: 'auth.logout',
   // system
   SYSTEM_PLATFORM_INFO: 'system.platformInfo',
   SYSTEM_OPEN_DIALOG: 'system.openDialog',

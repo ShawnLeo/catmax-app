@@ -391,6 +391,28 @@ export function writeBackendConfigFile(args: WriteBackendConfigArgs): BackendCon
 }
 
 /**
+ * 删除某个后端配置文件。文件不存在视为成功（幂等）。
+ *
+ * Internal Beta Login: 退出登录时用来清掉 claude.catmaxSettings 里的密钥——
+ * 这份覆盖文件是登录时自动生成的内测默认配置，退出后整体没意义，删文件比清字段干净
+ * （避免残留半个配置被 SDK 当成有效覆盖层）。
+ */
+export function deleteBackendConfigFile(id: string): { ok: boolean; message?: string } {
+  const descriptor = requireDescriptor(id)
+  const info = describeConfigFile(descriptor)
+  if (!info.exists) return { ok: true } // 幂等
+  try {
+    unlinkSync(info.path)
+    log.info(`deleted ${descriptor.id} (${info.path})`)
+    return { ok: true }
+  } catch (e) {
+    const message = e instanceof Error ? e.message : String(e)
+    log.error(`delete failed for ${descriptor.id}:`, e)
+    return { ok: false, message }
+  }
+}
+
+/**
  * 当前磁盘状态是否还是调用方读到的那一版。
  * 文件从"不存在"变成"存在"（比如用户同时跑了 codex login）也算冲突。
  */

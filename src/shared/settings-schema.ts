@@ -101,6 +101,8 @@ const bridgeProviderSchema = z.object({
   model: z.string().nullable().default(null),
   credentialSource: z.enum(['env', 'stored']).default('stored'),
   credentialEnvVar: z.string().default(''),
+  /** 认证头方案：x-api-key（标准 Anthropic，默认）或 bearer（Authorization: Bearer） */
+  authScheme: z.enum(['x-api-key', 'bearer']).default('x-api-key'),
   capabilities: upstreamCapabilitiesSchema.default({}),
   modelListMode: z.enum(['auto', 'manual']).default('auto'),
   manualModels: z.array(z.string()).default([]),

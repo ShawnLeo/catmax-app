@@ -1,5 +1,6 @@
 import { logger } from '../service/logger'
 
+import { registerAuthHandlers } from './domains/auth'
 import { registerBackendHandlers } from './domains/backend'
 import { registerFsHandlers } from './domains/fs'
 import { registerGitHandlers } from './domains/git'
@@ -18,6 +19,7 @@ export type AllHandlers = unknown // 占位：在 Plan 2 加 backend、session �
 export async function registerAllHandlers(): Promise<void> {
   registerWorkspaceHandlers()
   registerSettingsHandlers()
+  registerAuthHandlers()
   registerSystemHandlers()
   registerBackendHandlers()
   registerSessionHandlers()

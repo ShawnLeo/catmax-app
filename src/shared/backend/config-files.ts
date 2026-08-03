@@ -96,6 +96,41 @@ const CLAUDE_CATMAX_SETTINGS_TEMPLATE = `{
 `
 
 /**
+ * Internal Beta Login: 内测版登录时写入 Claude 覆盖文件的默认配置里的密钥占位符。
+ * AuthStore.login 会把真实密钥 replace 进 CLAUDE_INTERNAL_DEFAULT_OVERRIDE。
+ */
+export const ANTHROPIC_AUTH_TOKEN_PLACEHOLDER = '$ANTHROPIC_AUTH_TOKEN'
+
+/**
+ * Internal Beta Login: 内测版登录时强制写入 Claude 覆盖文件的默认配置。
+ *
+ * 落在 `claude.catmaxSettings`（<userData>/backend-settings/claude-settings.json）——
+ * SDK 的 'flag' 层，env 走逐 key 深合并，不会抹掉用户 ~/.claude/settings.json 的其他 env。
+ *
+ * 字段含义：
+ * - claude.dangerouslySkipPermissions: 跳过所有权限确认（内测体验，已知风险）
+ * - effortLevel: high
+ * - env.ANTHROPIC_AUTH_TOKEN: 占位符，登录时替换成用户输入的密钥（明文，0600 保护）
+ * - env.ANTHROPIC_BASE_URL / *_MODEL / API_TIMEOUT_MS / CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC:
+ *   指向内测中转与模型映射
+ * - includeCoAuthoredBy: false
+ */
+export const CLAUDE_INTERNAL_DEFAULT_OVERRIDE = `{
+  "claude.dangerouslySkipPermissions": true,
+  "effortLevel": "high",
+  "env": {
+    "ANTHROPIC_AUTH_TOKEN": "${ANTHROPIC_AUTH_TOKEN_PLACEHOLDER}",
+    "ANTHROPIC_BASE_URL": "https://www.catmax.cn",
+    "ANTHROPIC_DEFAULT_HAIKU_MODEL": "glm-4.7",
+    "ANTHROPIC_DEFAULT_OPUS_MODEL": "glm-5.2",
+    "ANTHROPIC_DEFAULT_SONNET_MODEL": "glm-5.2",
+    "API_TIMEOUT_MS": "3000000",
+    "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": 1
+  },
+  "includeCoAuthoredBy": false
+}`
+
+/**
  * 可在设置页编辑的后端配置文件白名单。
  * 顺序即 UI 上的 tab 顺序。
  */
