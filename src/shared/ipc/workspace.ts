@@ -25,6 +25,13 @@ export interface SetWorkspaceEditorArgs {
   editor: EditorId
 }
 
+export interface UpdateWorkspaceFoldersArgs {
+  id: string
+  name: string
+  /** 全量替换的次文件夹路径列表（主文件夹不可改，不在此参数内）。 */
+  secondaryPaths: string[]
+}
+
 // 函数签名（契约）。body 不重要，类型才重要。
 // stub 参数名以 `_` 前缀避免 unused 报错；参数类型从 typeof 派生不受影响。
 export async function listWorkspaces(): Promise<WorkspaceRecord[]> {
@@ -45,6 +52,11 @@ export async function setWorkspaceEditor(_args: SetWorkspaceEditorArgs): Promise
 export async function touchWorkspace(_args: { id: string }): Promise<void> {
   throw new Error('implemented in main')
 }
+export async function updateWorkspaceFolders(
+  _args: UpdateWorkspaceFoldersArgs,
+): Promise<WorkspaceRecord> {
+  throw new Error('implemented in main')
+}
 
 /** 聚合类型：所有 workspace handler 的 channel → 签名映射 */
 export type WorkspaceHandlers = {
@@ -54,4 +66,5 @@ export type WorkspaceHandlers = {
   'workspace.rename': typeof renameWorkspace
   'workspace.setEditor': typeof setWorkspaceEditor
   'workspace.touch': typeof touchWorkspace
+  'workspace.updateFolders': typeof updateWorkspaceFolders
 }

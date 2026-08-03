@@ -9,6 +9,7 @@ import type {
   AddWorkspaceArgs,
   RenameWorkspaceArgs,
   SetWorkspaceEditorArgs,
+  UpdateWorkspaceFoldersArgs,
 } from '@shared/ipc/workspace'
 
 const log = logger.domain('workspace-handler')
@@ -112,6 +113,46 @@ function buildWorkspaceFolders(
   return folders
 }
 
+/**
+ * 编辑场景专用：仅生成次文件夹记录，主文件夹保持不变。
+ * 复用与 buildWorkspaceFolders 相同的去重 / 嵌套 / alias 唯一性校验，
+ * 保证编辑后的次文件夹数据形态与创建时一致。
+ */
+function buildSecondaryWorkspaceFolders(
+  workspaceId: string,
+  primaryPath: string,
+  secondaryPaths: string[],
+  createdAt: number,
+): WorkspaceFolderRecord[] {
+  const uniquePaths = new Set([primaryPath])
+  const aliases = new Set<string>()
+  const folders: WorkspaceFolderRecord[] = []
+  secondaryPaths.forEach((path, index) => {
+    if (uniquePaths.has(path)) {
+      throw new WorkspaceError('invalid-path', `folder already added: ${path}`)
+    }
+    if (isNestedPath(primaryPath, path) || isNestedPath(path, primaryPath)) {
+      throw new WorkspaceError(
+        'invalid-path',
+        `workspace folders cannot contain each other: ${path}`,
+      )
+    }
+    uniquePaths.add(path)
+    const alias = uniqueAlias(basename(path) || 'folder', aliases)
+    aliases.add(alias)
+    folders.push({
+      id: randomUUID(),
+      workspaceId,
+      path,
+      alias,
+      role: 'secondary',
+      sortOrder: index + 1,
+      createdAt,
+    })
+  })
+  return folders
+}
+
 function isNestedPath(parent: string, child: string): boolean {
   const path = relative(parent, child)
   return path !== '' && !path.startsWith('..') && path !== '..'
@@ -137,6 +178,29 @@ export const renameWorkspace = async (args: RenameWorkspaceArgs): Promise<void> 
   const name = args.name.trim()
   if (!name) throw new WorkspaceError('invalid-path', 'name cannot be empty')
   ctx.db.updateWorkspaceName(args.id, name)
+}
+
+/**
+ * 编辑工作区：更新名称 + 全量替换次文件夹（主文件夹锁定，不可改）。
+ * 返回更新后的完整 record，store 据此整体替换缓存项。
+ */
+export const updateWorkspaceFolders = async (
+  args: UpdateWorkspaceFoldersArgs,
+): Promise<WorkspaceRecord> => {
+  const existing = ctx.db.findWorkspaceById(args.id)
+  if (!existing) throw new WorkspaceError('not-found', `workspace not found: ${args.id}`)
+  const name = args.name.trim()
+  if (!name) throw new WorkspaceError('invalid-path', 'name cannot be empty')
+
+  const primaryPath = existing.path
+  const secondaryPaths = (args.secondaryPaths ?? []).map(normalizeDirectory)
+  const now = Date.now()
+  const secondaryFolders = buildSecondaryWorkspaceFolders(args.id, primaryPath, secondaryPaths, now)
+
+  const updated = ctx.db.updateWorkspaceFolders(args.id, name, secondaryFolders)
+  if (!updated) throw new WorkspaceError('not-found', `workspace not found: ${args.id}`)
+  log.info('updated folders', updated.id, `${secondaryFolders.length} secondary`)
+  return updated
 }
 
 export const setWorkspaceEditor = async (args: SetWorkspaceEditorArgs): Promise<void> => {

@@ -212,6 +212,42 @@ export class DatabaseService {
     this.db.prepare('UPDATE workspaces SET name = ? WHERE id = ?').run(name, id)
   }
 
+  /**
+   * 全量替换某工作区的次文件夹——主文件夹不动（保留 role='primary' 行），
+   * 先删掉所有 secondary，再按传入顺序插入新的。整个操作在一个事务里。
+   * name 也一并更新（编辑弹窗一次提交）。返回更新后的完整 record。
+   */
+  updateWorkspaceFolders(
+    id: string,
+    name: string,
+    secondaryFolders: WorkspaceFolderRecord[],
+  ): WorkspaceRecord | null {
+    const tx = this.db.transaction(() => {
+      this.db.prepare('UPDATE workspaces SET name = ? WHERE id = ?').run(name, id)
+      this.db
+        .prepare(`DELETE FROM workspace_folders WHERE workspace_id = ? AND role = 'secondary'`)
+        .run(id)
+      const insert = this.db.prepare(
+        `INSERT INTO workspace_folders
+           (id, workspace_id, path, alias, role, sort_order, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      )
+      for (const folder of secondaryFolders) {
+        insert.run(
+          folder.id,
+          folder.workspaceId,
+          folder.path,
+          folder.alias,
+          folder.role,
+          folder.sortOrder,
+          folder.createdAt,
+        )
+      }
+    })
+    tx()
+    return this.findWorkspaceById(id)
+  }
+
   updateWorkspaceEditor(id: string, editor: string | null): void {
     this.db.prepare('UPDATE workspaces SET preferred_editor = ? WHERE id = ?').run(editor, id)
   }

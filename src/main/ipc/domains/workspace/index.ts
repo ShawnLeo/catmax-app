@@ -9,6 +9,7 @@ import {
   renameWorkspace,
   setWorkspaceEditor,
   touchWorkspace,
+  updateWorkspaceFolders,
 } from './handlers'
 
 export function registerWorkspaceHandlers(): void {
@@ -21,6 +22,10 @@ export function registerWorkspaceHandlers(): void {
     setWorkspaceEditor,
   )
   handleRendererRequest<WorkspaceHandlers, 'workspace.touch'>('workspace.touch', touchWorkspace)
+  handleRendererRequest<WorkspaceHandlers, 'workspace.updateFolders'>(
+    'workspace.updateFolders',
+    updateWorkspaceFolders,
+  )
 }
 
 export type { WorkspaceHandlers } from '@shared/ipc/workspace'

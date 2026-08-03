@@ -22,6 +22,7 @@ export const IPC = {
   WORKSPACE_RENAME: 'workspace.rename',
   WORKSPACE_SET_EDITOR: 'workspace.setEditor',
   WORKSPACE_TOUCH: 'workspace.touch',
+  WORKSPACE_UPDATE_FOLDERS: 'workspace.updateFolders',
   // settings
   SETTINGS_GET: 'settings.get',
   SETTINGS_UPDATE: 'settings.update',

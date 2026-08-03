@@ -54,6 +54,15 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     if (ws) ws.name = name
   }
 
+  // 编辑工作区：更新名称 + 全量替换次文件夹。主文件夹后端锁定，不在此参数内。
+  // 返回完整 record，整体替换缓存项（folders 变了，不能用浅 patch）。
+  async function updateFolders(id: string, name: string, secondaryPaths: string[]): Promise<void> {
+    const args = { id, name, secondaryPaths: [...secondaryPaths] }
+    const updated = await window.api.workspace.updateFolders(args)
+    const idx = workspaces.value.findIndex((w) => w.id === id)
+    if (idx !== -1) workspaces.value[idx] = updated
+  }
+
   // 切换当前工作区，并把 last_opened_at 更新到后端，让"最近工作区"列表反映真实打开顺序。
   // 失败不抛——这只是辅助排序，不应阻塞打开流程。
   async function setCurrent(id: string): Promise<void> {
@@ -81,6 +90,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     add,
     remove,
     rename,
+    updateFolders,
     setCurrent,
   }
 })

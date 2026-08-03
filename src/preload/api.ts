@@ -43,6 +43,9 @@ export const api = {
     rename: requestMain<WorkspaceHandlers, 'workspace.rename'>(IPC.WORKSPACE_RENAME),
     setEditor: requestMain<WorkspaceHandlers, 'workspace.setEditor'>(IPC.WORKSPACE_SET_EDITOR),
     touch: requestMain<WorkspaceHandlers, 'workspace.touch'>(IPC.WORKSPACE_TOUCH),
+    updateFolders: requestMain<WorkspaceHandlers, 'workspace.updateFolders'>(
+      IPC.WORKSPACE_UPDATE_FOLDERS,
+    ),
   },
   settings: {
     get: requestMain<SettingsHandlers, 'settings.get'>(IPC.SETTINGS_GET),

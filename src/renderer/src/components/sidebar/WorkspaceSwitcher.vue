@@ -38,7 +38,7 @@
           <button
             v-for="ws in workspaceStore.workspaces"
             :key="ws.id"
-            class="w-full flex items-center gap-2 px-3 py-2 hover:bg-muted text-left cursor-pointer"
+            class="group w-full flex items-center gap-2 px-3 py-2 hover:bg-muted text-left cursor-pointer"
             @click="selectWorkspace(ws.id)"
           >
             <FolderIcon class="w-4 h-4 flex-shrink-0 text-muted-foreground" />
@@ -50,6 +50,19 @@
                 {{ ws.path }}
               </div>
             </div>
+            <!-- 编辑图标:hover 才出现;点击不触发工作区切换 -->
+            <span
+              role="button"
+              tabindex="0"
+              class="shrink-0 rounded p-1 text-muted-foreground opacity-0 transition-opacity hover:bg-accent hover:text-foreground group-hover:opacity-100 focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+              title="编辑工作区"
+              aria-label="编辑工作区"
+              @click.stop.prevent="openEditWorkspace(ws)"
+              @keydown.enter.stop.prevent="openEditWorkspace(ws)"
+              @keydown.space.stop.prevent="openEditWorkspace(ws)"
+            >
+              <PencilIcon class="w-3.5 h-3.5" />
+            </span>
           </button>
         </div>
         <button
@@ -66,6 +79,12 @@
       @close="showCreateWorkspace = false"
       @created="finishCreateWorkspace"
     />
+    <EditWorkspaceDialog
+      :open="showEditWorkspace"
+      :workspace="editingWorkspace"
+      @close="showEditWorkspace = false"
+      @updated="finishEditWorkspace"
+    />
   </div>
 </template>
 
@@ -73,13 +92,17 @@
 import CatmaxLogo from '@renderer/components/icons/CatmaxLogo.vue'
 import TitleBarControls from '@renderer/components/TitleBarControls.vue'
 import CreateWorkspaceDialog from '@renderer/components/workspace/CreateWorkspaceDialog.vue'
+import EditWorkspaceDialog from '@renderer/components/workspace/EditWorkspaceDialog.vue'
 import { useWorkspaceStore } from '@renderer/stores/workspace'
-import { FolderIcon, ChevronDownIcon, PlusIcon } from 'lucide-vue-next'
+import type { WorkspaceRecord } from '@shared/domain'
+import { FolderIcon, ChevronDownIcon, PencilIcon, PlusIcon } from 'lucide-vue-next'
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 
 const workspaceStore = useWorkspaceStore()
 const showPicker = ref(false)
 const showCreateWorkspace = ref(false)
+const showEditWorkspace = ref(false)
+const editingWorkspace = ref<WorkspaceRecord | null>(null)
 const dropdownRef = ref<HTMLElement | null>(null)
 const triggerRef = ref<HTMLElement | null>(null)
 
@@ -158,6 +181,18 @@ function openCreateWorkspace(): void {
 
 function finishCreateWorkspace(): void {
   showCreateWorkspace.value = false
+}
+
+// 编辑工作区:从下拉项的 hover 图标进入。先收起下拉，再开弹窗，避免两层重叠。
+function openEditWorkspace(ws: WorkspaceRecord): void {
+  showPicker.value = false
+  editingWorkspace.value = ws
+  showEditWorkspace.value = true
+}
+
+function finishEditWorkspace(): void {
+  showEditWorkspace.value = false
+  editingWorkspace.value = null
 }
 </script>
 

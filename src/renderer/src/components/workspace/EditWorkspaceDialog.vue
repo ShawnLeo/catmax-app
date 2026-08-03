@@ -9,17 +9,17 @@
         class="w-full max-w-xl rounded-2xl border border-border bg-popover p-6 shadow-2xl"
         role="dialog"
         aria-modal="true"
-        aria-labelledby="create-workspace-title"
+        aria-labelledby="edit-workspace-title"
       >
         <header class="mb-5 flex items-start justify-between gap-4">
           <div>
             <h2
-              id="create-workspace-title"
+              id="edit-workspace-title"
               class="text-xl font-semibold tracking-tight text-foreground"
             >
-              创建工作区
+              编辑工作区
             </h2>
-            <p class="mt-1 text-sm text-muted-foreground">主文件夹用于新会话、Git 与项目配置</p>
+            <p class="mt-1 text-sm text-muted-foreground">修改名称或次文件夹</p>
           </div>
           <button
             type="button"
@@ -32,36 +32,28 @@
         </header>
 
         <div class="space-y-2.5">
-          <!-- 工作区名称 + 选择主文件夹:同一行 input-group -->
-          <div>
-            <div
-              class="flex h-9 items-stretch overflow-hidden rounded-md border border-input bg-transparent shadow-sm transition-colors focus-within:ring-1 focus-within:ring-ring"
-            >
-              <input
-                v-model="name"
-                placeholder="工作区名称,例如 Catmax"
-                class="min-w-0 flex-1 bg-transparent px-3 text-[length:var(--ui-text-base)] placeholder:text-muted-foreground focus:outline-none"
-              />
-              <button
-                type="button"
-                class="inline-flex shrink-0 items-center gap-1.5 border-l border-input bg-background px-3 text-[length:var(--ui-text-d3)] font-medium transition-colors hover:bg-accent hover:text-accent-foreground"
-                @click="pickPrimary"
-              >
-                <FolderOpenIcon class="h-4 w-4" />
-                选择文件夹
-              </button>
-            </div>
-            <!-- 已选主文件夹路径:轻量提示,非输入框 -->
-            <p
-              v-if="primaryPath"
-              class="flex items-center gap-1.5 px-1 pt-1 text-xs text-muted-foreground"
-            >
-              <FolderIcon class="h-3 w-3 shrink-0" />
-              <span class="min-w-0 flex-1 truncate">{{ primaryPath }}</span>
-            </p>
+          <!-- 工作区名称 -->
+          <input
+            v-model="name"
+            placeholder="工作区名称"
+            class="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-[length:var(--ui-text-base)] shadow-sm transition-colors placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+          />
+
+          <!-- 主文件夹:只读展示(创建后不可改) -->
+          <div
+            class="flex h-9 items-center gap-2 rounded-md border border-border/70 bg-muted/40 px-3"
+            :title="`主文件夹:${primaryPath}`"
+          >
+            <FolderIcon class="h-4 w-4 shrink-0 text-muted-foreground" />
+            <span class="min-w-0 flex-1 truncate text-sm text-muted-foreground">
+              {{ primaryPath || '—' }}
+            </span>
+            <span class="shrink-0 text-[length:var(--ui-text-d3)] text-muted-foreground">
+              主文件夹 · 不可改
+            </span>
           </div>
 
-          <!-- 次文件夹:拖放区 + 明显的选择按钮 -->
+          <!-- 次文件夹:拖放区 + 选择按钮 -->
           <div
             class="rounded-lg border border-dashed p-3 transition-colors"
             :class="dragging ? 'border-primary bg-primary/8' : 'border-border bg-background/55'"
@@ -70,7 +62,7 @@
             @dragleave.prevent="dragging = false"
             @drop.prevent="onDrop"
           >
-            <!-- 空状态:居中的明显按钮 + 拖放提示 -->
+            <!-- 空状态:居中按钮 + 拖放提示 -->
             <div
               v-if="secondaryPaths.length === 0"
               class="flex flex-col items-center justify-center gap-2 py-2 text-center"
@@ -119,9 +111,9 @@
         </div>
 
         <footer class="mt-6 flex justify-end gap-2 border-t border-border/70 pt-4">
-          <Button variant="ghost" :disabled="creating" @click="emit('close')">取消</Button>
-          <Button :disabled="!primaryPath || !name.trim() || creating" @click="create">
-            {{ creating ? '创建中…' : '创建工作区' }}
+          <Button variant="ghost" :disabled="saving" @click="emit('close')">取消</Button>
+          <Button :disabled="!canSave || saving" @click="save">
+            {{ saving ? '保存中…' : '保存' }}
           </Button>
         </footer>
       </section>
@@ -132,42 +124,38 @@
 <script setup lang="ts">
 import { Button } from '@renderer/components/ui/button'
 import { useWorkspaceStore } from '@renderer/stores/workspace'
-import { FolderIcon, FolderOpenIcon, FolderPlusIcon, PlusIcon, XIcon } from 'lucide-vue-next'
-import { ref, watch } from 'vue'
+import type { WorkspaceRecord } from '@shared/domain'
+import { FolderIcon, FolderPlusIcon, PlusIcon, XIcon } from 'lucide-vue-next'
+import { computed, ref, watch } from 'vue'
 
-const props = defineProps<{ open: boolean }>()
-const emit = defineEmits<{ close: []; created: [workspaceId: string] }>()
+const props = defineProps<{ open: boolean; workspace: WorkspaceRecord | null }>()
+const emit = defineEmits<{ close: []; updated: [workspaceId: string] }>()
 
 const workspaceStore = useWorkspaceStore()
 const name = ref('')
 const primaryPath = ref('')
 const secondaryPaths = ref<string[]>([])
 const dragging = ref(false)
-const creating = ref(false)
+const saving = ref(false)
 const error = ref('')
 
+// 打开时从传入 workspace 预填:主文件夹取 role==='primary',其余作为次文件夹。
 watch(
   () => props.open,
   (open) => {
-    if (!open) return
-    name.value = ''
-    primaryPath.value = ''
-    secondaryPaths.value = []
+    if (!open || !props.workspace) return
+    name.value = props.workspace.name
+    primaryPath.value =
+      props.workspace.folders.find((f) => f.role === 'primary')?.path ?? props.workspace.path
+    secondaryPaths.value = props.workspace.folders
+      .filter((f) => f.role === 'secondary')
+      .sort((a, b) => a.sortOrder - b.sortOrder)
+      .map((f) => f.path)
     error.value = ''
   },
 )
 
-async function pickPrimary(): Promise<void> {
-  const result = await window.api.system.openDialog({
-    title: '选择主文件夹',
-    properties: ['openDirectory'],
-  })
-  const path = result.filePaths[0]
-  if (result.canceled || !path) return
-  primaryPath.value = path
-  secondaryPaths.value = secondaryPaths.value.filter((item) => item !== path)
-  if (!name.value.trim()) name.value = pathName(path)
-}
+const canSave = computed(() => name.value.trim().length > 0 && !!props.workspace)
 
 async function pickSecondary(): Promise<void> {
   const result = await window.api.system.openDialog({
@@ -198,30 +186,17 @@ function removeSecondary(path: string): void {
   secondaryPaths.value = secondaryPaths.value.filter((item) => item !== path)
 }
 
-async function create(): Promise<void> {
-  if (!primaryPath.value || !name.value.trim() || creating.value) return
-  creating.value = true
+async function save(): Promise<void> {
+  if (!props.workspace || !canSave.value || saving.value) return
+  saving.value = true
   error.value = ''
   try {
-    const workspace = await workspaceStore.add(
-      primaryPath.value,
-      name.value.trim(),
-      secondaryPaths.value,
-    )
-    emit('created', workspace.id)
+    await workspaceStore.updateFolders(props.workspace.id, name.value.trim(), secondaryPaths.value)
+    emit('updated', props.workspace.id)
   } catch (cause) {
     error.value = cause instanceof Error ? cause.message : String(cause)
   } finally {
-    creating.value = false
+    saving.value = false
   }
-}
-
-function pathName(path: string): string {
-  return (
-    path
-      .replace(/[\\/]+$/, '')
-      .split(/[\\/]/)
-      .pop() || '新工作区'
-  )
 }
 </script>
