@@ -120,6 +120,8 @@
                 {{ backendDisplayName }}
               </span>
             </span>
+            <span class="h-3 w-px bg-border" aria-hidden="true" />
+            <ProjectSkillsPopover />
           </div>
         </div>
       </div>
@@ -205,6 +207,7 @@ import BackendIcon from '@renderer/components/icons/BackendIcon.vue'
 import CatmaxLogo from '@renderer/components/icons/CatmaxLogo.vue'
 import RightPanel from '@renderer/components/panel/RightPanel.vue'
 import Sidebar from '@renderer/components/sidebar/Sidebar.vue'
+import ProjectSkillsPopover from '@renderer/components/skills/ProjectSkillsPopover.vue'
 import ResizeHandle from '@renderer/components/ui/ResizeHandle.vue'
 import { useChatFileDrop } from '@renderer/composables/useChatFileDrop'
 import {

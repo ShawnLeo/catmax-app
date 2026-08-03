@@ -642,6 +642,32 @@ export interface AgentBackend {
    * 不实现 ≠ 该后端没有斜杠命令，只是没有**动态**命令表。
    */
   listSlashCommands?(cwd: string): Promise<SlashCommandInfo[]>
+
+  /**
+   * Unified Skill Center: 把「这个技能被关掉了」推给后端。
+   *
+   * 只有把技能开关**存在自己那边**的后端实现——codex 是（`skills/config/write`
+   * 落进 `~/.codex/config.toml` 的 `[[skills.config]]`）。claude 不实现：它没有
+   * 对应的 RPC，开关是在构造每次 query 时把 `skillOverrides` 合进 catmax 的
+   * flag 层配置里的（见 ClaudeAdapter.applyOverrideSettings），压根不是一次调用。
+   *
+   * ⚠️ 语义不对称，UI 必须说清楚：codex 这条写的是用户自己的全局配置，**终端里的
+   * codex 也会跟着关**；claude 那条只在 catmax 内生效。这不是实现偷懒——
+   * `ThreadStartParams` 里没有任何技能过滤字段，codex 没有 per-session 的关法。
+   */
+  setSkillEnabled?(name: string, enabled: boolean): Promise<void>
+
+  /**
+   * Unified Skill Center: 告诉后端「技能目录变了，扔掉缓存重扫」。
+   *
+   * 只有**缓存技能列表**的后端实现。codex 是：它把技能列表缓存在 app-server 进程里，
+   * 而且不 watch 文件系统，catmax 建完软链后不主动叫它一声，跑着的那个进程就永远
+   * 看不到新技能（实测，见 CodexAdapter.refreshSkills）。claude 不实现——它每轮
+   * query 都重新扫，没有需要失效的缓存。
+   *
+   * 实现方必须做到：后端进程没起来时**静默返回**，不为了刷新而把它拉起来。
+   */
+  refreshSkills?(): Promise<void>
   getCapabilities(): BackendCapabilities
 
   startSession(args: StartSessionArgs): Promise<{ sessionId: string; backendThreadId: string }>

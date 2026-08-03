@@ -6,6 +6,7 @@ import { registerGitHandlers } from './domains/git'
 import { registerPtyHandlers } from './domains/pty'
 import { registerSessionHandlers } from './domains/session'
 import { registerSettingsHandlers } from './domains/settings'
+import { registerSkillsHandlers, syncSkillsOnStartup } from './domains/skills'
 import { registerSystemHandlers } from './domains/system'
 import { registerWorkspaceHandlers } from './domains/workspace'
 
@@ -23,5 +24,9 @@ export async function registerAllHandlers(): Promise<void> {
   registerGitHandlers()
   registerFsHandlers()
   registerPtyHandlers()
+  registerSkillsHandlers()
   log.info('all handlers registered')
+  // Unified Skill Center: 补推被关掉的技能。不 await——codex 首次调用会 spawn
+  // app-server，拿它挡住启动会让窗口白等好几秒。
+  void syncSkillsOnStartup()
 }

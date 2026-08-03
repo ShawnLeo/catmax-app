@@ -77,6 +77,10 @@ export class BackendManager {
           log.warn('failed to persist backend real session id:', error)
         }
       },
+      onSkillsChanged: (backendId) => {
+        log.info('backend reported skills changed', backendId)
+        ctx.broadcast('skills:changed', {})
+      },
     }
     for (const plugin of plugins ?? getBackendPlugins()) {
       const adapter = plugin.createAdapter(context)
@@ -292,6 +296,69 @@ export class BackendManager {
     }
     adapter.invalidateModelsCache?.()
     return adapter.listModels()
+  }
+
+  /**
+   * Unified Skill Center: 把一个技能的开/关推给所有实现了该能力的后端。
+   *
+   * 只有 codex 实现——claude 的开关不是一次调用，而是构造 query 时把
+   * `skillOverrides` 合进 flag 层配置（见 ClaudeAdapter.applyOverrideSettings），
+   * 所以它自然不在这个循环里，也不需要在这里特判。
+   *
+   * 单个后端失败不该让开关整个失败：catmax 自己的状态已经落盘了，claude 侧下一轮
+   * 就生效；codex 没起来时这次推送丢了，等它起来时由 syncSkillsToBackends 补上。
+   */
+  async setSkillEnabled(name: string, enabled: boolean): Promise<{ failed: BackendId[] }> {
+    const failed: BackendId[] = []
+    await Promise.all(
+      [...this.adapters.entries()].map(async ([id, adapter]) => {
+        if (!adapter.setSkillEnabled) return
+        try {
+          await adapter.setSkillEnabled(name, enabled)
+        } catch (error) {
+          log.warn('setSkillEnabled failed', { backend: id, name, error })
+          failed.push(id)
+        }
+      }),
+    )
+    return { failed }
+  }
+
+  /**
+   * 技能目录被 catmax 改过（建软链 / 迁移 / 删除）之后，通知所有后端丢缓存重扫。
+   *
+   * 必须在**每一条改盘路径**之后调用，而不是只在某个按钮里调：codex 缓存技能列表
+   * 且不 watch 文件系统，漏掉一条路径的表现就是"catmax 里看着好了，codex 那边还是
+   * 旧的"，而这种不一致恰恰是用户最难自己诊断的。
+   *
+   * 单个后端失败只记日志：磁盘上的改动已经成功了，为一次可选的缓存刷新把整个操作
+   * 报成失败会让用户以为软链没建成，反而去重试。
+   */
+  async refreshSkills(): Promise<void> {
+    await Promise.all(
+      [...this.adapters.entries()].map(async ([id, adapter]) => {
+        if (!adapter.refreshSkills) return
+        try {
+          await adapter.refreshSkills()
+        } catch (error) {
+          log.warn('refreshSkills failed', { backend: id, error })
+        }
+      }),
+    )
+  }
+
+  /**
+   * 启动时把 catmax 的禁用集合整个推一遍。
+   *
+   * 需要它是因为 codex 那条投影是**推送式**的：应用没跑的时候用户在别处改了
+   * `~/.codex/config.toml`，或者上一次推送时 codex 没起来，两边就漂了。
+   * 只推"关"不推"开"——把没在禁用集合里的技能统统写成 enabled 会把用户自己在
+   * codex 里关掉的技能强行打开，那是越界。
+   */
+  async syncDisabledSkills(disabled: Iterable<string>): Promise<void> {
+    for (const name of disabled) {
+      await this.setSkillEnabled(name, false)
+    }
   }
 
   /** 预热指定 backend，不依赖可能已切换的 currentBackendId。 */

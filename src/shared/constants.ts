@@ -104,6 +104,14 @@ export const IPC = {
   PTY_WRITE: 'pty.write',
   PTY_RESIZE: 'pty.resize',
   PTY_KILL: 'pty.kill',
+  // skills（Unified Skill Center）
+  SKILLS_LIST: 'skills.list',
+  SKILLS_SET_ENABLED: 'skills.setEnabled',
+  SKILLS_MIRROR: 'skills.mirror',
+  SKILLS_MIGRATE: 'skills.migrate',
+  SKILLS_REMOVE: 'skills.remove',
+  SKILLS_REVEAL: 'skills.reveal',
+  SKILLS_OPEN_IN_EDITOR: 'skills.openInEditor',
 } as const
 
 /** 推送事件名 */
@@ -117,6 +125,8 @@ export const PUSH = {
   SESSION_TITLE_CHANGED: 'session:titleChanged',
   PTY_DATA: 'pty:data',
   PTY_EXIT: 'pty:exit',
+  /** Unified Skill Center: 后端报告技能集合变了，renderer 重扫 */
+  SKILLS_CHANGED: 'skills:changed',
 } as const
 
 /** 存储相关 */

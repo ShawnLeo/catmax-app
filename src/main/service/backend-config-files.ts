@@ -112,6 +112,24 @@ export function claudeOverrideSettingsPath(): string | null {
   }
 }
 
+/**
+ * 读出 catmax 覆盖配置的内容。
+ *
+ * Unified Skill Center 要把 `skillOverrides` 合进这一层再以内联对象交给 SDK
+ * （`Options.settings` 同时接受路径和对象），所以需要先把文件读成对象。
+ * 解析失败返回空对象——覆盖层坏了应该退化成"没有覆盖"，而不是让整个会话起不来。
+ */
+export function readClaudeOverrideSettings(path: string): Record<string, unknown> {
+  try {
+    const parsed: unknown = JSON.parse(readFileSync(path, 'utf8'))
+    if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) return {}
+    return parsed as Record<string, unknown>
+  } catch (error) {
+    log.warn('catmax override settings unreadable, ignoring', error)
+    return {}
+  }
+}
+
 /** 备份根目录——放 userData，不污染用户的 ~/.codex / ~/.claude */
 function backupRoot(): string {
   try {

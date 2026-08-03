@@ -1,6 +1,6 @@
 # 统一技能中心（Unified Skill Center）调研与设计
 
-- **状态**：设计中，未实现
+- **状态**：Phase 1–5 已实现（§5 的五期全部落地）；§6 的 per-session 关闭仍未验证
 - **日期**：2026-08-02
 - **范围**：让 codex 与 claude 两个后端读到同一份技能；技能的开/关；显示技能所在位置并用外部编辑器打开；新建会话页显示当前项目技能数量并可开关/删除
 - **不在范围**：应用内编辑技能正文、远程技能市场/下载
@@ -79,7 +79,7 @@ skills/config/write { path?: string | null, name?: string | null, enabled: boole
   enabled = false
   ```
   重新置 `enabled: true` 会把这条**整段删掉**，是干净的 override 语义。
-- 写完会推 `skills/changed` 通知，按"缓存失效"处理并重新 `skills/list`。
+- ~~写完会推 `skills/changed` 通知~~ **不推。** 调研时以为会，实现阶段实测 codex 0.145.0 写完之后 3 秒内一条通知都没有。见 §4.6。
 - ⚠️ **坑：`path` 必须是 `skills/list` 返回的 SKILL.md 全路径。** 传技能**目录**时响应照样是 `{"effectiveEnabled": false}`，但**实际没生效**——一个会骗人的成功响应。这类静默失败必须在实现里用测试钉死。
 - ⚠️ **影响范围是全局的**：写的是用户自己的 `~/.codex/config.toml`，用户在终端跑 codex 时这个技能也是关的。
 
@@ -146,15 +146,18 @@ catmax 维护一批软链，并且**只维护自己建的那些**：
 catmax 自己存一份 `userData/skills-state.json`：
 
 ```jsonc
-{ "disabled": { "/Users/x/.agents/skills/lark-base/SKILL.md": true } }
+{ "disabled": ["lark-base"] }
 ```
 
-**用统一根里的 SKILL.md 绝对路径作 key**，不用名字——path 是两个后端都能表达的唯一标识，而 codex 的 `name` 选择器在多根同名时是有歧义的。
+**按技能名作 key。** 设计阶段先写的是"用 SKILL.md 绝对路径"，实现时改掉了：claude 那边的开关只有 `settings.skillOverrides`，它是**纯按名字**索引的，没有路径选择器。既然一半的投影只能按名字，另一半就不该假装能按路径——那会造出一个 catmax 自以为做到、实际做不到的语义。
+
+代价说清楚：全局技能和项目技能同名时只能一起开关。它们在后端那边本来也是同一个名字空间，分不开。
 
 投影：
 
-- **codex**：启动时和状态变更时 `skills/config/write { path: <SKILL.md 全路径>, enabled }`。路径必须原样用 `skills/list` 返回的那个（软链只影响 claude 看到的路径，codex 直接读统一根，不受影响）。
-- **claude**：构造 query 时把 `skillOverrides: { <name>: 'off' }` 合进 flag 层。当前 `applyOverrideSettings` 是"传一个路径"，需要改成"没有 override 时仍传路径，有 override 时读出文件内容 + 合上 `skillOverrides` 传内联对象"——保持"无覆盖时 catmax 不做任何合并"这条既有不变量。
+- **codex**：启动时和状态变更时 `skills/config/write { name, enabled }`。
+  **不要改用 `path` 选择器而不加测试**——实测传技能*目录*时 codex 照样回 `{"effectiveEnabled": false}` 却根本没生效，只有 `skills/list` 返回的 SKILL.md 全路径才算数。`tests/backend/codex-skills.test.ts` 钉住了这一条。
+- **claude**：构造 query 时把 `skillOverrides: { <name>: 'off' }` 合进 flag 层。`applyOverrideSettings` 原本是"传一个路径"，改成了"没关任何技能时仍传路径，有禁用项时读出文件内容 + 合上 `skillOverrides` 传内联对象"——"无覆盖时 catmax 不做任何合并"这条既有不变量对绝大多数用户仍然成立。合并时**用户在覆盖文件里自己写的档位优先**：那是他显式表达过的意图，不该被一个 UI 开关悄悄盖掉。
 
 **必须如实告诉用户的不对称**：codex 的关闭写进 `~/.codex/config.toml`，用户终端里的 codex 也会跟着关；claude 的关闭只在 catmax 内生效。这不是实现偷懒——`ThreadStartParams` 里没有任何技能过滤字段，codex 没有 per-session 的关法。UI 上给 codex 的开关标一句"同时影响终端里的 codex"。
 
@@ -162,16 +165,21 @@ catmax 自己存一份 `userData/skills-state.json`：
 
 按 CLAUDE.md 的 8 域惯例（一个域一个关注点），加第 9 个 `skills` 域比塞进 `backend` 干净：
 
+**所有入口只接受 `id`（`<scope>:<name>`），不接受路径**——路径一律由 main 从扫描结果里查出来。这跟 backend config files 是同一条安全边界：renderer 能传路径进来的话，`skills.remove` 就等价于一个任意文件删除通道。
+
 | 方法 | 说明 |
 |---|---|
-| `skills.list(workspaceId)` | 返回统一视图：全局 + 当前项目，每条带 `path` / `scope` / `enabled` / `visibleTo: BackendId[]` |
-| `skills.setEnabled(path, enabled)` | 写 catmax 状态 + 投影到两个后端 |
-| `skills.mirror(path)` | 为某个技能补上 claude 侧软链（修复"只有 codex 看得到"） |
-| `skills.reveal(path)` | 在访达/资源管理器中显示 |
-| `skills.openExternal(path)` | 用默认编辑器打开 SKILL.md（复用 workspace 域已有的 default editor） |
-| `skills.remove(path)` | 仅项目级；删目录 + 软链 |
+| `skills.list({ workspaceId? })` | 返回统一视图：全局 + 当前项目，每条带 `locations` / `primary` / `scope` / `enabled` / `visibleTo` |
+| `skills.setEnabled({ id, enabled })` | 写 catmax 状态 + 投影到两个后端 |
+| `skills.mirror({ id })` | 为统一目录里的技能补上另一后端的软链（修复"只有 codex 看得到"） |
+| `skills.migrate({ id })` | 把后端目录里的真技能搬进统一目录，原地留软链 |
+| `skills.remove({ id })` | 仅项目级；删目录 + 软链 |
+| `skills.reveal({ id })` | 在访达/资源管理器中显示 |
+| `skills.openInEditor({ id })` | 用工作区的默认编辑器打开 SKILL.md |
 
-`skills.remove` 的守卫：路径必须在当前工作区内、必须可写、必须确认。越界或只读时报错，不试图 sudo。
+所有会改盘的调用都回一份新的 snapshot，省掉调用方的第二次往返，也避免"改完了但列表还是旧的"这种界面撒谎。
+
+`skills.remove` 的守卫：必须是项目级、每一处 location 都必须在当前工作区文件夹内（前缀相同但不是子目录的路径要判掉，有测试钉住）、越界就整体拒绝不做"删一半"。软链优先走 mirror 的三道闸（清单里有 → 磁盘上确实是软链 → 才 unlink）。
 
 ### 4.5 UI
 
@@ -181,8 +189,22 @@ catmax 自己存一份 `userData/skills-state.json`：
 
 ### 4.6 刷新
 
-- codex：订阅 `skills/changed` → `skills/list { forceReload: true }`。
-- claude：没有对应通知，catmax 自己扫盘。窗口重新聚焦、popover 打开时各扫一次即可，不值得为此上 watcher。
+> 这一节最初写成"订阅 `skills/changed` → `skills/list { forceReload: true }`"，实现时对着 codex 0.145.0 实测，**前提是错的**，结论反过来了。三条实测（沙盒 `HOME` + `CODEX_HOME`）：
+>
+> | 做的事 | 结果 |
+> |---|---|
+> | 往扫描根里新建技能目录，等 6 秒 | **0 条通知**；`skills/list`（`forceReload` 缺省）**也看不到**它 |
+> | 同一进程再发 `skills/list { forceReload: true }` | 出现了；此后缓存被更新，默认的 list 也看得到 |
+> | `skills/config/write` | 0 条通知 |
+> | `skills/extraRoots/set` | **推了 `skills/changed`** |
+>
+> 也就是说 codex **缓存技能列表、不 watch 文件系统**，`skills/changed` 是"codex 自己的技能根集合变了"的信号，不是文件系统变更的信号。协议里它的 params 就是 `Record<string, never>`——一个不带数据的失效信号。
+
+**主动 forceReload（真正 load-bearing 的那条）**：catmax 每一条改盘路径（`skills.mirror` / `migrate` / `remove`）之后都必须调 `AgentBackend.refreshSkills?.()`，codex 的实现是 `skills/list { forceReload: true }`。少一条路径的表现是：catmax 自己扫盘所以列表是新的，跑着的 app-server 还拿着旧缓存，用户下一轮对话里那个技能依然不存在——**界面显示成功、实际没生效**，正是这个功能最该避免的撒谎。实现方必须在后端进程没起来时静默返回，不为一次目录变更把 app-server 拉起来（冷启动本来就扫最新的）。
+
+**订阅 `skills/changed`**：仍然接上（`BackendPluginContext.onSkillsChanged` → 广播 `skills:changed` → renderer 重扫），成本极低，且 codex 将来扩大触发面时 catmax 自动跟得上。但**不能当主刷新机制**——实测两个最该触发的时机它都不发。
+
+**兜底的才是主力**：renderer 自己扫盘，时机是 popover 打开、切工作区、**窗口重新聚焦**。聚焦重扫在 store 里做引用计数（设置页技能区和新建会话页 popover 会同时在场，各挂一个 listener 就等于每次聚焦扫两遍），并对 `focus` + `visibilitychange` 做 1 秒节流（切回应用时两个事件会一起来）。claude 侧永远只有这条路——它没有任何技能变更通知。
 
 ---
 

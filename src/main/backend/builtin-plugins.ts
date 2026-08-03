@@ -23,7 +23,8 @@ export function registerBuiltinBackendPlugins(): void {
         blockTypes: CODEX_CAPABILITIES.chat.blockTypes,
         capabilities: CODEX_CAPABILITIES,
       },
-      createAdapter: () => new CodexAdapter(),
+      createAdapter: (context: BackendPluginContext) =>
+        new CodexAdapter({ onSkillsChanged: () => context.onSkillsChanged('codex') }),
       applySettings: (adapter, settings) => {
         if (!(adapter instanceof CodexAdapter)) return
         const binaryPath = settings.backendPaths.codex

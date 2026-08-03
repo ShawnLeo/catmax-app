@@ -79,6 +79,9 @@
         <div class="settings-content max-w-2xl mx-auto p-8 flex flex-col gap-8">
           <ThemeSection v-show="activeSection === 'theme'" />
           <BackendSection v-show="activeSection === 'backend'" />
+          <!-- v-if 而不是 v-show：SkillsSection 挂载时会扫盘，藏着也扫等于每次开设置页
+               都白扫一遍全部技能目录。 -->
+          <SkillsSection v-if="activeSection === 'skills'" />
           <WorkspaceSection v-show="activeSection === 'workspace'" />
           <ProxySection v-show="activeSection === 'proxy'" />
 
@@ -106,6 +109,7 @@
 import CatmaxLogo from '@renderer/components/icons/CatmaxLogo.vue'
 import BackendSection from '@renderer/components/settings/BackendSection.vue'
 import ProxySection from '@renderer/components/settings/ProxySection.vue'
+import SkillsSection from '@renderer/components/settings/SkillsSection.vue'
 import ThemeSection from '@renderer/components/settings/ThemeSection.vue'
 import WorkspaceSection from '@renderer/components/settings/WorkspaceSection.vue'
 import TitleBarControls from '@renderer/components/TitleBarControls.vue'
@@ -118,13 +122,14 @@ import {
   InfoIcon,
   ArrowLeftIcon,
   MenuIcon,
+  SparklesIcon,
   XIcon,
 } from 'lucide-vue-next'
 import type { Component } from 'vue'
 import { onMounted, onUnmounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 
-type SectionId = 'theme' | 'backend' | 'workspace' | 'proxy' | 'about'
+type SectionId = 'theme' | 'backend' | 'skills' | 'workspace' | 'proxy' | 'about'
 
 interface NavItem {
   id: SectionId
@@ -135,6 +140,7 @@ interface NavItem {
 const navItems: NavItem[] = [
   { id: 'theme', label: '外观', icon: PaletteIcon },
   { id: 'backend', label: '后端', icon: CpuIcon },
+  { id: 'skills', label: '技能', icon: SparklesIcon },
   { id: 'workspace', label: '工作区', icon: FolderIcon },
   { id: 'proxy', label: '网络', icon: GlobeIcon },
   { id: 'about', label: '关于', icon: InfoIcon },

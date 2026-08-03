@@ -51,8 +51,12 @@ import {
 } from '@shared/backend/types'
 import { app } from 'electron'
 
-import { claudeOverrideSettingsPath } from '../../service/backend-config-files'
+import {
+  claudeOverrideSettingsPath,
+  readClaudeOverrideSettings,
+} from '../../service/backend-config-files'
 import { logger } from '../../service/logger'
+import { disabledSkillOverrides, mergeSkillOverrides } from '../../service/skill-state'
 import { buildWorkspaceInstructions, secondaryWorkspacePaths } from '../workspace-context'
 
 import { createAskUserServer } from './ask-user-server'
@@ -1320,8 +1324,30 @@ export class ClaudeAdapter implements AgentBackend {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   private applyOverrideSettings(options: Record<string, any>): void {
     const path = claudeOverrideSettingsPath()
-    if (path === null) return
-    options.settings = path
+    const skillOverrides = disabledSkillOverrides()
+
+    // 没有被关掉的技能时，保持原样传路径——"无覆盖 = catmax 不做任何合并"这条
+    // 不变量对绝大多数用户都成立，不该为一个少数功能把所有人拖进合并逻辑。
+    if (skillOverrides === null) {
+      if (path !== null) options.settings = path
+      return
+    }
+
+    /*
+     * Unified Skill Center: 关技能只能落在这一层。
+     *
+     * 实测（SDK 0.3.220 / 内置 claude 2.1.220）：
+     * - `Options.managedSettings.skillOverrides` **无效**——typings 跑在二进制前面了；
+     * - `Options.skills` 白名单只是**上下文过滤器**，命令表纹丝不动，斜杠命令照样能打；
+     * - 只有 `settings.skillOverrides` 真的把技能从命令表里摘掉（实测 79 → 77）。
+     *
+     * `settings` 同时接受路径和内联对象，这里用内联对象把用户的覆盖文件和 catmax
+     * 算出来的 skillOverrides 合在一起，就不必再为此多落一个磁盘文件。合并只发生在
+     * 顶层的一个 key 上，用户覆盖文件里自己写的 skillOverrides 优先——那是他显式
+     * 表达的意图，不该被 UI 开关悄悄盖掉。
+     */
+    const base = path === null ? {} : readClaudeOverrideSettings(path)
+    options.settings = mergeSkillOverrides(base, skillOverrides)
   }
 
   // ============ binary 路径解析（ASAR 打包支持） ============

@@ -115,6 +115,15 @@ export interface CodexAdapterOptions {
   spawner?: ProcessSpawner
   /** 自定义 cwd（默认 process.cwd） */
   cwd?: string
+  /**
+   * codex 推 `skills/changed` 时回调（Unified Skill Center）。
+   *
+   * 这是个**空 params 的失效信号**（协议里就是 `Record<string, never>`），只说
+   * "技能集合变了，自己重拉"。触发源实测是 `skills/extraRoots/set`——codex 0.145
+   * 既不 watch 文件系统，`skills/config/write` 之后也不推。所以它只能当补充，
+   * 不能当主刷新机制，真正的刷新靠 renderer 自己扫盘。
+   */
+  onSkillsChanged?: () => void
 }
 
 /** pending state：等待 approval 响应时持有的 resolver */
@@ -567,6 +576,52 @@ export class CodexAdapter implements AgentBackend {
     this.cachedModelsPromise = null
     // 桥那边也有一层缓存，"刷新模型"要能真的重新打上游
     this.modelListProvider?.invalidate()
+  }
+
+  // ============ 技能开关 ============
+
+  /**
+   * Unified Skill Center: 把技能的开/关推给 codex。
+   *
+   * 落盘位置是**用户自己的** `~/.codex/config.toml`：
+   * ```toml
+   * [[skills.config]]
+   * name = "web-perf"
+   * enabled = false
+   * ```
+   * 重新置 `enabled: true` 会把整段删掉，是干净的 override 语义。所以终端里跑
+   * codex 时这个技能也是关的——UI 上必须写清楚，见 AgentBackend.setSkillEnabled。
+   *
+   * ⚠️ 用 `name` 而不是 `path` 选择器，有两个原因：
+   * 1. claude 那边只能按名字关（`skillOverrides` 没有路径选择器），两边都按名字
+   *    才不会造出一个 catmax 自以为做到、实际做不到的语义；
+   * 2. `path` 有个会骗人的坑——实测传技能**目录**时响应照样是
+   *    `{"effectiveEnabled": false}`，但**根本没生效**；只有传 `skills/list` 返回的
+   *    SKILL.md 全路径才算数。要改用 path 的话必须先把这条钉进测试。
+   */
+  async setSkillEnabled(name: string, enabled: boolean): Promise<void> {
+    await this.ensureInitialized()
+    await this.sendRequest('skills/config/write', { name, enabled })
+  }
+
+  /**
+   * 让跑着的 app-server 重新扫技能目录。
+   *
+   * **codex 缓存技能列表，而且不 watch 文件系统**——实测：往扫描根里新建一个技能
+   * 目录后，`skills/list` 默认（`forceReload` 缺省）仍然看不到它，等 6 秒也没有任何
+   * 通知；只有 `forceReload: true` 那一次才会出现，之后缓存才更新。
+   *
+   * 所以 catmax 建软链 / 迁移 / 删除之后必须主动调这个，否则「修复可见性」按钮对
+   * **当前这个** codex 进程是无效的：catmax 的列表刷新了（它自己扫盘），codex 却
+   * 还拿着旧缓存，用户下一轮对话里那个技能依然不存在——界面显示成功、实际没生效，
+   * 正是这个功能最该避免的那种撒谎。
+   *
+   * 进程没起来就直接返回：**不为了刷新而 spawn app-server**。冷启动本来就会扫最新的，
+   * 为一次目录变更把 codex 拉起来是纯浪费（还会拖慢建软链的响应）。
+   */
+  async refreshSkills(): Promise<void> {
+    if (!this.proc || !this.initialized) return
+    await this.sendRequest('skills/list', { forceReload: true })
   }
 
   // ============ 会话 ============
@@ -1120,6 +1175,12 @@ export class CodexAdapter implements AgentBackend {
   }
 
   private handleNotification(msg: JsonRpcNotification): void {
+    // 跟 turn 无关的通知要在 currentSink 检查**之前**处理。技能变更几乎总是发生在
+    // 没有 turn 在跑的时候，放在下面那个 early return 后面等于永远收不到。
+    if (msg.method === 'skills/changed') {
+      this.opts.onSkillsChanged?.()
+      return
+    }
     if (!this.currentSink) {
       // 没有 turn 在跑，忽略
       return

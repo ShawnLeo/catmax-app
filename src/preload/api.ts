@@ -5,6 +5,7 @@ import type { GitHandlers } from '@shared/ipc/git'
 import type { PtyHandlers, PtyPushEvents } from '@shared/ipc/pty'
 import type { SessionHandlers, SessionPushEvents } from '@shared/ipc/session'
 import type { SettingsHandlers } from '@shared/ipc/settings'
+import type { SkillsHandlers, SkillsPushEvents } from '@shared/ipc/skills'
 import type { SystemHandlers } from '@shared/ipc/system'
 import type { WorkspaceHandlers } from '@shared/ipc/workspace'
 import * as electron from 'electron'
@@ -217,6 +218,18 @@ export const api = {
       subscribeToMainEvent<PtyPushEvents, 'pty:data'>(PUSH.PTY_DATA, cb),
     onExit: (cb: (payload: PtyPushEvents['pty:exit']) => void) =>
       subscribeToMainEvent<PtyPushEvents, 'pty:exit'>(PUSH.PTY_EXIT, cb),
+  },
+  skills: {
+    list: requestMain<SkillsHandlers, 'skills.list'>(IPC.SKILLS_LIST),
+    setEnabled: requestMain<SkillsHandlers, 'skills.setEnabled'>(IPC.SKILLS_SET_ENABLED),
+    mirror: requestMain<SkillsHandlers, 'skills.mirror'>(IPC.SKILLS_MIRROR),
+    migrate: requestMain<SkillsHandlers, 'skills.migrate'>(IPC.SKILLS_MIGRATE),
+    remove: requestMain<SkillsHandlers, 'skills.remove'>(IPC.SKILLS_REMOVE),
+    reveal: requestMain<SkillsHandlers, 'skills.reveal'>(IPC.SKILLS_REVEAL),
+    openInEditor: requestMain<SkillsHandlers, 'skills.openInEditor'>(IPC.SKILLS_OPEN_IN_EDITOR),
+    /** 后端报告技能集合变了（空 payload，收到就重扫）。 */
+    onChanged: (cb: (payload: SkillsPushEvents['skills:changed']) => void) =>
+      subscribeToMainEvent<SkillsPushEvents, 'skills:changed'>(PUSH.SKILLS_CHANGED, cb),
   },
 }
 
