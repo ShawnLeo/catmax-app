@@ -92,6 +92,10 @@ const highlightRef = ref<HTMLElement | null>(null)
  *     多删几行也不会缩回去。
  *   - 用 scrollHeight（包含 padding，不包含边框/外边距）作为目标高度，配合 box-sizing
  *     默认的 border-box 刚好能盖住 padding。
+ *   - 测量用的 'auto' 会让 textarea 视口瞬间变矮（rows=1），光标若跌出视口浏览器会
+ *     自动滚动让光标可见、改写 scrollTop——改完高度必须立即调 syncScroll() 把底层
+ *     高亮层的 scrollTop 同步过来，否则两层垂直错位（上层光标跟着滚走了、底层文字
+ *     没动，看起来就是"光标靠上一点"），内容越多越明显。
  */
 const MIN_HEIGHT_PX = 44 // 一行 + py-3 的最小高度，避免空输入时压得太扁
 const MAX_HEIGHT_PX = 192 // 12rem，约 8~9 行——超过后转内部滚动
@@ -99,10 +103,13 @@ function autoResize(): void {
   const el = textareaRef.value
   if (!el) return
   el.style.height = 'auto'
-  const next = Math.min(Math.max(el.scrollHeight, MIN_HEIGHT_PX), MAX_HEIGHT_PX)
+  const contentHeight = el.scrollHeight
+  const next = Math.min(Math.max(contentHeight, MIN_HEIGHT_PX), MAX_HEIGHT_PX)
   el.style.height = `${next}px`
   // 封顶后让 textarea 内部出滚动条；未封顶时恢复隐藏（删行回缩场景）。
-  el.style.overflowY = el.scrollHeight > MAX_HEIGHT_PX ? 'auto' : 'hidden'
+  el.style.overflowY = contentHeight > MAX_HEIGHT_PX ? 'auto' : 'hidden'
+  // 改高度会扰动 scrollTop，必须立即同步底层高亮层，否则两层错位。
+  syncScroll()
 }
 
 /**
@@ -144,10 +151,17 @@ function syncScroll(): void {
 }
 
 // 外部改写文本（拖放 / 右键加引用）不经过 scroll 事件，但会改变内容高度——
-// 这时同样要对齐一次，否则 textarea 自动滚到底而高亮层还停在原处。
-watch(() => props.modelValue, syncScroll, { flush: 'post' })
-// Auto-resize: 外部改写文本（拖放 / 右键加引用 / 候选应用）也要重算高度
-watch(() => props.modelValue, autoResize, { flush: 'post' })
+// 这时既要把底层高亮层的 scrollTop 对齐，也要重算 textarea 高度。
+// 合并成一个 watch 而非两个：autoResize 内部已调 syncScroll，且必须保证它最后跑
+// （它改高度会扰动 scrollTop），拆成两个会因注册顺序产生竞态。
+watch(
+  () => props.modelValue,
+  () => {
+    autoResize()
+    syncScroll()
+  },
+  { flush: 'post' },
+)
 
 onMounted(() => {
   autoResize()
@@ -197,8 +211,12 @@ defineExpose({
 /*
  * textarea 只留光标，文字交给底下那层画。
  *
- * 选中态的底色必须是半透明的：::selection 画在 textarea 这一层，也就是高亮层
- * 之上，用不透明底色会把选中范围内的文字整段盖掉，看起来像被抹掉了。
+ * 选中态的底色不能跟文字同色系——文字色继承自 --foreground（纯灰阶），选中底色若也
+ * 取自 --primary（同样是灰阶）的半透明，混出来必然和某档灰阶文字低对比，亮色模式
+ * 下白底深字尤其明显，选中后像被抹掉。所以选中底色用一个带明确色相的中性蓝：它在
+ * 亮/暗两种模式下、对黑/白两种文字都有足够反差，也是用户对"选中"的视觉预期。
+ * 这里没有复用 --color-info（它是侧边栏"未读活动"指示点的专用语义，见 themes.css
+ * 注释），选中态另立一个 token，避免语义混用。
  */
 textarea.mirror {
   color: transparent;
@@ -218,7 +236,7 @@ textarea.mirror::-webkit-scrollbar {
 }
 
 textarea.mirror::selection {
-  background-color: color-mix(in oklch, var(--color-primary) 28%, transparent);
+  background-color: color-mix(in oklch, oklch(60% 0.18 255) 55%, transparent);
 }
 
 .mirror .mention {
