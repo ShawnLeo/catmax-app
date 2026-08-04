@@ -14,7 +14,12 @@
     不要拆开。
   -->
   <div class="relative">
-    <div ref="highlightRef" class="mirror absolute inset-0 overflow-hidden pointer-events-none">
+    <!--
+      必须是 overflow-auto，不能用 overflow-hidden：Chromium 对 hidden overflow 元素
+      连续执行 scrollTop 同步后，原生鼠标滚轮会漏绘新露出的尾部行。pointer-events-none
+      保证滚轮仍由 textarea 接收；滚动条在下方共享样式里隐藏。
+    -->
+    <div ref="highlightRef" class="mirror absolute inset-0 overflow-auto pointer-events-none">
       <!--
         末尾补一个换行：文本以 \n 结尾时 div 不会撑出最后一个空行，而 textarea 会，
         两层的滚动高度就此错开一行。
@@ -108,7 +113,25 @@ function autoResize(): void {
   el.style.height = `${next}px`
   // 封顶后让 textarea 内部出滚动条；未封顶时恢复隐藏（删行回缩场景）。
   el.style.overflowY = contentHeight > MAX_HEIGHT_PX ? 'auto' : 'hidden'
-  // 改高度会扰动 scrollTop，必须立即同步底层高亮层，否则两层错位。
+  // Mirror Sync: 改高度会扰动 scrollTop，必须立即同步底层高亮层，否则两层错位。
+  syncScroll()
+  // 内容封顶滚动后，重算高度（auto→固定值）会抑制浏览器原生的"光标滚入视图"机制：
+  // 输入新行时光标跌出可视区下方，但 textarea 不会自动下滚，于是光标所在的新行
+  // （透明文字）留在可视区外，高亮层也跟着停在旧 scrollTop——用户看到的就是上半
+  // 部分内容正常、下半部分一片空白（融入背景）。这里手动补上：光标不在可视区就滚
+  // 到让它可见，再同步给高亮层。scrollTop 赋值本身不会触发 scroll 事件，所以仍要
+  // 显式调 syncScroll。
+  const lineHeight = parseFloat(getComputedStyle(el).lineHeight) || 21.7
+  const padTop = parseFloat(getComputedStyle(el).paddingTop) || 0
+  const cursorLine = el.value.slice(0, el.selectionStart).split('\n').length - 1
+  const cursorY = padTop + cursorLine * lineHeight
+  const viewTop = el.scrollTop
+  const viewBottom = el.scrollTop + el.clientHeight
+  if (cursorY >= viewBottom - lineHeight) {
+    el.scrollTop = cursorY - el.clientHeight + lineHeight * 2
+  } else if (cursorY < viewTop) {
+    el.scrollTop = Math.max(0, cursorY - padTop)
+  }
   syncScroll()
 }
 
@@ -206,6 +229,17 @@ defineExpose({
   word-break: break-word;
   tab-size: 4;
   border: 0;
+  /*
+   * 两层都隐藏滚动条。textarea 的经典滚动条会占内容宽度，导致两层换行错位；
+   * 高亮层现在是 overflow-auto 的真实滚动容器，也不能露出第二根滚动条。
+   * 滚轮和键盘滚动仍由 textarea 正常接收。
+   */
+  scrollbar-width: none;
+}
+
+.mirror::-webkit-scrollbar {
+  width: 0;
+  height: 0;
 }
 
 /*
@@ -222,17 +256,20 @@ textarea.mirror {
   color: transparent;
   caret-color: var(--color-foreground);
   /*
-   * 藏掉滚动条——不是为了好看，是为了对齐。经典滚动条（Windows）会从 textarea 的
-   * 内容宽度里切走十几个像素，而底下的高亮层是 overflow:hidden、不会跟着缩，
-   * 文本一旦超过三行两层就横向错位。macOS 的浮层滚动条不占宽度，所以这个问题
-   * 只在 Windows 上出现，也正因如此很容易漏测。滚轮和键盘滚动不受影响。
+   * Mirror Sync: 必须显式设 display:block。
+   *
+   * textarea 在默认 UA 样式下是 inline（replaced）元素，自带 vertical-align:baseline，
+   * 行盒下方会留出 descender 空隙（约 3px）——这会让它撑开的外层 .relative 容器比
+   * textarea 自己的可视高度高出几像素。而底层高亮层是 absolute inset-0，钉死成
+   * 外层容器的高度，于是高亮层 clientHeight > textarea clientHeight，两层最大可滚动
+   * 距离（scrollHeight - clientHeight）不一致。内容封顶滚动后 syncScroll 把两层的
+   * scrollTop 设成相同值，但因为 maxScroll 不同，高亮层实际显示的文字行和 textarea
+   * 光标行逐行累积错位，底部那几行只剩 textarea 的透明文字、没有底色文字 → 看不见。
+   *
+   * display:block 去掉行盒，两层 clientHeight 严格相等，maxScroll 一致，scrollTop
+   * 才能逐像素对齐。这是这个两层镜像结构能正常滚动的前提，删不得。
    */
-  scrollbar-width: none;
-}
-
-textarea.mirror::-webkit-scrollbar {
-  width: 0;
-  height: 0;
+  display: block;
 }
 
 textarea.mirror::selection {
