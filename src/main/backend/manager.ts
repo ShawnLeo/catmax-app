@@ -29,6 +29,7 @@ import {
 import type { BackendId } from '@shared/constants'
 import type { TurnRunRecord } from '@shared/domain'
 import type { CoordinatedStartTurnArgs } from '@shared/ipc/backend'
+import type { McpRuntimeStatus } from '@shared/mcp/types'
 import type { AppSettings } from '@shared/settings-schema'
 
 import { registerMainBackendPlugins } from './plugin-loader'
@@ -49,7 +50,8 @@ export interface BackendManagerOptions {
 export class BackendManager {
   private adapters = new Map<BackendId, AgentBackend>()
   private plugins = new Map<BackendId, MainBackendPlugin>()
-  private currentBackendId: BackendId = 'codex'
+  // 默认 claude——它是内置打包后端（恒可用），codex 未安装时不能用做兜底默认值。
+  private currentBackendId: BackendId = 'claude'
   private readonly turnCoordinator: PerTurnCoordinator
   /**
    * claude 内部 sessionId（startSession 生成的占位 UUID）→ claude 真实 session_id 的映射。
@@ -101,7 +103,7 @@ export class BackendManager {
       this.adapters.set(plugin.manifest.id, adapter)
     }
     if (!this.adapters.has(this.currentBackendId)) {
-      this.currentBackendId = this.adapters.keys().next().value ?? 'codex'
+      this.currentBackendId = this.adapters.keys().next().value ?? 'claude'
     }
   }
 
@@ -345,6 +347,60 @@ export class BackendManager {
         }
       }),
     )
+  }
+
+  /**
+   * Unified MCP Server Center: 向每个后端要一份 MCP 运行时状态，按后端分开返回。
+   *
+   * **不合并成一份**：同一个 server 在 codex 里连上了、在 claude 里可能启动失败
+   * （本机实测就有这么一个）。合并就必须挑一个显示，挑哪个都会对另一个后端撒谎。
+   *
+   * 两端串行还是并行？并行——claude 那条要花十几秒（握手 + 轮询，见
+   * ClaudeAdapter.listMcpRuntime），串起来就是两倍等待，而它们互不影响。
+   *
+   * 单个后端失败只记日志、给空数组：codex 没装的用户照样该看得到 claude 那半边。
+   */
+  async listMcpRuntime(cwd?: string): Promise<Partial<Record<BackendId, McpRuntimeStatus[]>>> {
+    const out: Partial<Record<BackendId, McpRuntimeStatus[]>> = {}
+    await Promise.all(
+      [...this.adapters.entries()].map(async ([id, adapter]) => {
+        if (!adapter.listMcpRuntime) return
+        try {
+          out[id] = await adapter.listMcpRuntime(cwd)
+        } catch (error) {
+          log.warn('listMcpRuntime failed', { backend: id, error })
+        }
+      }),
+    )
+    return out
+  }
+
+  /**
+   * Unified MCP Server Center: 暴露 adapter 表给投影层。
+   *
+   * 投影逻辑（哪个 server 写哪个文件、claude 的名单怎么按项目摊开）放在
+   * `mcp-projection.ts` 而不是这里：它是纯策略 + 文件操作，没有进程状态，
+   * 放 service 层才能不起 Electron 就测。manager 只负责把 adapter 递过去。
+   */
+  getAdapters(): Map<BackendId, AgentBackend> {
+    return this.adapters
+  }
+
+  /** codex 专属：把项目加进信任列表。没有实现这个能力的后端直接跳过。 */
+  async trustProject(folderPath: string): Promise<{ failed: BackendId[] }> {
+    const failed: BackendId[] = []
+    await Promise.all(
+      [...this.adapters.entries()].map(async ([id, adapter]) => {
+        if (!adapter.trustProject) return
+        try {
+          await adapter.trustProject(folderPath)
+        } catch (error) {
+          log.warn('trustProject failed', { backend: id, folderPath, error })
+          failed.push(id)
+        }
+      }),
+    )
+    return { failed }
   }
 
   /**

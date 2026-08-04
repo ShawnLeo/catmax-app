@@ -49,6 +49,7 @@ import {
   type TurnEvent,
   type WarmupBackendArgs,
 } from '@shared/backend/types'
+import type { McpRuntimeStatus } from '@shared/mcp/types'
 import { app } from 'electron'
 
 import {
@@ -56,7 +57,9 @@ import {
   readClaudeOverrideSettings,
 } from '../../service/backend-config-files'
 import { logger } from '../../service/logger'
+import { claudeMcpInjectServers } from '../../service/mcp-inject'
 import { disabledSkillOverrides, mergeSkillOverrides } from '../../service/skill-state'
+import { allSettled, mapClaudeMcpStatus } from '../shared/mcp-runtime-mapping'
 import { buildWorkspaceInstructions, secondaryWorkspacePaths } from '../workspace-context'
 
 import { createAskUserServer } from './ask-user-server'
@@ -95,6 +98,16 @@ const WARMUP_DISPOSE_GRACE_MS = 3_000
  * 静态兜底表，不值得让用户对着弹层干等。
  */
 const SLASH_COMMANDS_TIMEOUT_MS = 15_000
+
+/**
+ * 拉 MCP 运行时状态的总预算。
+ *
+ * 握手实测 3.2 秒，最后一个 server 落定在 t+9.2 秒。20 秒是给慢机器和多 server
+ * 留的余量；到点就把已拿到的部分交出去，没落定的显示成「连接中」。
+ */
+const MCP_RUNTIME_TIMEOUT_MS = 20_000
+/** 轮询间隔。实测状态大约每 2 秒变一次，再密就是白问。 */
+const MCP_RUNTIME_POLL_MS = 1_000
 
 /**
  * 一条永远不产出消息的 prompt 流。
@@ -374,6 +387,59 @@ export class ClaudeAdapter implements AgentBackend {
     }
   }
 
+  /**
+   * Unified MCP Server Center: 读 claude 侧 MCP server 的连接情况。
+   *
+   * ⚠️ 这里必须**轮询**，一次读到的永远是 pending。实测（本机 3 个 server）：
+   * `initializationResult()` 返回时（t+3.2s）三个全是 pending；t+5.2s 一个转 failed；
+   * t+9.2s 两个转 connected（29 / 1 个工具）。claude 的 MCP 连接是握手之后才异步建立的，
+   * 「握完手读一次」正是设计文档原本写的做法，实测证伪。
+   *
+   * 代价：一次冷启握手（约 3 秒）+ 最多 MCP_RUNTIME_TIMEOUT_MS 的等待，**零 token**
+   * （用 neverEndingPrompt，跟拉斜杠命令表同一套）。所以只能由用户显式动作触发。
+   *
+   * 按 cwd：项目级 server 和 `projects.<abs>.disabledMcpServers` 都是 per-project 的，
+   * 换个目录结果就不一样。
+   */
+  async listMcpRuntime(cwd?: string): Promise<McpRuntimeStatus[]> {
+    const abortController = new AbortController()
+    const timeout = setTimeout(() => abortController.abort(), MCP_RUNTIME_TIMEOUT_MS)
+    const deadline = Date.now() + MCP_RUNTIME_TIMEOUT_MS
+    let latest: McpRuntimeStatus[] = []
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const options: Record<string, any> = {
+        abortController,
+        cwd: cwd ?? process.cwd(),
+        env: { ...process.env, ...this.extraEnv },
+        permissionMode: 'default',
+      }
+      this.applyOverrideSettings(options)
+      const binaryPath = this.resolveSdkBinaryPath()
+      if (binaryPath !== undefined) options.pathToClaudeCodeExecutable = binaryPath
+
+      const sdkQuery = query({ prompt: neverEndingPrompt(), options })
+      await sdkQuery.initializationResult()
+
+      while (Date.now() < deadline) {
+        const raw = await sdkQuery.mcpServerStatus()
+        latest = raw.map(mapClaudeMcpStatus).filter((s): s is McpRuntimeStatus => s !== null)
+        // 全部落定就别再等了——常见情况下这能把 15 秒压到 6 秒左右。
+        if (allSettled(latest)) break
+        await new Promise((resolve) => setTimeout(resolve, MCP_RUNTIME_POLL_MS))
+      }
+      return latest
+    } catch (error) {
+      log.debug('listMcpRuntime failed for', cwd, error)
+      // 超时/中断时把已经拿到的那部分交出去：三个里有两个已经落定的话，
+      // 显示两个真状态 + 一个"连接中"，比整片空白有用得多。
+      return latest
+    } finally {
+      clearTimeout(timeout)
+      abortController.abort()
+    }
+  }
+
   /** SDK 的 effort 等级 → catmax 的 EffortLevel（补 'none'） */
   private mapEffortLevels(levels: ('low' | 'medium' | 'high' | 'xhigh' | 'max')[]): EffortLevel[] {
     return ['none', ...levels]
@@ -475,6 +541,10 @@ export class ClaudeAdapter implements AgentBackend {
       env: { ...process.env, ...this.extraEnv },
       includePartialMessages: false,
       mcpServers: {
+        // Unified MCP Server Center: 「补给 claude」的 server 走这里（注入层），
+        // 不写用户配置。放在 catmax 之后，同名时 ask_user 优先——那是 catmax 自己的
+        // 内部工具，被一个用户 server 顶掉会让追问功能直接失效。
+        ...claudeMcpInjectServers(args.workspaceFolders?.map((f) => f.path) ?? []),
         catmax: { type: 'sdk', name: 'catmax', instance: askUser.server },
       },
       permissionMode: 'default',
@@ -755,6 +825,10 @@ export class ClaudeAdapter implements AgentBackend {
       canUseTool, // 进程内权限回调，替代 CLI 的 --permission-prompt-tool + MCP + socket
       // ask_user 工具以 in-process MCP server 注入（type:'sdk'，SDK 自行接管 transport）
       mcpServers: {
+        // Unified MCP Server Center: 「补给 claude」的 server 走这里（注入层），
+        // 不写用户配置。放在 catmax 之后，同名时 ask_user 优先——那是 catmax 自己的
+        // 内部工具，被一个用户 server 顶掉会让追问功能直接失效。
+        ...claudeMcpInjectServers(args.workspaceFolders?.map((f) => f.path) ?? []),
         catmax: { type: 'sdk', name: 'catmax', instance: askUser.server },
       },
       // 追加 ask_user 引导语到 Claude Code 默认 system prompt（不覆盖默认 prompt）

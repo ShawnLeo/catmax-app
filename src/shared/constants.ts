@@ -117,6 +117,15 @@ export const IPC = {
   SKILLS_REMOVE: 'skills.remove',
   SKILLS_REVEAL: 'skills.reveal',
   SKILLS_OPEN_IN_EDITOR: 'skills.openInEditor',
+  // mcp（Unified MCP Server Center）
+  MCP_LIST: 'mcp.list',
+  MCP_REVEAL: 'mcp.reveal',
+  MCP_REFRESH_RUNTIME: 'mcp.refreshRuntime',
+  MCP_SET_ENABLED: 'mcp.setEnabled',
+  MCP_TRUST_PROJECT: 'mcp.trustProject',
+  MCP_SYNC: 'mcp.sync',
+  MCP_UNSYNC: 'mcp.unsync',
+  MCP_REMOVE: 'mcp.remove',
 } as const
 
 /** 推送事件名 */

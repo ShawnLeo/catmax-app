@@ -6,7 +6,9 @@ import { ref, computed } from 'vue'
 
 export const useBackendStore = defineStore('backend', () => {
   const statuses = ref<BackendStatus[]>([])
-  const currentId = ref<BackendId>('codex')
+  // 瞬态初值——refresh() 会立刻用 backend.current() 的真值覆盖；用 claude 避免默认 codex
+  //（未安装）造成的一闪而过。与 settings-schema.ts 的 defaultBackend 对齐。
+  const currentId = ref<BackendId>('claude')
   const models = ref<ModelOption[]>([])
   // 按 backend 分别缓存的模型列表——设置页同时展示两个 backend 的可选模型。
   // 进设置页时 loadAllBackendModels() 并行拉取；codex 首次会 spawn app-server。

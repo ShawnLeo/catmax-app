@@ -14,6 +14,7 @@ import type {
   TurnEvent,
   ApprovalRequest,
 } from '@shared/backend/types'
+import { isActiveTurnRun, type TurnRunRecord } from '@shared/domain'
 import { defineStore } from 'pinia'
 import { computed, reactive, ref } from 'vue'
 
@@ -844,6 +845,37 @@ export const useMessageStore = defineStore('message', () => {
   }
 
   /**
+   * 用后端权威的 turn 状态对齐内存里的 isRunning——与 markTurnStarting 对称。
+   *
+   * 为什么需要它：isRunning 是纯内存标志，正常情况下只靠 backend:turnEvent 流转回 false。
+   * 但 HMR 热更新 / 切窗口 / 重挂会让 useStreamMessage 的 onTurnEvent 订阅出现真空窗口，
+   * 若 turn 恰好在窗口内结束，turn_completed 被静默丢弃，isRunning 永远卡在 true。
+   * 这条函数在挂载/切回 session/窗口聚焦时被调用，按 listTurnRuns 的真相纠正卡死状态。
+   *
+   * 幂等：状态本来就正确时不重写；内存里没有该 session 也不凭空创建。
+   */
+  function reconcileTurnRun(sessionId: string, record: TurnRunRecord | undefined): void {
+    const s = sessionStates.get(sessionId)
+    if (!s) return
+    const active = record ? isActiveTurnRun(record.status) : false
+    if (active) {
+      // 后端确认仍在跑——采纳后端的 currentTurnId（重挂后内存可能已丢），保持 isRunning
+      s.isRunning = true
+      s.currentTurnId = record!.id
+      s.lastError = null
+      return
+    }
+    // 后端已结束（或根本没有 turn 记录）。仅当内存还以为在跑时才纠正，避免无谓重写。
+    if (!s.isRunning) return
+    s.isRunning = false
+    // 兜底结束"正在思考"的 reasoning header——与 turn_completed / 不可恢复 error 路径对称。
+    if (s.currentTurnId) markReasoningEnded(s, s.currentTurnId, Date.now())
+    s.currentTurnId = null
+    // 后端记录是 error 终态时，把可读错误补进 lastError（事件丢失时 UI 拿不到）。
+    if (record?.status === 'error' && record.error) s.lastError = record.error
+  }
+
+  /**
    * 替换当前 session 的 messages（loadHistory 调）。
    * 不动其他 session 状态。
    */
@@ -929,6 +961,7 @@ export const useMessageStore = defineStore('message', () => {
     startCompact,
     startCompactForSession,
     markTurnStarting,
+    reconcileTurnRun,
     setCurrentSession,
     setMessages,
     setMessagesForSession,

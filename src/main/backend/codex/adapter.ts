@@ -23,6 +23,7 @@ import { createInterface } from 'node:readline'
 import { pipeline } from 'node:stream/promises'
 
 import { logger } from '@main/service/logger'
+import { codexMcpKeyPath, codexTrustKeyPath, tomlKeySegment } from '@main/service/mcp-config-codec'
 import { CODEX_CAPABILITIES } from '@shared/backend/builtin-capabilities'
 import { upgradeMessageBlocks } from '@shared/backend/normalize-blocks'
 import {
@@ -61,9 +62,16 @@ import {
   type TurnCommand,
   type TurnEvent,
 } from '@shared/backend/types'
+import type { McpRuntimeStatus } from '@shared/mcp/types'
 
 import { checkCliHealth } from '../health-check'
 import { type ProcessSpawner, RealProcessSpawner } from '../process-spawner'
+import {
+  applyCodexStartupState,
+  mapCodexMcpStatus,
+  type CodexMcpServerStatusRaw,
+  type CodexMcpStartupState,
+} from '../shared/mcp-runtime-mapping'
 import { buildWorkspaceInstructions, secondaryWorkspacePaths } from '../workspace-context'
 
 import { readCodexDefaultProvider } from './default-provider'
@@ -87,6 +95,7 @@ import {
   LineBuffer,
   parseFrame,
 } from './protocol'
+import { CodexRpcError } from './rpc-error'
 
 const log = logger.domain('codex-adapter')
 
@@ -218,6 +227,15 @@ export class CodexAdapter implements AgentBackend {
    * 进程退出时也清空（账户可能换了）。
    */
   private cachedModelsPromise: Promise<ModelOption[]> | null = null
+
+  /**
+   * server 名 → 最近一次 `mcpServer/startupStatus/updated`。
+   *
+   * 攒着而不是即时上报：这些通知跟 turn 无关，用处是 listMcpRuntime 时补上
+   * `mcpServerStatus/list` 说不出来的失败原因。跟着进程走——进程换了就该清掉，
+   * 否则会拿旧进程的失败去解释新进程的 server。
+   */
+  private mcpStartupStates = new Map<string, CodexMcpStartupState>()
 
   /** 当前 turn 的事件 sink（同一时刻只跑一个 turn） */
   private currentSink: TurnEventSink | null = null
@@ -422,6 +440,8 @@ export class CodexAdapter implements AgentBackend {
         this.initialized = false
         // 进程死了，缓存的 model 列表也可能过时（比如用户重新登录了别的账户）——清掉。
         this.cachedModelsPromise = null
+        // MCP 启动状态属于那个进程；留着会拿旧进程的失败去解释新进程的 server。
+        this.mcpStartupStates.clear()
         // 进程死了，pending 的 request 全 reject（避免 30s 超时白等）
         this.rejectAllPending('codex process exited')
       })
@@ -464,6 +484,7 @@ export class CodexAdapter implements AgentBackend {
     this.lineBuffer = new LineBuffer()
     this.initialized = false
     this.cachedModelsPromise = null
+    this.mcpStartupStates.clear()
   }
 
   /** reject 所有 pending request（用于进程意外退出） */
@@ -489,6 +510,7 @@ export class CodexAdapter implements AgentBackend {
     }
     this.initialized = false
     this.cachedModelsPromise = null
+    this.mcpStartupStates.clear()
     this.pendingRequests.clear()
     this.pendingApprovals.clear()
     // 旧进程可能死在半行 JSON 上，残留内容会把新进程的第一行拼坏——和 killAndClearProc 一致地重置
@@ -622,6 +644,161 @@ export class CodexAdapter implements AgentBackend {
   async refreshSkills(): Promise<void> {
     if (!this.proc || !this.initialized) return
     await this.sendRequest('skills/list', { forceReload: true })
+  }
+
+  // ============ MCP 开关与信任 ============
+
+  /**
+   * Unified MCP Server Center: 把 server 的开/关写进 codex 的配置，并热重载。
+   *
+   * 实测要点（codex 0.145.0，沙盒 CODEX_HOME 里验证，没碰用户真实配置）：
+   * - `config/value/write` **完整保留注释和格式**，包括行尾注释。所以绝不能手拼 TOML。
+   * - **`value: null` 会把这个键删掉**，不是写一个 null。所以「重新启用」用 null 回到
+   *   "没有 override" 的干净状态，比写 `enabled = true` 更贴近用户手写配置的样子。
+   * - **写入会校验整份配置**：给一个配置里不存在的 server 写 `enabled` 会失败
+   *   （`invalid transport`——光有 enabled 既没 command 也没 url）。所以必须写进
+   *   **该 server 真正定义在的那个文件**，靠 `filePath` 指定；默认的用户 config.toml
+   *   对一个定义在项目层的 server 是错的。
+   *
+   * **不带 `expectedVersion`**，尽管设计文档建议带。那个 sha256 乐观锁防的是
+   * "读整份配置 → 改 → 写回"的竞态，而这里是一次定点 keyPath 编辑，codex 自己
+   * 重读文件再拼接，catmax 这边根本没有 read-modify-write 窗口。带上它只会在
+   * 用户刚好在别处编辑过配置时让开关失败——那时用户的意图明明是"把这个关掉"。
+   */
+  async setMcpEnabled(name: string, enabled: boolean, filePath?: string): Promise<void> {
+    if (!this.proc || !this.initialized) {
+      // 与 refreshSkills 同一条规矩：不为一次开关把 app-server 拉起来。
+      // catmax 自己的状态已经落盘，冷启动时由 syncMcpOnStartup 补推。
+      log.debug('setMcpEnabled skipped, codex not running', name)
+      return
+    }
+    await this.sendRequest('config/value/write', {
+      keyPath: codexMcpKeyPath(name, 'enabled'),
+      value: enabled ? null : false,
+      mergeStrategy: 'upsert',
+      ...(filePath ? { filePath } : {}),
+    })
+    // 热重载，让**当前这些会话**立刻生效，而不是等下次 spawn。
+    // 失败不算开关失败：配置已经写进去了，最坏是下次启动才生效。
+    try {
+      await this.sendRequest('config/mcpServer/reload', {})
+    } catch (error) {
+      log.warn('config/mcpServer/reload failed after setMcpEnabled', error)
+    }
+  }
+
+  /**
+   * 把一整个 MCP server 段写进 codex 的配置文件（Phase 5 的「写入用户配置」）。
+   *
+   * **整段写，不逐字段写。** `config/value/write` 每次都校验整份配置，逐字段写会在
+   * 中间态失败——比如先写 `enabled` 时该 server 还没有 `command`/`url`，直接报
+   * `invalid transport`。整段写一次到位，实测嵌套子表（`http_headers`）也会被正确
+   * 展开成 `[mcp_servers."x".http_headers]`。
+   *
+   * 这里的 keyPath 用 `tomlKeySegment` 加引号——`config/value/write` **支持**带引号的
+   * 段（与 `-c` 注入不同，那边不支持，见 canInjectIntoCodex），所以名字带点也能写。
+   */
+  async writeMcpServer(
+    name: string,
+    server: Record<string, unknown>,
+    filePath?: string,
+  ): Promise<void> {
+    await this.ensureInitialized()
+    await this.sendRequest('config/value/write', {
+      keyPath: `mcp_servers.${tomlKeySegment(name)}`,
+      value: server,
+      mergeStrategy: 'upsert',
+      ...(filePath ? { filePath } : {}),
+    })
+    try {
+      await this.sendRequest('config/mcpServer/reload', {})
+    } catch (error) {
+      log.warn('config/mcpServer/reload failed after writeMcpServer', error)
+    }
+  }
+
+  /**
+   * 删掉一整个 MCP server 段。
+   *
+   * 与「重新启用」用的是同一条机制：`value: null` 是**删键**，不是写 null（实测）。
+   * 传整段的 keyPath 就删整段，注释和其它段不受影响。
+   */
+  async removeMcpServer(name: string, filePath?: string): Promise<void> {
+    await this.ensureInitialized()
+    await this.sendRequest('config/value/write', {
+      keyPath: `mcp_servers.${tomlKeySegment(name)}`,
+      value: null,
+      mergeStrategy: 'upsert',
+      ...(filePath ? { filePath } : {}),
+    })
+    try {
+      await this.sendRequest('config/mcpServer/reload', {})
+    } catch (error) {
+      log.warn('config/mcpServer/reload failed after removeMcpServer', error)
+    }
+  }
+
+  /**
+   * 把项目加进 codex 的信任列表，解掉 `<repo>/.codex/config.toml` 的 needs-trust。
+   *
+   * 写的是用户 config.toml 的 `[projects."<abs>"] trust_level = "trusted"`（实测生效，
+   * 路径带点/空格都正确加引号）。
+   *
+   * ⚠️ 这不只是解开 MCP：信任一个项目意味着允许它的 `.codex/config.toml` 注入
+   * hooks 和 exec policies。所以它是独立方法、由用户显式点，绝不能作为开关的副作用。
+   */
+  async trustProject(folderPath: string): Promise<void> {
+    await this.ensureInitialized()
+    await this.sendRequest('config/value/write', {
+      keyPath: codexTrustKeyPath(folderPath),
+      value: 'trusted',
+      mergeStrategy: 'upsert',
+    })
+  }
+
+  // ============ MCP 运行时状态 ============
+
+  /**
+   * Unified MCP Server Center: 读 codex 侧 MCP server 的连接情况。
+   *
+   * 实测要点（codex 0.145.0，`codex app-server generate-ts` 对过类型）：
+   * - `initialize` 之后**立刻**就能调，不需要先开 thread；
+   * - 响应里**没有状态字段**，只有 `serverInfo`（连上才非 null）、`tools`（**map** 不是数组）、
+   *   `authStatus`。所以状态只能推断，见 mapCodexMcpStatus 的注释；
+   * - `enabled = false` 的 server **照样出现在列表里**，serverInfo 为 null。别把它当失败；
+   * - 有游标分页（`nextCursor`），server 多了不翻页就会少东西。
+   *
+   * 进程没起来直接返回空数组：**不为了拉状态 spawn app-server**（同 refreshSkills）。
+   * 冷启一次 codex 只为了在设置页点亮几个徽章，代价和收益完全不成比例。
+   */
+  async listMcpRuntime(): Promise<McpRuntimeStatus[]> {
+    if (!this.proc || !this.initialized) return []
+    const out: McpRuntimeStatus[] = []
+    let cursor: string | null = null
+    try {
+      // 上限兜底：翻页是靠服务端给的游标，万一它一直回同一个游标就会转不出去。
+      for (let page = 0; page < 20; page++) {
+        const params: Record<string, unknown> = { detail: 'toolsAndAuthOnly' }
+        if (cursor) params.cursor = cursor
+        const res = (await this.sendRequest('mcpServerStatus/list', params)) as {
+          data?: CodexMcpServerStatusRaw[]
+          nextCursor?: string | null
+        }
+        for (const raw of res.data ?? []) {
+          const mapped = mapCodexMcpStatus(raw)
+          // 列表推断不出状态时，用攒下来的启动通知补——那是 codex 唯一会说
+          // 「失败了，因为 X」的地方。
+          if (mapped)
+            out.push(applyCodexStartupState(mapped, this.mcpStartupStates.get(mapped.name)))
+        }
+        cursor = res.nextCursor ?? null
+        if (!cursor) break
+      }
+    } catch (error) {
+      // 拉状态失败不该冒泡成用户可见的错误——设置页少几个徽章就是了。
+      log.debug('mcpServerStatus/list failed', error)
+    }
+    return out
   }
 
   // ============ 会话 ============
@@ -1168,10 +1345,38 @@ export class CodexAdapter implements AgentBackend {
     if (!pending) return
     this.pendingRequests.delete(msg.id)
     if (msg.error) {
-      pending.reject(new Error(msg.error.message))
+      // 带上 code / data 再 reject。codex 的结构化错误码就藏在 data 里
+      // （例如配置写入冲突是 `data.config_write_error_code = "configVersionConflict"`），
+      // 只留 message 的话上层就只能对英文散文做字符串匹配——那是最脆的一种判断。
+      pending.reject(new CodexRpcError(msg.error.message, msg.error.code, msg.error.data))
     } else {
       pending.resolve(msg.result)
     }
+  }
+
+  /**
+   * `mcpServer/startupStatus/updated` —— codex 唯一会说出「启动失败」的地方。
+   *
+   * `mcpServerStatus/list` 的响应里**没有状态字段**（实测），所以失败的 server 在那份
+   * 列表里和「被关掉的」「还在启起来的」长得一模一样（serverInfo 都是 null）。
+   * 只有这条通知带 `status` + `error` + `failureReason`。
+   *
+   * 存起来而不是往 TurnEvent 里推：它跟 turn 无关，用途是下次 listMcpRuntime 时把
+   * 推断出来的 unknown 补成真状态。收不到就维持 unknown——**不猜**。
+   *
+   * ⚠️ 实测中这条通知在 initialize 后的 4 秒内一次都没推过（本机两个 stdio server），
+   * 所以它只能当补充，不能当唯一来源。真正的主力仍是 mcpServerStatus/list。
+   */
+  private handleMcpStartupStatus(params: unknown): void {
+    const raw = params as
+      { name?: unknown; status?: unknown; error?: unknown; failureReason?: unknown } | undefined
+    if (typeof raw?.name !== 'string' || typeof raw.status !== 'string') return
+    this.mcpStartupStates.set(raw.name, {
+      status: raw.status,
+      error: typeof raw.error === 'string' ? raw.error : null,
+      // "reauthenticationRequired" 是唯一的取值，映射成统一的 needs-auth。
+      needsAuth: raw.failureReason === 'reauthenticationRequired',
+    })
   }
 
   private handleNotification(msg: JsonRpcNotification): void {
@@ -1179,6 +1384,12 @@ export class CodexAdapter implements AgentBackend {
     // 没有 turn 在跑的时候，放在下面那个 early return 后面等于永远收不到。
     if (msg.method === 'skills/changed') {
       this.opts.onSkillsChanged?.()
+      return
+    }
+    // MCP 启动状态同理——它几乎总在没有 turn 的时候推（server 是随 app-server 启动
+    // 拉起来的），放在下面那个 early return 之后就永远收不到。
+    if (msg.method === 'mcpServer/startupStatus/updated') {
+      this.handleMcpStartupStatus(msg.params)
       return
     }
     if (!this.currentSink) {

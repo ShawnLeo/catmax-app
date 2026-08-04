@@ -244,7 +244,7 @@ const missingBackendIds = computed(() =>
     .map((status) => status.id),
 )
 
-const defaultBackend = computed(() => settings.settings?.defaultBackend ?? 'codex')
+const defaultBackend = computed(() => settings.settings?.defaultBackend ?? 'claude')
 
 /**
  * 刷新当前默认后端的模型列表。

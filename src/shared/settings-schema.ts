@@ -147,7 +147,11 @@ export const appSettingsSchema = z.object({
   defaultBackend: z
     .string()
     .regex(/^[a-z0-9][a-z0-9._-]*$/)
-    .default('codex'),
+    // 默认 claude——它是随 @anthropic-ai/claude-agent-sdk 内置打包的后端，
+    // healthCheck 恒为 ok；codex 是可选外部 CLI，未安装时不能作为默认后端
+    // （否则全新机器上 BackendSection 的 Setup Gate 会把运行时配置全部藏住，
+    // 用户卡在不可用的 codex 上无法切到 claude）。
+    .default('claude'),
   backendPaths: z
     .object({
       codex: z.string().nullable().default(null),

@@ -3,6 +3,7 @@ import type { AuthHandlers } from '@shared/ipc/auth'
 import type { BackendHandlers, BackendPushEvents } from '@shared/ipc/backend'
 import type { FsHandlers } from '@shared/ipc/fs'
 import type { GitHandlers } from '@shared/ipc/git'
+import type { McpHandlers } from '@shared/ipc/mcp'
 import type { PtyHandlers, PtyPushEvents } from '@shared/ipc/pty'
 import type { SessionHandlers, SessionPushEvents } from '@shared/ipc/session'
 import type { SettingsHandlers } from '@shared/ipc/settings'
@@ -239,6 +240,16 @@ export const api = {
     /** 后端报告技能集合变了（空 payload，收到就重扫）。 */
     onChanged: (cb: (payload: SkillsPushEvents['skills:changed']) => void) =>
       subscribeToMainEvent<SkillsPushEvents, 'skills:changed'>(PUSH.SKILLS_CHANGED, cb),
+  },
+  mcp: {
+    list: requestMain<McpHandlers, 'mcp.list'>(IPC.MCP_LIST),
+    reveal: requestMain<McpHandlers, 'mcp.reveal'>(IPC.MCP_REVEAL),
+    refreshRuntime: requestMain<McpHandlers, 'mcp.refreshRuntime'>(IPC.MCP_REFRESH_RUNTIME),
+    setEnabled: requestMain<McpHandlers, 'mcp.setEnabled'>(IPC.MCP_SET_ENABLED),
+    trustProject: requestMain<McpHandlers, 'mcp.trustProject'>(IPC.MCP_TRUST_PROJECT),
+    sync: requestMain<McpHandlers, 'mcp.sync'>(IPC.MCP_SYNC),
+    unsync: requestMain<McpHandlers, 'mcp.unsync'>(IPC.MCP_UNSYNC),
+    remove: requestMain<McpHandlers, 'mcp.remove'>(IPC.MCP_REMOVE),
   },
 }
 
