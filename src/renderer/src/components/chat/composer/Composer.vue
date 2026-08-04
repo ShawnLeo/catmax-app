@@ -24,7 +24,7 @@
            跟主体聊天区(--background)形成轻微对比,呼应侧边栏的层次感。 -->
       <!-- relative:联想弹层(SuggestionPopover)以此为定位锚，贴在输入框正上方 -->
       <div
-        class="relative rounded-2xl border border-border bg-sidebar focus-within:border-primary/50 transition-colors @container"
+        class="composer-input-shell relative rounded-2xl border border-border bg-sidebar focus-within:border-primary/50 transition-[border-color,box-shadow] duration-200 @container"
       >
         <!-- Composer Autocomplete: `@` 文件联想。候选来源由 lib/autocomplete 的
              registry 决定，这里只负责摆位置和转发事件。 -->
@@ -174,6 +174,12 @@
     </div>
   </div>
 </template>
+
+<style scoped>
+.composer-input-shell:focus-within {
+  box-shadow: 0 0 20px 2px var(--composer-focus-glow);
+}
+</style>
 
 <script setup lang="ts">
 import AttachmentBar from '@renderer/components/chat/composer/AttachmentBar.vue'

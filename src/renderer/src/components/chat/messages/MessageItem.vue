@@ -35,10 +35,12 @@
           // first:mt-0：对话首条通常是 user 提问，去掉顶部 margin 避免与容器 py-4 叠加。
           'flex-row-reverse mb-4 mt-4 first:mt-0'
         : 'flex-row relative border-l-2 border-border/60 pt-3',
-      // assistant 首尾遮罩必须能同时生效：只有一条（含仅 thinking）时隐藏整条连线。
+      // 首尾遮罩按**每一轮**算（不是整个会话的首尾）：本轮首条遮色点上方，
+      // 本轮末条遮色点下方；两者必须能同时生效——本轮只有一条 assistant
+      // （含仅 thinking）时整条连线隐藏，只剩色点。
       {
-        'mask-line-top': message.role === 'assistant' && isFirstAssistant,
-        'mask-line-bottom': message.role === 'assistant' && isLast,
+        'mask-line-top': message.role === 'assistant' && isTurnFirstAssistant,
+        'mask-line-bottom': message.role === 'assistant' && isTurnLastAssistant,
       },
     ]"
   >
@@ -176,10 +178,10 @@ const props = defineProps<{
   showThinking?: boolean
   /** 工作区目录--子 agent 读 jsonl 需要 */
   cwd?: string
-  /** 是否是最后一条 assistant——是则不画时间轴竖线(末端无需向下延伸) */
-  isLast?: boolean
-  /** 是否是第一条 assistant——是则遮住色点上方的竖线段(上方接 user,无需延伸到色点之上) */
-  isFirstAssistant?: boolean
+  /** 是否是**本轮**最后一条 assistant——是则遮住色点下方的竖线段(本轮时间轴到此终止) */
+  isTurnLastAssistant?: boolean
+  /** 是否是**本轮**第一条 assistant——是则遮住色点上方的竖线段(上方接 user,无需延伸到色点之上) */
+  isTurnFirstAssistant?: boolean
 }>()
 const messageAnchorId = computed(() =>
   isNavigableUserMessage(props.message) ? props.message.id : null,
@@ -369,8 +371,8 @@ function statusTooltip(status: 'text' | 'running' | 'completed' | 'failed'): str
 
 <style scoped>
 /*
- * mask-line-top:第一条 assistant 消息用。
- * border-l 竖线从 article 顶部开始画,但第一条 assistant 上方接的是 user 消息,
+ * mask-line-top:**本轮**第一条 assistant 消息用。
+ * border-l 竖线从 article 顶部开始画,但本轮首条 assistant 上方接的是 user 消息,
  * 竖线不该延伸到色点之上。用 ::before 伪元素盖住色点上方(0 ~ 22px)的 border 段。
  * 22px = 色点 top(18px) + 色点半径(4px),即盖到色点中心位置。
  * 背景色跟随 --color-background,保证暗/亮主题下都与页面融合。
@@ -387,8 +389,8 @@ function statusTooltip(status: 'text' | 'running' | 'completed' | 'failed'): str
 }
 
 /*
- * mask-line-bottom:最后一条 assistant 消息用。
- * 时间轴到末端的色点处应终止,色点下方不再画竖线。
+ * mask-line-bottom:**本轮**最后一条 assistant 消息用。
+ * 本轮时间轴到末端的色点处应终止,色点下方不再画竖线。
  * ::after 覆盖色点下方(22px ~ 底部)的 border 段。
  * top 22px 起始(色点中心),height 100% - 22px 用 calc 算,
  * 或者直接 top: 22px; bottom: 0; 让浏览器撑满。

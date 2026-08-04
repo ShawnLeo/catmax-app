@@ -12,7 +12,7 @@
   -->
   <div
     v-if="fileMentions.length > 0 || attachments.length > 0"
-    class="flex flex-wrap gap-1.5 px-4 pt-3"
+    class="flex flex-wrap gap-1.5 px-4 pt-3 pb-1"
   >
     <!--
       key 用路径而不是 start 偏移：偏移会随前面的文字增删不断变化，用它当 key

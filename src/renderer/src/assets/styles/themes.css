@@ -72,6 +72,7 @@
   --panel-edge-shadow: oklch(0% 0 0 / 0.17);
   --composer-background: var(--color-gray-50);
   --composer-border: var(--border);
+  --composer-focus-glow: oklch(82% 0 0 / 0.12);
   --code-block-background: oklch(12% 0.005 250);
   --terminal-background: oklch(10% 0.005 250);
   --tool-call-background: var(--color-gray-200);
@@ -144,6 +145,7 @@
   --panel-edge-shadow: oklch(20% 0 0 / 0.09);
   --composer-background: var(--color-gray-0);
   --composer-border: var(--border);
+  --composer-focus-glow: oklch(35% 0 0 / 0.09);
   --code-block-background: oklch(96% 0.003 80);
   --terminal-background: oklch(95% 0.003 80);
   --tool-call-background: var(--color-gray-100);
