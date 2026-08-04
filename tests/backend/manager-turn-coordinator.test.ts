@@ -118,6 +118,7 @@ describe('BackendManager per-turn coordinator integration', () => {
       yield { type: 'turn_completed', turnId: 'claude-turn', status: 'completed' }
     })
     const manager = new BackendManager([codex.plugin, claude.plugin])
+    await manager.switchBackend('codex')
 
     await expect(
       manager.startTurn({
@@ -161,6 +162,7 @@ describe('BackendManager per-turn coordinator integration', () => {
         sessionId: 'catmax-session',
         event: expect.objectContaining({
           type: 'turn_completed',
+          turnId: 'client-turn',
           status: 'interrupted',
         }),
       }),

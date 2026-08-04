@@ -58,7 +58,10 @@ export function buildCodexConversationEntries(
  * The Codex header collapses the work log, not the final answer. `phase` is authoritative;
  * for older histories without it, the last text item is treated as the final answer.
  */
-export function splitCodexTurn(messages: NormalizedMessage[]): CodexTurnSections {
+export function splitCodexTurn(
+  messages: NormalizedMessage[],
+  options: { running?: boolean } = {},
+): CodexTurnSections {
   // 防御旧实时状态：历史实现分别用 block id（`${itemId}-text`）和原始 itemId
   // 创建消息，同一块会出现两遍。以 block id 去重，并优先保留带 phase 的完成快照。
   const blocks = dedupeBlocks(messages.flatMap(messageBlocks))
@@ -82,7 +85,11 @@ export function splitCodexTurn(messages: NormalizedMessage[]): CodexTurnSections
   const trailingUnphased = unphasedText.length > 0 ? unphasedText.at(-1) : undefined
   const isTrailing =
     trailingUnphased !== undefined && blocks[blocks.length - 1]?.id === trailingUnphased.id
-  const fallbackFinal = explicitFinal.length === 0 && isTrailing ? trailingUnphased : undefined
+  // 实时事件正常会在 item/started 带 phase；若事件缺失或来自旧后端，流式 delta
+  // 暂时没有 phase。运行中不能用“最后一段就是最终回答”的历史兼容规则，否则
+  // commentary 会先跑到面板外，item/completed 补 phase 后又跳回面板内。
+  const fallbackFinal =
+    explicitFinal.length === 0 && !options.running && isTrailing ? trailingUnphased : undefined
 
   const finalBlocks =
     explicitFinal.length > 0 ? explicitFinal : fallbackFinal ? [fallbackFinal] : []
@@ -153,9 +160,11 @@ function mergeActivityBlocks(
     status:
       previous.status === 'failed' || next.status === 'failed'
         ? 'failed'
-        : previous.status === 'running' || next.status === 'running'
-          ? 'running'
-          : 'completed',
+        : previous.status === 'interrupted' || next.status === 'interrupted'
+          ? 'interrupted'
+          : previous.status === 'running' || next.status === 'running'
+            ? 'running'
+            : 'completed',
     durationMs: (previous.durationMs ?? 0) + (next.durationMs ?? 0),
     ...(next.turnDiff !== undefined ? { turnDiff: next.turnDiff } : {}),
     ...(next.turnDiffStats !== undefined ? { turnDiffStats: next.turnDiffStats } : {}),

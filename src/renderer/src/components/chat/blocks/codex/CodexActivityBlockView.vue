@@ -138,6 +138,7 @@ function summarizeActivities(activities: CodexActivity[], status: CodexActivityS
     if (activities.length === 1) return activityVerb(activities[0]!)
     return '正在处理'
   }
+  if (status === 'interrupted') return '处理已中断'
 
   const editCount = activities
     .filter((activity) => activity.kind === 'file_change')
@@ -164,6 +165,7 @@ function summarizeActivities(activities: CodexActivity[], status: CodexActivityS
 }
 
 function activityVerb(activity: CodexActivity): string {
+  if (activity.status === 'interrupted') return '已中断'
   const running = activity.status === 'running'
   switch (activity.kind) {
     case 'command':

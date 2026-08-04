@@ -186,6 +186,52 @@ describe('CodexAdapter', () => {
     ).toBe(true)
   })
 
+  test('真实 codex turn id 返回前停止，会在 id 绑定后补发 interrupt', async () => {
+    const { spawner, stdout, stdin } = createMockSpawner()
+    const adapter = new CodexAdapter({ spawner })
+    const methods: string[] = []
+
+    stdin.on('data', (data) => {
+      const lines = data.toString().split('\n').filter(Boolean)
+      for (const line of lines) {
+        const msg = JSON.parse(line)
+        methods.push(msg.method)
+        if (msg.method === 'initialize') {
+          pushLine(stdout, { id: msg.id, result: { ok: true } })
+        } else if (msg.method === 'model/list') {
+          pushLine(stdout, {
+            id: msg.id,
+            result: { data: [{ id: 'gpt-5.2-codex', displayName: 'gpt-5.2-codex' }] },
+          })
+        } else if (msg.method === 'turn/start') {
+          pushLine(stdout, { id: msg.id, result: { turn: { id: 'codex_turn_pending' } } })
+        } else if (msg.method === 'turn/interrupt') {
+          expect(msg.params).toEqual({ threadId: 'thr_1', turnId: 'codex_turn_pending' })
+          pushLine(stdout, { id: msg.id, result: {} })
+          pushLine(stdout, {
+            method: 'turn/completed',
+            params: { turn: { id: 'codex_turn_pending', status: 'interrupted', items: [] } },
+          })
+        }
+      }
+    })
+
+    const iter = adapter.startTurn({ sessionId: 'thr_1', prompt: 'hi' })[Symbol.asyncIterator]()
+    const started = await iter.next()
+    expect(started.value).toMatchObject({ type: 'turn_started' })
+
+    await adapter.interrupt(started.value!.turnId)
+    const remaining: TurnEvent[] = []
+    for (let next = await iter.next(); !next.done; next = await iter.next()) {
+      remaining.push(next.value)
+    }
+
+    expect(methods).toContain('turn/interrupt')
+    expect(remaining).toContainEqual(
+      expect.objectContaining({ type: 'turn_completed', status: 'interrupted' }),
+    )
+  })
+
   test('command tool_call 流程（item/started + approval + item/completed）', async () => {
     const { spawner, stdout, stdin } = createMockSpawner()
     const adapter = new CodexAdapter({ spawner })

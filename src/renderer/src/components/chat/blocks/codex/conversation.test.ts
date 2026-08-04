@@ -178,6 +178,20 @@ describe('Codex conversation composition', () => {
     expect(sections.finalBlocks).toEqual([])
   })
 
+  test('keeps unphased live text in the processing panel until its phase is known', () => {
+    const sections = splitCodexTurn(
+      [
+        message('streaming', 'assistant', 't1', [
+          { id: 'streaming-text', type: 'text', text: '我再检查一下调用链' },
+        ]),
+      ],
+      { running: true },
+    )
+
+    expect(sections.processBlocks.map((block) => block.id)).toEqual(['streaming-text'])
+    expect(sections.finalBlocks).toEqual([])
+  })
+
   test('deduplicates legacy completed snapshot and delta messages by block id', () => {
     const sections = splitCodexTurn([
       message('message-1-text', 'assistant', 't1', [
