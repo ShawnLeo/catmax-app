@@ -4,6 +4,7 @@
  * 绝不见 codex/claude 协议原文。
  */
 import type { BackendId } from '../constants'
+import type { McpRuntimeStatus } from '../mcp/types'
 
 import type { ContentBlock } from './blocks'
 import type { ContextBlock } from './context-tag-types'
@@ -668,6 +669,62 @@ export interface AgentBackend {
    * 实现方必须做到：后端进程没起来时**静默返回**，不为了刷新而把它拉起来。
    */
   refreshSkills?(): Promise<void>
+
+  /**
+   * Unified MCP Server Center: 拉取 MCP server 的运行时状态（连没连上、几个工具、为什么失败）。
+   *
+   * 配置侧扫盘（mcp-scanner）看不到这些——MCP 协议里 description / 工具列表 / 连接结果
+   * 只存在于运行时握手之后。
+   *
+   * ⚠️ 两端的**代价完全不对称**，调用方必须知道：
+   * - codex：向已经跑着的 app-server 发一次 `mcpServerStatus/list`，近乎免费。
+   *   进程没起来就返回空数组——**不为了拉状态 spawn**（与 refreshSkills 同一条规矩）。
+   * - claude：没有常驻进程，必须现开一次握手（实测约 3 秒），而且**握手完还得轮询几秒**
+   *   才等得到结果（见 mcp-runtime-mapping.ts 的 allSettled）。所以只能由用户显式动作触发，
+   *   绝不能挂在每次扫盘上。
+   *
+   * 拿不到就返回空数组，不抛——UI 那时显示「未连接」，不能显示成「已连接」。
+   */
+  listMcpRuntime?(cwd?: string): Promise<McpRuntimeStatus[]>
+
+  /**
+   * Unified MCP Server Center: 把 server 的开/关推给后端。
+   *
+   * 只有 codex 实现——它有原生的 `enabled` 字段和写配置的 RPC。claude 不实现：
+   * 它的开关是往 `~/.claude.json` 的 `projects.<abs>.disabledMcpServers` 写名单，
+   * 那是一次文件操作（见 mcp-claude-writer.ts），跟 adapter 和进程状态都没关系。
+   *
+   * ⚠️ 与 setSkillEnabled 一样，这条写的是**用户自己的配置**，终端里的 codex 也会
+   * 跟着关。UI 必须说清楚。
+   *
+   * @param filePath server 实际定义在哪个配置文件里。**必须传对**——codex 写入时会校验
+   *   整份配置，往一个没有该 server 定义的文件里写 `enabled` 会直接失败。
+   *
+   * 实现方必须做到：后端进程没起来时**静默返回**，不为一次开关把它拉起来。
+   */
+  setMcpEnabled?(name: string, enabled: boolean, filePath?: string): Promise<void>
+
+  /**
+   * Unified MCP Server Center: 把项目加进后端的信任列表。
+   *
+   * 只有 codex 有这个概念（`[projects."<abs>"] trust_level`）——它的项目层配置默认
+   * 不合入生效配置，所以一个项目级 MCP server 可以「列表里看得见、永远不加载」。
+   */
+  trustProject?(folderPath: string): Promise<void>
+
+  /**
+   * Unified MCP Server Center: 把一整个 server 段写进 / 删出后端自己的配置文件。
+   *
+   * 与 setMcpEnabled 的区别是影响范围：那个只翻一个布尔，这两个会新增/移除整条配置，
+   * **并把其中的凭据复制到第二个文件**（见设计文档 §9.2）。所以调用方必须先向用户
+   * 明确告知写到了哪，不能当成一个静默操作。
+   *
+   * 只有 codex 实现（它有通用的配置写入 RPC）。claude 侧是直接改 `~/.claude.json`，
+   * 走 mcp-claude-writer.ts，跟 adapter 无关。
+   */
+  writeMcpServer?(name: string, server: Record<string, unknown>, filePath?: string): Promise<void>
+  removeMcpServer?(name: string, filePath?: string): Promise<void>
+
   getCapabilities(): BackendCapabilities
 
   startSession(args: StartSessionArgs): Promise<{ sessionId: string; backendThreadId: string }>

@@ -48,7 +48,7 @@
 
 <script setup lang="ts">
 import { segmentFileMentions } from '@renderer/lib/file-mention'
-import { computed, ref, watch } from 'vue'
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 
 const props = withDefaults(
   defineProps<{
@@ -59,7 +59,7 @@ const props = withDefaults(
     disabled?: boolean | undefined
     rows?: number | undefined
   }>(),
-  { placeholder: '', disabled: false, rows: 3 },
+  { placeholder: '', disabled: false, rows: 1 },
 )
 
 const emit = defineEmits<{
@@ -80,6 +80,31 @@ const emit = defineEmits<{
 const textareaRef = ref<HTMLTextAreaElement | null>(null)
 const highlightRef = ref<HTMLElement | null>(null)
 
+/*
+ * Auto-resize: 输入框默认矮一点，内容超出时长高，但封顶到 maxHeightPx 再改内部滚动。
+ *
+ * 默认高度（单行/空输入）对应 rows=1 + padding；超过后随 scrollHeight 增长，
+ * 到 MAX_HEIGHT_PX (12rem ≈ 192px) 为止——这之后 textarea 自己出滚动条。
+ * 实现细节：
+ *   - 改的是 textarea.style.height，底层高亮层是 absolute inset-0，会自动跟着
+ *     外层 <div>（由 textarea 撑高）一起变高，无需单独同步高度。
+ *   - 测量前先把 height 置成 'auto'，否则 scrollHeight 会停在当前已设的固定高度上，
+ *     多删几行也不会缩回去。
+ *   - 用 scrollHeight（包含 padding，不包含边框/外边距）作为目标高度，配合 box-sizing
+ *     默认的 border-box 刚好能盖住 padding。
+ */
+const MIN_HEIGHT_PX = 44 // 一行 + py-3 的最小高度，避免空输入时压得太扁
+const MAX_HEIGHT_PX = 192 // 12rem，约 8~9 行——超过后转内部滚动
+function autoResize(): void {
+  const el = textareaRef.value
+  if (!el) return
+  el.style.height = 'auto'
+  const next = Math.min(Math.max(el.scrollHeight, MIN_HEIGHT_PX), MAX_HEIGHT_PX)
+  el.style.height = `${next}px`
+  // 封顶后让 textarea 内部出滚动条；未封顶时恢复隐藏（删行回缩场景）。
+  el.style.overflowY = el.scrollHeight > MAX_HEIGHT_PX ? 'auto' : 'hidden'
+}
+
 /**
  * 输入法组合中。组合期间不报光标——那时候文本里躺着的是未确认的拼音，
  * 拿它去搜文件既搜不到，还会让弹层在每个拼音字母上闪一次。
@@ -94,6 +119,8 @@ function onInput(e: Event): void {
   // 之后发的 caret 才和它配得上。反过来会让联想拿旧文本 + 新光标去算触发段。
   emit('update:modelValue', el.value)
   if (!composing.value) emit('caret', el.selectionStart)
+  // Auto-resize: 输入即重算高度
+  autoResize()
 }
 
 function emitCaret(): void {
@@ -119,6 +146,16 @@ function syncScroll(): void {
 // 外部改写文本（拖放 / 右键加引用）不经过 scroll 事件，但会改变内容高度——
 // 这时同样要对齐一次，否则 textarea 自动滚到底而高亮层还停在原处。
 watch(() => props.modelValue, syncScroll, { flush: 'post' })
+// Auto-resize: 外部改写文本（拖放 / 右键加引用 / 候选应用）也要重算高度
+watch(() => props.modelValue, autoResize, { flush: 'post' })
+
+onMounted(() => {
+  autoResize()
+  window.addEventListener('resize', autoResize)
+})
+onUnmounted(() => {
+  window.removeEventListener('resize', autoResize)
+})
 
 defineExpose({
   focus: () => textareaRef.value?.focus(),

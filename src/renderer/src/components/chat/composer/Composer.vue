@@ -52,7 +52,7 @@
           v-model="prompt"
           :placeholder="disabled ? '后端未连接...' : hint"
           :disabled="disabled"
-          :rows="3"
+          :rows="1"
           @keydown="onKeyDown"
           @paste="onPaste"
           @caret="onCaret"
@@ -437,38 +437,47 @@ function onSend(): void {
  * 粘贴处理：剪贴板是"看起来像代码"的多行文本时，自动作为 ide_selection 附件，
  * 不进 textarea。启发式判断（保守）：至少 2 行 + 含明显代码符号。
  * 加 attachments 时若有重复内容直接跳过。
+ *
+ * 暂时停用：该「粘贴代码自动转引用」功能先关掉，让粘贴内容直接进入 textarea
+ * （用户体验：粘贴的代码不再被截断成附件，能继续在框内编辑）。
+ * 重新启用时把下面的注释块恢复成函数体即可。
  */
-function onPaste(e: ClipboardEvent): void {
-  const text = e.clipboardData?.getData('text/plain')
-  if (!text) return
+function onPaste(_e: ClipboardEvent): void {
+  // 暂时停用——什么都不做，让浏览器默认粘贴行为发生（文本进入 textarea）。
+  void _e
 
-  const lineCount = text.split('\n').length
-  if (lineCount < 2) return
-
-  // 多行 + 含代码符号才认作代码片段
-  const codeIndicators = /[{};=>]|function |class |def |import |const |let |var |public |private /
-  if (!codeIndicators.test(text)) return
-
-  // 已有相同附件，避免重复
-  const dup = chatInput.pendingAttachments.some(
-    (a: ContextBlock) => a.tag === 'ide_selection' && (a.data as { code: string }).code === text,
-  )
-  if (dup) {
-    e.preventDefault()
-    return
-  }
-
-  e.preventDefault()
-  chatInput.addAttachment({
-    tag: 'ide_selection',
-    data: {
-      // 粘贴的代码没有原始文件路径，用占位
-      filePath: '(pasted snippet)',
-      startLine: 1,
-      endLine: lineCount,
-      code: text,
-    },
-  })
+  // === 以下为「粘贴代码自动转 ide_selection 引用」的原逻辑（暂未启用）===
+  // const text = _e.clipboardData?.getData('text/plain')
+  // if (!text) return
+  //
+  // const lineCount = text.split('\n').length
+  // if (lineCount < 2) return
+  //
+  // // 多行 + 含代码符号才认作代码片段
+  // const codeIndicators = /[{};=>]|function |class |def |import |const |let |var |public |private /
+  // if (!codeIndicators.test(text)) return
+  //
+  // // 已有相同附件，避免重复
+  // const dup = chatInput.pendingAttachments.some(
+  //   (a: ContextBlock) =>
+  //     a.tag === 'ide_selection' && (a.data as { code: string }).code === text,
+  // )
+  // if (dup) {
+  //   _e.preventDefault()
+  //   return
+  // }
+  //
+  // _e.preventDefault()
+  // chatInput.addAttachment({
+  //   tag: 'ide_selection',
+  //   data: {
+  //     // 粘贴的代码没有原始文件路径，用占位
+  //     filePath: '(pasted snippet)',
+  //     startLine: 1,
+  //     endLine: lineCount,
+  //     code: text,
+  //   },
+  // })
 }
 
 async function onInterrupt(): Promise<void> {

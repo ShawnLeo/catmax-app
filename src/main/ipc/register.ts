@@ -3,6 +3,7 @@ import { logger } from '../service/logger'
 import { registerBackendHandlers } from './domains/backend'
 import { registerFsHandlers } from './domains/fs'
 import { registerGitHandlers } from './domains/git'
+import { registerMcpHandlers, syncMcpOnStartupHandler } from './domains/mcp'
 import { registerPtyHandlers } from './domains/pty'
 import { registerSessionHandlers } from './domains/session'
 import { registerSettingsHandlers } from './domains/settings'
@@ -25,8 +26,11 @@ export async function registerAllHandlers(): Promise<void> {
   registerFsHandlers()
   registerPtyHandlers()
   registerSkillsHandlers()
+  registerMcpHandlers()
   log.info('all handlers registered')
   // Unified Skill Center: 补推被关掉的技能。不 await——codex 首次调用会 spawn
   // app-server，拿它挡住启动会让窗口白等好几秒。
   void syncSkillsOnStartup()
+  // Unified MCP Server Center: 同理补推 MCP 开关。同样不 await。
+  void syncMcpOnStartupHandler()
 }

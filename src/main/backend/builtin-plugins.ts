@@ -1,6 +1,7 @@
 import { CLAUDE_CAPABILITIES, CODEX_CAPABILITIES } from '@shared/backend/builtin-capabilities'
 
 import { bridgeManager } from '../protocol/manager'
+import { codexMcpInjectArgs } from '../service/mcp-inject'
 
 import { ClaudeAdapter } from './claude/adapter'
 import { CodexAdapter } from './codex/adapter'
@@ -43,7 +44,10 @@ export function registerBuiltinBackendPlugins(): void {
           }),
           ...bridgeManager.codexSpawnEnv(),
         })
-        adapter.setExtraArgs(bridgeManager.codexSpawnArgs())
+        // Unified MCP Server Center: 「补给 codex」的 server 也走 `-c`（sessionFlags 层）。
+        // 与桥的参数拼在一起——setExtraArgs 是整体替换，分两次调用后者会把前者冲掉。
+        // 顺序上桥在前：两者的 keyPath 不相交，但桥是更基础的一层，出问题时也更好读日志。
+        adapter.setExtraArgs([...bridgeManager.codexSpawnArgs(), ...codexMcpInjectArgs()])
         // 老会话的 provider 写死在 rollout 里，`-c model_provider` 覆盖不了它——
         // resume 时必须显式传（详见 CodexAdapter.setModelProvider）。
         adapter.setModelProvider(bridgeManager.codexModelProviderId())

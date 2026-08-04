@@ -1,6 +1,6 @@
 # 统一 MCP Server 中心（Unified MCP Server Center）调研与设计
 
-- **状态**：设计稿 v2，待评审（v1 的多条核心前提经实测证伪，见 §0.1）
+- **状态**：v2 设计已定稿；**Phase 1–6 全部已实现**。后续变更请直接改代码并回来更新本文。
 - **日期**：2026-08-03
 - **范围**：让 codex 与 claude 两个后端看到一份统一的 MCP server 列表；扫描各后端真实配置（系统级 / 用户级 / 项目级）；支持 server 的启用 / 禁用；支持把一个后端的 server 补给另一个后端
 - **不在范围**：应用内编辑 server 配置正文、claude `strictMcpConfig` 全接管模式、claude.ai 云连接器（claudeai-proxy）的管理、企业 MDM 层的写入
@@ -197,12 +197,21 @@ export type McpRootKind =
   | 'claude-mcpjson'   // <repo>/.mcp.json                    仅 claude，信任门控
   | 'claude-injected'  // catmax 的 Options.mcpServers        仅 claude，不落用户盘
 
-/** system 是企业/系统管控层，catmax 只读。 */
-export type McpScope = 'system' | 'global' | 'project'
+/** 作用域 = 用户能选择把 server 放在哪，只有两个位置。企业层不是第三个位置。 */
+export type McpScope = 'global' | 'project'
 
 /** 传输类型。两端都支持本地与远程；codex 无 type 字段，靠 command/url 推断。 */
 export type McpTransport = 'stdio' | 'sse' | 'http'
 ```
+
+> **为什么没有 `system` scope**（实现期改的，初稿写的是三个）：企业/系统管控层不是第三个可选位置，而是「别人替你决定了」的同一批全局 server 的另一个来源层。当成第三个 scope 会引出两个真问题：
+>
+> 1. **同名跨层被拆成两条。** entry 的合并键是 `<scope>:<name>`，而 codex 七层栈里用户层就是**覆盖**系统层同名项的。拆开显示 = 列表里两行同名 server，其中一行是死的。
+> 2. **「能不能写」是 per-location 的。** 一个 server 完全可以同时有只读的系统层和可写的用户层，用 scope 表达可写性这种情况必然判错。
+>
+> 所以只读性走 `McpEntry.managed = locations.every(l => !MCP_ROOT_META[l.kind].writable)`，UI 上是 global 组里的一枚「企业下发 · 只读」徽章，不是一个每行都点不动的第三个 tab。
+>
+> 连带一条：摘要显示不能取 `locations[0]`（合并后可能是被覆盖的系统层那份），要用 `pickDisplayLocation()` 取**可写的那一层**；漂移检测也只比**后端之间**，同后端的层间差异是 codex 配置栈的正常用法，报出来是误报。
 
 > `sse` vs `http` 的不对称要说清楚：claude 用 `type` 显式区分，**codex 没有判别字段**，只有一个 `url`。所以 `claude sse → codex` 与 `claude http → codex` 会塌缩成同一种写法。这不是阻断（不像 v1 说的那样要报 `transport-unsupported`），但是**有损**：往回同步时无法还原原本是 sse 还是 http。扫描器要把这种塌缩记成 `lossy-transport` 提示，而不是假装无损。
 
@@ -379,7 +388,18 @@ config/value/write {
 }
 ```
 
-然后 `config/mcpServer/reload`（或用 `config/batchWrite { reloadUserConfig: true }` 一步到位）。这一条同时解决了 v1 的三个问题：格式/注释保留（codex 自己负责）、并发写冲突（`expectedVersion` 冲突会失败而不是覆盖）、热重载（不用等下次 spawn）。
+然后 `config/mcpServer/reload`（或用 `config/batchWrite { reloadUserConfig: true }` 一步到位）。
+
+#### 实现期实测补充（四条，都在沙盒 `CODEX_HOME` 里验证，没碰真实配置）
+
+1. **格式与注释确实完整保留**，包括行尾注释。所以绝不能手拼 TOML——这条从"推测"升级成了实测。
+2. **`value: null` 会把键删掉**，不是写一个 null。所以「重新启用」用 `null` 回到"没有 override"的干净状态，比写 `enabled = true` 更贴近用户手写配置的样子。
+3. **`keyPath` 里的 server 名必须加引号。** 名字带点时，`mcp_servers.my.server.enabled` 会被当成三层嵌套表，去写一个 `[mcp_servers.my.server]` 新段，然后配置校验报 `Invalid configuration: invalid transport in mcp_servers.my` ——**先写坏再报错**，不是拒绝。统一走 `tomlKeySegment()`（`JSON.stringify`，TOML basic string 的转义规则与 JSON 一致）。项目路径同理。
+4. **写入会校验整份配置**，所以必须写进**该 server 真正定义在的那个文件**（`filePath` 参数）。往一个没有该 server 定义的文件里写 `enabled` 会以 `invalid transport` 失败（光有 `enabled` 既没 `command` 也没 `url`）。`codexWriteTarget()` 负责挑：取第一个 codex 侧、可写、有 filePath 的 location；一个都没有就返回 null 并跳过，**不许退回去猜用户 `config.toml`**。
+
+#### 与本节建议的一处偏离：不带 `expectedVersion`
+
+实测确认乐观锁是有效的（过期版本返回 `configVersionConflict`），但**实现里不用它**。那个 sha256 锁防的是"读整份配置 → 改 → 写回"的竞态，而 `config/value/write` 是一次定点 keyPath 编辑，codex 自己重读文件再拼接，catmax 这边根本没有 read-modify-write 窗口。带上它只会在用户刚好在别处编辑过配置时让开关失败——而那时用户的意图明明就是"把这个关掉"。
 
 **降级路径**：后端进程没起来时无法调 RPC。此时**不为一次开关把 app-server 拉起来**（与 Skill 中心 `refreshSkills` 的处理一致），只写 catmax 状态，冷启动时由 §5.4 的启动补推落盘。
 
@@ -391,6 +411,18 @@ config/value/write {
 - `enabledMcpjsonServers` / `disabledMcpjsonServers` **不用作开关**——它们是 `.mcp.json` 的**信任决策**（批准/拒绝一个仓库带来的 server），语义不是「开关」。catmax 只**读**它们来判断 `ineffective: 'needs-approval'`。
 
 > 与 Skill 中心的一个差异：Skill 的 claude 投影走 flag 层覆盖文件，只影响 catmax 内会话；MCP 的 `disabledMcpServers` 写的是用户自己的 `~/.claude.json`，**用户终端里的 claude 也会跟着关**。这与 codex 侧写 `config.toml` 的影响范围一致，反而对称了。UI 要如实标注（Skill 中心当年是反过来的不对称）。
+
+#### 写 `~/.claude.json` 的五条硬约束（`mcp-claude-writer.ts`，均有用例）
+
+这个文件在本机是 **86KB / mode 0600**，装着登录态、全部项目历史和明文凭据。所以写它的规矩比功能本身更要紧：
+
+1. **不做备份**（§9.4）——备份等于多一处 catmax 没在管的密钥副本，收益（回滚一个布尔）远小于代价。
+2. **原子替换 + 显式 chmod 0600**：同目录临时文件（带 pid，防两个 catmax 实例互踩）+ rename；`writeFile` 的 mode 受 umask 影响，不能指望默认值。
+3. **JSON 解析失败就什么都不做，绝不重建**——重建一个"干净的"会把用户的登录态和全部项目历史一次性抹掉。
+4. **文件或项目桶不存在时不创建**：claude 自己会建，替它造壳可能干扰 onboarding，也等于往用户配置里写他没在 claude 里打开过的项目。
+5. **保持原文缩进**：实测用户的文件是 2 空格缩进，压成一行会让他自己没法读；反过来把压缩文件展开会让它膨胀几倍。
+
+另外两条行为规则：写的是**全集不是增量**（`disabledMcpServers` 本身就是一张完整名单，增量式追加会让"在别处手动删掉一条"永远补不回来）；**没变化就不重写**（避免无谓改 mtime）。
 
 ### 5.4 启动补推
 
@@ -447,8 +479,19 @@ src/main/ipc/domains/mcp/index.ts       ── handler 注册
 - `codex-user`：`join(resolveBackendConfigDir('codex'), 'config.toml')`（考虑 `$CODEX_HOME`）。
 - `codex-project`：`join(folderPath, '.codex', 'config.toml')`。
 - `codex-system`：`/etc/codex/config.toml`（macOS/Linux 都是这个，实测 `layers[]` 里就这么报的）。
-- `claude-user` / `claude-project`：都在 `~/.claude.json`。**注意不对称**：claude 的 settings 在 `~/.claude/`，但 `.claude.json` 在 `$HOME`。
-  > ⚠️ **未验证**：`$CLAUDE_CONFIG_DIR` 设置时 `.claude.json` 是否跟着移动。实现前要单独探一次，不要照抄 v1 那句「它在 `$HOME` 而非 `$CLAUDE_CONFIG_DIR` 下」——那条没有探针支撑。
+- `claude-user` / `claude-project`：都在 `.claude.json`。**路径规则实测如下（v1 那句「它在 `$HOME` 而非 `$CLAUDE_CONFIG_DIR` 下」是错的）**：
+
+  ```ts
+  join(process.env.CLAUDE_CONFIG_DIR?.trim() || homedir(), '.claude.json')
+  ```
+
+  实测（claude CLI 2.1.132）：
+  | 环境 | `claude mcp list` | 结论 |
+  |---|---|---|
+  | 不设 `CLAUDE_CONFIG_DIR` | 列出 `~/.claude.json` 里的 3 个真实 server | 读 `$HOME/.claude.json` |
+  | `CLAUDE_CONFIG_DIR=<tmp>` | `No MCP servers configured`，并在 `<tmp>/` 里**新建** `.claude.json` | 读 `$CLAUDE_CONFIG_DIR/.claude.json` |
+
+  所以**不能**直接用 `resolveBackendConfigDir('claude')` 拼：它在未设环境变量时返回 `~/.claude`，而 `.claude.json` 那时在 `~/`（不是 `~/.claude/`）。这个「设了就进目录、没设就回退到 home」的不对称必须在 `mcp-roots.ts` 里显式处理并注释。
 - `claude-managed`：macOS `/Library/Application Support/ClaudeCode/managed-mcp.json`，Linux `/etc/claude-code/managed-mcp.json`（二进制 `strings` 实测）。
 - `claude-mcpjson`：`join(folderPath, '.mcp.json')`。
 
@@ -467,13 +510,33 @@ src/main/ipc/domains/mcp/index.ts       ── handler 注册
 
 v1 §8.4 排除运行时状态的两条理由都不成立：
 
-1. 「codex 没有等价能力」→ 有 `mcpServerStatus/list`，返回 `serverInfo`（含 `description`/`title`/`version`/`websiteUrl`）、`tools`、`resources`、`authStatus`，还有 `mcpServerStatusUpdated` 主动推送。
-2. 「需要活跃会话」→ claude 侧**握手即可**，实测 `query()` 不发消息就能调 `mcpServerStatus()`，**不花 token**。
+1. 「codex 没有等价能力」→ 有 `mcpServerStatus/list`。
+2. 「需要活跃会话」→ claude 侧**握手即可**，`query()` 不发消息就能调 `mcpServerStatus()`，**不花 token**。
 
-所以首版就把状态做成**只读增强**：
+所以首版就把状态做成**只读增强**。
 
-- 两端后端在跑时拉一次状态，填 `McpEntry.runtime`（`description` / `toolCount` / `authStatus` / `state`）。
-- 后端没跑就是 `runtime: null`，UI 显示「未连接」，**不显示成「已连接」**。
+### 8.1 实现期实测推翻的四条（v2 初稿也写错了）
+
+写 Phase 2 之前又跑了一轮探针，本节原来的四处描述都被证伪：
+
+| v2 初稿的说法 | 实测（codex 0.145.0 / claude 2.1.220） |
+| --- | --- |
+| 通知叫 `mcpServerStatusUpdated` | 实名是 **`mcpServer/startupStatus/updated`**（`ServerNotification.ts` 里的字面量）。按原名订阅收不到任何东西 |
+| `mcpServerStatus/list` 返回 `state` | **响应里根本没有状态字段**。`McpServerStatus` 只有 `name` / `serverInfo` / `tools` / `resources` / `resourceTemplates` / `authStatus` |
+| claude 握手后读一次即可 | **读一次永远是 pending**。连接是握手之后异步建立的：t+3.2s 三个全 pending，t+5.2s 一个转 failed，t+9.2s 两个转 connected。必须轮询 |
+| `runtime` 是单个对象 | 同一个 server 在两端状态可以不同（本机 `scorpio-mcp-server` 在 claude 侧 failed）。必须**按后端分开存** |
+
+由此产生的三条设计约束：
+
+- **codex 的连接状态只能推断**：`serverInfo !== null` → connected，否则 `unknown`。不能映射成 failed——本机 `enabled = false` 的 `computer-use` 照样出现在列表里且 `serverInfo` 为 null，它没坏，是被关了。真失败原因只有 `mcpServer/startupStatus/updated` 通知带（`status` + `error` + `failureReason`），adapter 攒着，下次 list 时补进 `unknown`（只补 `unknown`：通知是历史，list 是此刻）。
+- **两端的 `tools` 形状相反**：codex 是 map（`{ [name]: Tool }`），claude 是数组。数错了工具数就全错。
+- **代价严重不对称，所以 `mcp.refreshRuntime` 必须与 `mcp.list` 分开**：list 是毫秒级纯读盘（窗口聚焦会自动跑），refreshRuntime 在 claude 侧要冷启握手 + 轮询（实测 8 秒）。合成一个方法的话，用户切个窗口就白等十几秒。UI 上也是两个按钮。
+
+### 8.2 其余约定
+
+- 后端没跑时 `runtime` 留空，UI 显示「**未探测**」——与「未连接」是两回事，都画灰点但文案必须不同，把没问过的显示成未连接就是在编。
+- codex 分页有 `nextCursor`，要翻页。
+- **后端回报了但配置里没有的 server 静默丢掉**：实测 codex 会多报一个内建的 `codex_apps`（36 个工具）。这个功能是配置管理，不是进程监视器。
 - `authStatus: 'notLoggedIn'` 的远程 server 给一个「登录」入口 → codex 调 `mcpServer/oauth/login`；claude 侧 `~/.claude/mcp-needs-auth-cache.json` 已存在，说明它有自己的授权流，首版只展示不接管。
 
 「配置存在 ≠ 已连接」这条 v1 的文案要求仍然成立，而且现在有真状态可显示，更该做准。
@@ -604,42 +667,148 @@ export type McpWriteFailure =
 
 ## 12. 分阶段实施计划
 
-### Phase 1：数据模型与扫描（只读）
+### Phase 1：数据模型与扫描（只读）— ✅ 已实现
 - `shared/mcp/types.ts`、`shared/ipc/mcp.ts`
-- `mcp-roots.ts`、`mcp-config-codec.ts`、**`mcp-secrets.ts`（脱敏必须与扫描同期，不能后补）**、`mcp-scanner.ts`
+- `mcp-roots.ts`、`mcp-config-codec.ts`、**`mcp-secrets.ts`（脱敏必须与扫描同期，不能后补）**、`mcp-scanner.ts`、`mcp-state.ts`
 - `ipc/domains/mcp/`（`listMcpServers` + `revealMcpConfig`）、`preload/api.ts`
-- 设置页 `McpSection.vue` 只读列表
-- **验收**：列出两端所有来源的 server，标出 scope / 单端双端 / 漂移 / `ineffective` 原因；**renderer 侧断言拿不到任何密钥明文**
+- 设置页 `McpSection.vue` + `components/mcp/McpRow.vue` + `stores/mcp.ts`
+- 测试：`tests/service/mcp-{config-codec,secrets,scanner,state}.test.ts`（62 个用例）
+- **验收结果**：对本机真实配置扫描得到 5 个 server（codex 2 + claude 3），`computer-use`
+  正确反映 codex 原生 `enabled = false`，`web-search-prime` 的 `Authorization` 头被掩码
+  且标了 `hasInlineSecret`，整份 snapshot 序列化后不含真实 token。
 
-### Phase 2：运行时状态（只读增强）
-- `refreshMcpRuntime`：codex `mcpServerStatus/list`、claude 握手后 `mcpServerStatus()`
-- 订阅 codex `mcpServerStatusUpdated`
-- **验收**：连接状态/工具数/authStatus 正确；后端没跑时显示「未连接」而非「已连接」
+> **实现期发现的一个 bug（已修，有回归测试）**：`readMcpState()` 原本返回
+> `{ ...EMPTY }`——浅拷贝让 `projectDisabled` 与模块级常量共享引用，而 `setMcpEnabled`
+> 是就地写，一次调用就会永久污染这个"空状态"，此后任何一次「文件不存在」或
+> 「文件损坏」的读取都会带上前一次的禁用项。改成 `emptyState()` 工厂函数。
 
-### Phase 3：开关
-- `mcp-state.ts`；`setMcpEnabled` 双投影
-- codex 走 `config/value/write` + `config/mcpServer/reload`；claude 写 `disabledMcpServers`
-- `trustCodexProject`；`syncMcpOnStartup`
-- **验收**：关 codex server 后**同一会话内**即时生效（热重载）；关 claude 全局 server 后 `mcpServerStatus()` 报 `disabled`
+### Phase 2：运行时状态（只读增强）— ✅ 已实现
+- `AgentBackend.listMcpRuntime?(cwd)`；codex 走 `mcpServerStatus/list`（进程没起来返回空数组，**不为拉状态 spawn**），claude 走握手 + 轮询
+- `backend/shared/mcp-runtime-mapping.ts`：两端归一 + `attachRuntime` 合并（纯函数，22 个用例）
+- 订阅 codex **`mcpServer/startupStatus/updated`**（不是初稿写的 `mcpServerStatusUpdated`），攒在 adapter 里，随进程清空
+- `mcp.refreshRuntime` IPC + 设置页独立的「探测连接状态」按钮
+- **真机验收**（跑的是 adapter 实际代码路径，不是探针）：
 
-### Phase 4：同步（默认注入层）
-- codex `-c` 注入接进 `codexSpawnArgs()`；claude 接进 `Options.mcpServers`
-- `syncMcpServer({ mode: 'inject' })` + 有损警告链路
-- **验收**：单端 server 在另一端可用，且**两端用户配置文件字节未变**
+  ```
+  global:chrome-devtools     visibleTo=claude   claude=connected/29 工具
+  global:computer-use        visibleTo=codex    codex=unknown→显示为「已禁用」（配置侧 enabled=false）
+  global:node_repl           visibleTo=codex    codex=connected/3 工具  rmcp@1.5.0
+  global:scorpio-mcp-server  visibleTo=claude   claude=failed  err=MCP endpoint not found at …
+  global:web-search-prime    visibleTo=claude   claude=connected/1 工具
+  ```
 
-### Phase 5：写入用户配置 + 删除 + popover
-- `mcp-writer.ts` 完整写入（含 §9.2 的告知）
-- `removeMcpServer` 守卫；`ProjectMcpPopover.vue`
-- **验收**：写入后终端里的后端也能用；全局 server 不让删
+  codex 未 initialize 时返回空数组；claude 轮询耗时 8.0 秒；运行时载荷不含任何密钥。
 
-### Phase 6：打磨
-- 漂移检测、错误码全链路 UI 翻译、`AGENTS.md` 补 MCP domain
+> **实现期的一处收敛**：codex 回 `unknown` 而配置侧已知该 server 被禁用时，UI 显示
+> 「已禁用」而不是「状态未知」——配置是直接证据，后端说不清的地方由它补。
+
+### Phase 3：开关 — ✅ 已实现
+- `mcp-projection.ts`（双投影编排 + `codexWriteTarget`）、`mcp-claude-writer.ts`（原子写 `~/.claude.json`）
+- `AgentBackend.setMcpEnabled?` / `trustProject?`；codex 走 `config/value/write` + `config/mcpServer/reload`
+- `mcp.setEnabled` / `mcp.trustProject` IPC；`syncMcpOnStartupHandler` 在 register.ts 里 `void` 调用
+- 行内开关（样式与 SkillRow 一致）+ 「信任该项目」按钮 + 失败/警告提示条
+- 测试：`mcp-claude-writer`（12）、`mcp-projection`（7）
+- **真机验收**（沙盒 `CODEX_HOME`，跑 adapter 实际代码）：
+
+  ```
+  关掉后：注释与行尾注释完整保留；[mcp_servers."my.server"] 段没被拆开；两处 enabled = false
+  重开后：enabled 键被删掉，回到没有 override 的状态
+  信任后：[projects."/Users/x/my.project"] trust_level = "trusted"
+  codex 没起来时：静默返回，配置文件一个字节没动
+  ```
+
+> **顺序不能反**：先写 catmax 状态再投影。即使投影失败（后端没起来、文件只读），
+> 下次启动的 `syncMcpOnStartup` 也会补上；反过来先投影的话，一端成功一端失败就
+> 没有任何地方记得用户到底想要什么。
+>
+> **单次开关只投影被点的那一个**（`onlyNames`）。全量投影虽然幂等，但会把所有
+> codex server 的配置文件 mtime 都改一遍，而 codex 自己也在看这些文件。
+
+### Phase 4：同步（默认注入层）— ✅ 已实现
+- `mcp-inject.ts`：`codexInjectArgsFor`（TOML 字面量编码）、`canInjectIntoCodex`（安全名判定）、`claudeMcpInjectServers`
+- codex 的 `-c` 与桥的参数在 `builtin-plugins.ts` 里拼成一份 `setExtraArgs`（那是整体替换，分两次调用会互相冲掉）
+- claude 接进两处 `Options.mcpServers`（warmup + startTurn），放在 `catmax` 之前——同名时 ask_user 优先
+- `mcp.sync` / `mcp.unsync` IPC + 两步式有损确认；`McpEntry.injectedInto` 让 UI 区分「用户自己配的」和「catmax 补的」
+- 测试：`mcp-inject`（10）
+- **真机验收**：
+
+  ```
+  注入参数： -c mcp_servers.web-search-prime.url="…"
+             -c mcp_servers.web-search-prime.http_headers={Authorization="…"}
+             -c mcp_servers.web-search-prime.startup_timeout_sec=2
+  生效的 mcp_servers： mine, web-search-prime     ← 叠加，用户自己那个还在
+  layers： sessionFlags, user, system
+  config.toml 字节未变 ✅
+  ```
+
+#### 实测发现的一条硬限制：`-c` 不支持带引号的 keyPath 段
+
+这与 `config/value/write` **不一致**——那边 `mcp_servers."my.server".enabled` 是好的。传给 `-c` 时 codex 按 `.` 先切再看引号，于是拿到一个叫 `mcp_servers."my` 的键，然后：
+
+```
+Error: error loading default config after config error: invalid transport
+in `mcp_servers."my`
+```
+
+**注意失败面**：不是"这个 server 没注入成功"，是 **codex 完全启动不了**，用户会看到整个后端挂掉。逐字符实测的结论是 `-` `_` 空格 大小写 数字都没问题，**只有 `.` 致命**（`"` `\` `=` 没实测但一并拒掉）。所以 `canInjectIntoCodex()` 是硬闸：名字带点的 server 只能拒绝同步并告诉用户改用写入用户配置或重命名，没有降级方案。
+
+#### 其它两条实现约定
+
+- **codex 注入要重连才生效**（`-c` 是 spawn 参数），且必须先 `applySettings` 把新参数写进 adapter 再 `reconnectBackend`，顺序与桥开关那条路径一致。claude 不用重连——它的 options 每次 query 现构。
+- **只存名字，不存配置副本**（`McpState.injected`）。存副本既会漂移，又会把明文密钥落进 catmax 自己的 `mcp-state.json`。代价是注入时要现读源配置，为此加了 `scanMcpServersRaw()`——**不脱敏、返回值绝不能进 IPC**，用独立函数名而不是 `scanMcpServers({ redact: false })` 参数，就是为了让 review 的人在调用点上能一眼看出危险。
+
+### Phase 5：写入用户配置 + 删除 + popover — ✅ 已实现
+- codex：`CodexAdapter.writeMcpServer` / `removeMcpServer`（`config/value/write` 整段写 / `value: null` 整段删）
+- claude：`writeClaudeServer()` 扩展 `mcp-claude-writer.ts`，复用同一套原子写 + 0600 + 拒绝重建
+- `mcp.sync({ mode: 'write' })` 复用注入那条路径的全部前置校验；`mcp.remove` 带 §10.2 三条守卫
+- `ProjectMcpPopover.vue` 挂进 ChatView（定位逻辑与 ProjectSkillsPopover 一致）
+- 测试：`mcp-claude-writer` 补到 19 个
+- **真机验收**（沙盒 `CODEX_HOME`，跑 adapter 实际代码）：
+
+  ```
+  写入后：[mcp_servers."web.search"] + 子表 [.http_headers]，用户注释和 [mcp_servers.mine] 都在
+  删除后：该段整个消失，注释和其它 server 不受影响
+  ```
+
+#### 三条实现期的决定
+
+1. **整段写，不逐字段写。** `config/value/write` 每次都校验整份配置，逐字段写会在中间态失败（写 `enabled` 时该 server 还没有 `command`/`url` → `invalid transport`）。整段写一次到位，嵌套子表（`http_headers`）实测会被正确展开成 `[mcp_servers."x".http_headers]`。
+2. **`config/value/write` 的 keyPath 支持带引号的段**（与 `-c` 注入相反，见 Phase 4），所以名字带点的 server **能**写入用户配置——这恰好是注入路径拒绝它时给用户的替代方案。
+3. **`.mcp.json` 里的 server 拒绝删除。** §10.2 只说了「文件必须在工作区内」，而 `<repo>/.mcp.json` 是满足这条的。但它是**团队共享、进版本库**的文件：catmax 删它等于替整个团队做决定，还会在别人的 git 里冒出一个没人解释得清的改动。改为提示用户走版本控制。
+
+#### §9.2 的告知落地
+
+写入模式的返回 `warnings` 里必定有一条说明写到了哪个文件；配置含明文凭据时文案变成
+「⚠️ 该配置含明文凭据，现在它在两个文件里各有一份」。UI 上「写入 X 配置」用的是次要样式（ghost），
+与「在 catmax 里补给 X」（outline）刻意区分——后者是推荐路径，前者要显得更重。
+
+### Phase 6：打磨 — ✅ 已实现
+- **漂移**升为顶部聚合提示（与「未生效」「含明文凭据」并列）。MCP 没有软链可依，两端是独立副本，漂移**一定**会发生，而它的表现是「同一个工具在两个后端里行为不一样」——用户最不会想到来 MCP 列表找原因，所以要主动顶上来。
+- **错误码**：`McpActionResult.code: McpFailureCode`，所有 handler 分支都带上。
+- **`AGENTS.md` 整体重新生成**，不是只补 MCP 那一节（见下）。
+- 测试：`codex-rpc-error`（4）
+
+#### 错误码只列真正会发出的
+
+§10.1 列了一批（`occupied-by-different-config`、`permission-denied`、`parse-error` …），实现里**只保留有对应代码路径的**。一个永远不出现的码只会让调用方为不存在的情况写分支。
+
+其中最要紧的一个是 `needs-confirmation`——它**不是失败**，是「等你点确认」。之前 renderer 靠「ok=false 且没有 message 且有 warnings」来推断这件事，那是**从字段缺失反推语义**：谁后来给那个分支补一句 message，确认弹窗就会无声地变成一个错误提示。
+
+#### 顺带修的一处信息丢失
+
+`config/value/write` 失败时 codex 会返回 `data.config_write_error_code`（实测取值 `configVersionConflict`），但 adapter 一直是 `reject(new Error(msg.error.message))` ——**结构化错误码被丢掉了**，上层只剩一句英文散文，判断只能靠字符串匹配。新增 `CodexRpcError`（带 `rpcCode` + `data`），乐观锁冲突现在翻译成「配置在写入前被别处改过，请重新扫描后再试」。
+
+#### `AGENTS.md`：重新生成而不是补一节
+
+原计划是「补 MCP domain」。但实际比对后，AGENTS.md 与 CLAUDE.md 的 17 行差异里**没有一行是 AGENTS.md 独有的内容**——全是 CLAUDE.md 的旧版本（8 个 IPC 域 vs 10 个、~47 个测试文件 vs ~66、缺 Protocol Bridge / Session Persistence / Other Guidance 三整节）。它本来就该是逐字副本，只是靠手工维护所以一直在漂。
+
+所以改成从 CLAUDE.md 整体重新生成，只保留两处差异（文件头、指向对方的那条 bullet），并在两边都写明**它是生成的、不要手工打补丁**。只补 MCP 那一节只会让它更参差。
 
 ---
 
 ## 13. 风险与未决项
 
-1. **`$CLAUDE_CONFIG_DIR` 对 `.claude.json` 的影响未验证**（§7.1）。实现前必须单独探一次。
+1. ~~**`$CLAUDE_CONFIG_DIR` 对 `.claude.json` 的影响未验证**~~ **已验证并落地**：`CLAUDE_CONFIG_DIR` 设了就用它、没设回退 `$HOME`，见 §7.1 的表。
 2. **`disabledMcpServers` 的写入侧未端到端验证**：读侧已实测生效（§2.5），但 catmax 写进去之后 claude 是否立刻认（还是要重启会话）没跑过。Phase 3 的验收就是这条。
 3. **codex `expectedVersion` 的获取时机**：`layers[].version` 是 sha256，从 `config/read` 拿到到 `config/value/write` 之间有窗口。冲突时返回 `version-conflict` 让上层重读重试，不要静默覆盖。
 4. **codex 后端没跑时无法用 RPC 写配置**。降级为只写 catmax 状态 + 启动补推（§5.2），**不要**为一次开关拉起 app-server。

@@ -122,6 +122,8 @@
             </span>
             <span class="h-3 w-px bg-border" aria-hidden="true" />
             <ProjectSkillsPopover />
+            <span class="h-3 w-px bg-border" aria-hidden="true" />
+            <ProjectMcpPopover />
           </div>
         </div>
       </div>
@@ -205,6 +207,7 @@ import MessageList from '@renderer/components/chat/messages/MessageList.vue'
 import FileDropOverlay from '@renderer/components/chat/overlays/FileDropOverlay.vue'
 import BackendIcon from '@renderer/components/icons/BackendIcon.vue'
 import CatmaxLogo from '@renderer/components/icons/CatmaxLogo.vue'
+import ProjectMcpPopover from '@renderer/components/mcp/ProjectMcpPopover.vue'
 import RightPanel from '@renderer/components/panel/RightPanel.vue'
 import Sidebar from '@renderer/components/sidebar/Sidebar.vue'
 import ProjectSkillsPopover from '@renderer/components/skills/ProjectSkillsPopover.vue'

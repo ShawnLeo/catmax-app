@@ -82,6 +82,9 @@
           <!-- v-if 而不是 v-show：SkillsSection 挂载时会扫盘，藏着也扫等于每次开设置页
                都白扫一遍全部技能目录。 -->
           <SkillsSection v-if="activeSection === 'skills'" />
+          <!-- 同样用 v-if：McpSection 挂载时会读 5 类配置文件（其中 ~/.claude.json
+               可能上百 KB），藏着也扫等于每次开设置页都白读一遍。 -->
+          <McpSection v-if="activeSection === 'mcp'" />
           <WorkspaceSection v-show="activeSection === 'workspace'" />
           <ProxySection v-show="activeSection === 'proxy'" />
 
@@ -108,6 +111,7 @@
 <script setup lang="ts">
 import CatmaxLogo from '@renderer/components/icons/CatmaxLogo.vue'
 import BackendSection from '@renderer/components/settings/BackendSection.vue'
+import McpSection from '@renderer/components/settings/McpSection.vue'
 import ProxySection from '@renderer/components/settings/ProxySection.vue'
 import SkillsSection from '@renderer/components/settings/SkillsSection.vue'
 import ThemeSection from '@renderer/components/settings/ThemeSection.vue'
@@ -123,13 +127,14 @@ import {
   ArrowLeftIcon,
   MenuIcon,
   SparklesIcon,
+  PlugIcon,
   XIcon,
 } from 'lucide-vue-next'
 import type { Component } from 'vue'
 import { onMounted, onUnmounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 
-type SectionId = 'theme' | 'backend' | 'skills' | 'workspace' | 'proxy' | 'about'
+type SectionId = 'theme' | 'backend' | 'skills' | 'mcp' | 'workspace' | 'proxy' | 'about'
 
 interface NavItem {
   id: SectionId
@@ -141,6 +146,7 @@ const navItems: NavItem[] = [
   { id: 'theme', label: '外观', icon: PaletteIcon },
   { id: 'backend', label: '后端', icon: CpuIcon },
   { id: 'skills', label: '技能', icon: SparklesIcon },
+  { id: 'mcp', label: 'MCP', icon: PlugIcon },
   { id: 'workspace', label: '工作区', icon: FolderIcon },
   { id: 'proxy', label: '网络', icon: GlobeIcon },
   { id: 'about', label: '关于', icon: InfoIcon },
