@@ -490,7 +490,15 @@ export class BackendManager {
         await adapter.interrupt(backendTurnId)
       },
       onEvent: (event) => {
-        ctx.broadcast('backend:turnEvent', { turnId, sessionId: routeSessionId, event })
+        // adapter 的 turnId 只用于 main 内部绑定真实后端 turn（interrupt/steer）。
+        // renderer 必须始终看到稳定的 client turnId；否则 turn-run 对账会把
+        // currentTurnId 切回 client id，而消息块仍挂在 adapter id 下，同一轮就会被
+        // 拆成一个“已处理”面板和一个空“处理中”面板。
+        ctx.broadcast('backend:turnEvent', {
+          turnId,
+          sessionId: routeSessionId,
+          event: { ...event, turnId },
+        })
       },
       onSettled: (record) => {
         // 实际启动过的 turn 结束后回写会话配置到 db。

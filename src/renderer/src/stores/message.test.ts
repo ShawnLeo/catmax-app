@@ -179,6 +179,35 @@ describe('message store Codex activity streaming', () => {
     })
   })
 
+  test('turn 中断时把仍在运行的 Codex 活动收敛为已中断', () => {
+    const store = useMessageStore()
+    store.setCurrentSession('session-1')
+    store.markTurnStarting('session-1', 'turn-1')
+    store.applyEvent('session-1', {
+      type: 'content_block_upsert',
+      turnId: 'turn-1',
+      itemId: 'command-1',
+      block: {
+        id: 'activity-1',
+        type: 'codex_activity',
+        status: 'running',
+        activities: [{ id: 'command-1', kind: 'command', command: 'sleep 20', status: 'running' }],
+      },
+    })
+
+    store.applyEvent('session-1', {
+      type: 'turn_completed',
+      turnId: 'turn-1',
+      status: 'interrupted',
+    })
+
+    expect(store.messages[0]?.blocks?.[0]).toMatchObject({
+      type: 'codex_activity',
+      status: 'interrupted',
+      activities: [{ status: 'interrupted' }],
+    })
+  })
+
   test('异步发送和历史加载始终写入指定 session，不污染当前页面', () => {
     const store = useMessageStore()
     store.setCurrentSession('session-2')

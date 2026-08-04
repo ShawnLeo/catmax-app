@@ -98,7 +98,7 @@ watch(
   },
 )
 
-const sections = computed(() => splitCodexTurn(props.messages))
+const sections = computed(() => splitCodexTurn(props.messages, { running: props.running === true }))
 
 /**
  * 本轮首个活动 message 的 createdAt ——

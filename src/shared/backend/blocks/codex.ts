@@ -32,7 +32,7 @@ export interface CodexGeneratedImageContentBlock extends BaseContentBlock {
   path?: string
 }
 
-export type CodexActivityStatus = 'running' | 'completed' | 'failed'
+export type CodexActivityStatus = 'running' | 'completed' | 'failed' | 'interrupted'
 
 export interface CodexDiffStats {
   additions: number

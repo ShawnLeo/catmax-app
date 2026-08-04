@@ -94,4 +94,27 @@ describe('session store selection version', () => {
     expect(messageStore.currentSessionId).toBeNull()
     expect(messageStore.messages).toEqual([])
   })
+
+  test('新建会话状态下 load 不递增 selectionVersion（setCurrent("") 归一化为 null）', async () => {
+    const list = vi.fn().mockResolvedValue([
+      { id: 'session-1', backend: 'codex' },
+      { id: 'session-2', backend: 'codex' },
+    ])
+    Object.defineProperty(window, 'api', {
+      configurable: true,
+      value: { session: { list } },
+    })
+
+    const sessionStore = useSessionStore()
+
+    // 模拟用户点"新建会话"按钮：setCurrent('') 将 currentSessionId 归一化为 null
+    sessionStore.setCurrent('')
+    const versionBeforeLoad = sessionStore.selectionVersion
+    expect(sessionStore.currentSessionId).toBeNull()
+
+    // create() 内部会调 load() 刷新列表；load 不应把 '' 当作"丢失的选择"而递增版本
+    await sessionStore.load('workspace-1', 'codex')
+
+    expect(sessionStore.selectionVersion).toBe(versionBeforeLoad)
+  })
 })

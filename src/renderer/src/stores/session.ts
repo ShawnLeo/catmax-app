@@ -123,7 +123,10 @@ export const useSessionStore = defineStore('session', () => {
   }
 
   function setCurrent(sessionId: string): void {
-    currentSessionId.value = sessionId
+    // 空字符串是现有调用方表示“新建会话 / 未选中会话”的哨兵值。
+    // 统一归一化为 null，避免 create() 内部 load() 把 '' 误判成已丢失的旧选择，
+    // 导致 selectionVersion 再次递增并阻止首条消息自动进入新建会话。
+    currentSessionId.value = sessionId === '' ? null : sessionId
     selectionVersion.value++
   }
 

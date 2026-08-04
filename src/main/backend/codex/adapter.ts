@@ -241,6 +241,10 @@ export class CodexAdapter implements AgentBackend {
   private currentSink: TurnEventSink | null = null
   /** 内部 turnId → codex turnId 映射 */
   private turnIdMap = new Map<string, string>()
+  /** 内部 turnId → codex threadId；当前 turn/interrupt 要求两个 id 同时提供。 */
+  private turnThreadIdMap = new Map<string, string>()
+  /** 在 Codex 返回真实 turn id 前收到的中断请求；绑定 id 后立即补发。 */
+  private pendingInterrupts = new Set<string>()
 
   constructor(opts: CodexAdapterOptions = {}) {
     this.opts = opts
@@ -1075,6 +1079,7 @@ export class CodexAdapter implements AgentBackend {
     // 中（mock 收到 request 后同步把 response + notifications 都 write 进 stdout），
     // 所有 'data' 事件会在 await 的微任务之前同步触发，导致 notifications 被丢弃。
     this.turnIdMap.set(internalTurnId, '')
+    this.turnThreadIdMap.set(internalTurnId, args.sessionId)
     const state: SinkState = { queue: [], resolveWait: null, done: false }
     this.currentSink = makeSink(state)
 
@@ -1108,12 +1113,14 @@ export class CodexAdapter implements AgentBackend {
         })
         const codexTurnId = (turnResponse as { turn?: { id?: string } }).turn?.id
         if (codexTurnId) {
-          this.turnIdMap.set(internalTurnId, codexTurnId)
+          this.bindCodexTurnId(internalTurnId, codexTurnId)
         }
       }
     } catch (e) {
       this.currentSink = null
       this.turnIdMap.delete(internalTurnId)
+      this.turnThreadIdMap.delete(internalTurnId)
+      this.pendingInterrupts.delete(internalTurnId)
       yield {
         type: 'error',
         turnId: internalTurnId,
@@ -1166,6 +1173,8 @@ export class CodexAdapter implements AgentBackend {
     } finally {
       this.currentSink = null
       this.turnIdMap.delete(internalTurnId)
+      this.turnThreadIdMap.delete(internalTurnId)
+      this.pendingInterrupts.delete(internalTurnId)
     }
   }
 
@@ -1254,11 +1263,29 @@ export class CodexAdapter implements AgentBackend {
   async interrupt(turnId: string): Promise<void> {
     const codexTurnId = this.turnIdMap.get(turnId)
     if (!codexTurnId) {
-      log.warn('interrupt: no codex turn id for', turnId)
+      // turn_started 会先把 adapter 内部 id 暴露给协调器，但 Codex 的真实 id 要等
+      // turn/start 响应或 turn/started 通知。这个窗口里不能丢掉用户的停止请求。
+      this.pendingInterrupts.add(turnId)
+      log.info('interrupt queued until codex turn id is available:', turnId)
+      return
+    }
+    await this.interruptCodexTurn(turnId, codexTurnId)
+  }
+
+  private bindCodexTurnId(internalTurnId: string, codexTurnId: string): void {
+    this.turnIdMap.set(internalTurnId, codexTurnId)
+    if (!this.pendingInterrupts.delete(internalTurnId)) return
+    void this.interruptCodexTurn(internalTurnId, codexTurnId)
+  }
+
+  private async interruptCodexTurn(internalTurnId: string, codexTurnId: string): Promise<void> {
+    const threadId = this.turnThreadIdMap.get(internalTurnId)
+    if (!threadId) {
+      log.warn('interrupt: no codex thread id for', internalTurnId)
       return
     }
     try {
-      await this.sendRequest('turn/interrupt', { turnId: codexTurnId })
+      await this.sendRequest('turn/interrupt', { threadId, turnId: codexTurnId })
     } catch (e) {
       log.error('interrupt failed:', e)
     }
@@ -1413,7 +1440,7 @@ export class CodexAdapter implements AgentBackend {
         const r = turnStartedParamsSchema.safeParse(params)
         if (!r.success) return null
         const codexTurnId = r.data.turn.id
-        this.turnIdMap.set(internalTurnId, codexTurnId)
+        this.bindCodexTurnId(internalTurnId, codexTurnId)
         return {
           type: 'turn_started',
           turnId: internalTurnId,

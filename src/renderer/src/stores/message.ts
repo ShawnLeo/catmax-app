@@ -278,8 +278,8 @@ export const useMessageStore = defineStore('message', () => {
         s.lastError = null
         // /compact turnId 对齐：
         // ChatView 的 startCompact(turnId) 传的是 renderer-local UUID（占位），
-        // 但 backend（adapter）自己起 internalTurnId 标在所有事件上，
-        // 且 startTurn 不接受外部 turnId。如果不在 turn_started 时对齐，
+        // backend push 在 manager 边界统一使用稳定的 clientTurnId。如果不在
+        // turn_started 时对齐（例如旧 main 进程仍推 adapter turnId），
         // 后续 turn_completed 里 s.compactTurnId === event.turnId 永远 false，
         // compactDone 永不置 true，"正在压缩上下文"呼吸动画永远停不下来。
         //
@@ -538,6 +538,15 @@ export const useMessageStore = defineStore('message', () => {
       case 'turn_completed': {
         s.isRunning = false
         s.currentTurnId = null
+        settleCodexActivities(
+          s,
+          event.turnId,
+          event.status === 'completed'
+            ? 'completed'
+            : event.status === 'interrupted'
+              ? 'interrupted'
+              : 'failed',
+        )
         if (event.usage) {
           s.lastUsage = event.usage
         }
@@ -606,6 +615,24 @@ export const useMessageStore = defineStore('message', () => {
         if (block.kind === 'reasoning' && block.endedAt === undefined) {
           block.endedAt = now
         }
+      }
+    }
+  }
+
+  /** turn 已终止时，不能让丢失 item/completed 的活动继续显示“正在运行”。 */
+  function settleCodexActivities(
+    s: SessionState,
+    turnId: string,
+    status: Exclude<CodexActivityStatus, 'running'>,
+  ): void {
+    for (const message of s.messages) {
+      if (message.turnId !== turnId) continue
+      for (const block of message.blocks ?? []) {
+        if (block.type !== 'codex_activity') continue
+        for (const activity of block.activities) {
+          if (activity.status === 'running') activity.status = status
+        }
+        block.status = aggregateCodexActivityStatus(block.activities)
       }
     }
   }
@@ -996,5 +1023,6 @@ function mergeCodexActivity(existing: CodexActivity, incoming: CodexActivity): C
 function aggregateCodexActivityStatus(activities: CodexActivity[]): CodexActivityStatus {
   if (activities.some((activity) => activity.status === 'running')) return 'running'
   if (activities.some((activity) => activity.status === 'failed')) return 'failed'
+  if (activities.some((activity) => activity.status === 'interrupted')) return 'interrupted'
   return 'completed'
 }
