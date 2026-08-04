@@ -10,7 +10,8 @@ import { ctx } from './context'
 /**
  * 解析 App 图标资源路径。
  *
- * resources/icon.png 是 512x512 猫咪图标。
+ * resources/icon.png 是 1024x1024 猫咪图标，按 Apple 图标网格绘制：
+ * 深色圆角方块只占 824/1024，四周留 100px 透明边距（详见 build/icon.icns 的同款母版）。
  * dev 模式 app.getAppPath() = 项目根 → <root>/resources/icon.png；
  * packaged 模式 resources/ 被 asarUnpack 到 process.resourcesPath。
  * 用 app.getAppPath() 主路径 + process.resourcesPath 兜底，两个都找不到返回 undefined。
@@ -102,11 +103,15 @@ export function createMainWindow(): BrowserWindow {
   const savedState = ctx.settingsStore.load().windowState
   const bounds = restoreBounds(savedState)
 
-  // macOS：BrowserWindow 的 icon 选项对 Dock 图标无效（只影响 Win 任务栏）。
+  // App Icon: macOS 下 BrowserWindow 的 icon 选项对 Dock 图标无效（只影响 Win 任务栏）。
   // dev 模式跑的是 node_modules 里的 Electron.app，Dock 默认显示 Electron 图标，
   // 必须显式 app.dock.setIcon() 才能在 dev 下也看到猫咪图标。
-  // （packaged 模式下 .icns 已是 app 图标，这里再设一次也无害。）
-  if (icon && process.platform === 'darwin' && app.dock) {
+  //
+  // 但 packaged 模式必须跳过：setIcon 会把 Dock 图标替换成这张位图，绕开系统对
+  // app bundle 图标的加工（macOS 26 会把 .icns 套进 Liquid Glass 容器再渲染），
+  // 导致运行时的 Dock 图标和 Finder / 启动台里看到的不是同一个。
+  // packaged 下 Contents/Resources/icon.icns 已经是 app 图标，交给系统即可。
+  if (icon && is.dev && process.platform === 'darwin' && app.dock) {
     app.dock.setIcon(icon)
   }
 
