@@ -175,6 +175,33 @@
         />
       </div>
 
+      <!-- 认证头方案 -->
+      <div class="flex flex-col gap-2">
+        <div class="flex items-center gap-1.5">
+          <label class="text-[length:var(--ui-text-d3)] text-muted-foreground">认证头方案</label>
+          <HelpTooltip>
+            上游端点要求的认证头风格。x-api-key 是标准 Anthropic；Authorization: Bearer 用于用 token
+            认证的 Anthropic 兼容端点（如 catmax.cn）。
+          </HelpTooltip>
+        </div>
+        <div class="flex gap-2">
+          <button
+            v-for="option in authSchemes"
+            :key="option.value"
+            type="button"
+            :class="[
+              'px-3 py-1.5 rounded-md border text-[length:var(--ui-text-d3)] transition-colors cursor-pointer',
+              editingProvider.authScheme === option.value
+                ? 'border-foreground bg-foreground text-background shadow-sm'
+                : 'border-sidebar-border text-muted-foreground hover:text-foreground',
+            ]"
+            @click="patchProvider(editingProvider!.id, { authScheme: option.value })"
+          >
+            {{ option.label }}
+          </button>
+        </div>
+      </div>
+
       <!-- 模型列表来源 -->
       <div class="flex flex-col gap-2">
         <label class="text-[length:var(--ui-text-d3)] text-muted-foreground">模型列表来源</label>
@@ -513,6 +540,11 @@ const credentialSources: Array<{ value: BridgeProvider['credentialSource']; labe
 const modelListModes: Array<{ value: BridgeProvider['modelListMode']; label: string }> = [
   { value: 'auto', label: '自动获取' },
   { value: 'manual', label: '手动录入' },
+]
+
+const authSchemes: Array<{ value: BridgeProvider['authScheme']; label: string }> = [
+  { value: 'x-api-key', label: 'x-api-key' },
+  { value: 'bearer', label: 'Authorization: Bearer' },
 ]
 
 function checked(event: Event): boolean {
