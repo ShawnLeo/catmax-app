@@ -7,6 +7,7 @@
  * 这一层不认识任何具体协议，只负责：转发、错误归一、以及那条硬不变量——
  * **无论上游怎么断，客户端一定收到恰好一个终止事件**。
  */
+import type { BridgeAuthScheme } from '@shared/protocol/bridge-config'
 import { BridgeRequestError, type UpstreamCapabilities } from '@shared/protocol/codec'
 import type { ProtocolId } from '@shared/protocol/ir'
 
@@ -24,6 +25,8 @@ export interface BridgeUpstreamTarget {
   model: string | null
   /** 上游确实存在的模型 id；null 表示还没拉到列表（此时一律用兜底名） */
   knownModelIds?: ReadonlySet<string> | null
+  /** 认证头方案：x-api-key（标准 Anthropic）或 bearer（Authorization: Bearer） */
+  authScheme: BridgeAuthScheme
   capabilities: UpstreamCapabilities
 }
 
@@ -98,7 +101,7 @@ export async function runBridgeTurn(options: BridgeTurnOptions): Promise<BridgeT
     headers: {
       'content-type': 'application/json',
       accept: ir.stream ? 'text/event-stream' : 'application/json',
-      ...upstreamCodec.authHeaders(options.upstream.apiKey),
+      ...upstreamCodec.authHeaders(options.upstream.apiKey, options.upstream.authScheme),
       ...options.extraHeaders,
     },
     body: JSON.stringify(upstreamBody),

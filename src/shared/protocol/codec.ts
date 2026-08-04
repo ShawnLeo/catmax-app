@@ -12,6 +12,7 @@
  * encoder / decoder 都是**有状态对象**而不是纯函数：Responses 的 added/done 配对、
  * 块索引分配、上游断流时的终态合成，本质都需要跨事件的状态。
  */
+import type { BridgeAuthScheme } from './bridge-config'
 import type { IrRequest, IrStreamEvent, IrUsage, ProtocolId } from './ir'
 
 /** 上游的能力/怪癖声明。是数据不是分支——加一家上游只加一条配置。 */
@@ -87,8 +88,11 @@ export interface ProtocolCodec {
 
   /** 相对 base_url 的请求路径，如 '/v1/messages' */
   upstreamPath(): string
-  /** 凭证注入方式，各协议不同（Bearer vs x-api-key + anthropic-version） */
-  authHeaders(apiKey: string): Record<string, string>
+  /**
+   * 凭证注入方式，各协议不同。scheme 让同一协议的 codec 按上游要求切换
+   * 认证头风格（x-api-key vs Authorization: Bearer）。
+   */
+  authHeaders(apiKey: string, scheme: BridgeAuthScheme): Record<string, string>
 }
 
 /** 客户端请求体不合法。会被 server 映射成 4xx。 */

@@ -45,6 +45,7 @@ function makeProvider(over: Partial<BridgeProvider> = {}): BridgeProvider {
     model: 'm1',
     credentialSource: 'stored',
     credentialEnvVar: '',
+    authScheme: 'x-api-key',
     capabilities: {
       supportsImages: true,
       dropSamplingWhenThinking: true,

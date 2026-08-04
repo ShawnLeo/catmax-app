@@ -131,6 +131,7 @@ export class BridgeManager {
       apiKey,
       model: upstream.model?.trim() ? upstream.model.trim() : null,
       knownModelIds: this.knownModelIds,
+      authScheme: upstream.authScheme,
       capabilities: upstream.capabilities,
     }
   }

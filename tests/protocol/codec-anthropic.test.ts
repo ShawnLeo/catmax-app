@@ -471,11 +471,18 @@ describe('decodeResponse（非流式）', () => {
 })
 
 describe('authHeaders / upstreamPath', () => {
-  test('用 x-api-key 而不是 Bearer，并带 anthropic-version', () => {
-    expect(anthropicMessagesCodec.authHeaders('sk-test')).toEqual({
+  test('x-api-key 方案：用 x-api-key 并带 anthropic-version', () => {
+    expect(anthropicMessagesCodec.authHeaders('sk-test', 'x-api-key')).toEqual({
       'x-api-key': 'sk-test',
       'anthropic-version': '2023-06-01',
     })
     expect(anthropicMessagesCodec.upstreamPath()).toBe('/v1/messages')
+  })
+
+  test('bearer 方案：用 Authorization: Bearer 并带 anthropic-version', () => {
+    expect(anthropicMessagesCodec.authHeaders('sk-test', 'bearer')).toEqual({
+      authorization: 'Bearer sk-test',
+      'anthropic-version': '2023-06-01',
+    })
   })
 })

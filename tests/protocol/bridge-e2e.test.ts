@@ -123,6 +123,7 @@ async function startBridge(
       apiKey: 'sk-upstream',
       model,
       knownModelIds,
+      authScheme: 'x-api-key',
       capabilities: { ...DEFAULT_UPSTREAM_CAPABILITIES, supportsImages: false, ...caps },
     }),
   })

@@ -285,7 +285,10 @@ export const testBridgeUpstream = async (args: {
   try {
     const response = await fetch(url, {
       method: 'POST',
-      headers: { 'content-type': 'application/json', ...codec.authHeaders(apiKey) },
+      headers: {
+        'content-type': 'application/json',
+        ...codec.authHeaders(apiKey, provider.authScheme),
+      },
       body: JSON.stringify({
         model: provider.model?.trim() || 'claude-sonnet-4-20250514',
         max_tokens: 1,

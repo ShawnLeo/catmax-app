@@ -929,5 +929,5 @@ export const openaiResponsesCodec: ProtocolCodec = {
   createStreamDecoder: () => new ResponsesStreamDecoder(),
   decodeResponse: () => [],
   upstreamPath: () => '/v1/responses',
-  authHeaders: (apiKey) => ({ authorization: `Bearer ${apiKey}` }),
+  authHeaders: (apiKey, _scheme) => ({ authorization: `Bearer ${apiKey}` }),
 }
