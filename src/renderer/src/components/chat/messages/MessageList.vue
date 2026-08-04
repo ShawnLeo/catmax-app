@@ -51,8 +51,8 @@
               :message="message"
               :show-thinking="showThinking"
               :cwd="cwd"
-              :is-last="index === lastAssistantIdx"
-              :is-first-assistant="index === firstAssistantIdx"
+              :is-turn-last-assistant="assistantTimelineEdges.last.has(index)"
+              :is-turn-first-assistant="assistantTimelineEdges.first.has(index)"
             />
             <ChangesCard
               v-if="turnChanges.get(index)"
@@ -213,24 +213,35 @@ const conversationClass = computed(() =>
 )
 
 /**
- * 第一条 / 最后一条 assistant 消息的 index——用于 MessageItem 决定竖线画到哪里:
- *   - 第一条 assistant:色点上方不画竖线(上方接的是 user 消息,无需延伸)
- *   - 最后一条 assistant:整条不画竖线(时间轴末端)
- * 中间的 assistant 消息画完整竖线,与前一条衔接。
+ * Assistant 时间轴首尾：**每一轮**的首 / 末 assistant 消息 index——
+ * 用于 MessageItem 决定竖线画到哪里:
+ *   - 本轮第一条 assistant:色点上方不画竖线(上方接的是本轮的 user 提问)
+ *   - 本轮最后一条 assistant:色点下方不画竖线(本轮时间轴到此终止)
+ * 轮内中间的 assistant 画完整竖线,与前后衔接成一条连续时间轴。
+ *
+ * 边界判据是「相邻 + 同 turnId」,不是全局首尾:
+ *   - 相邻——中间夹了 user 气泡 / compact / 中断条目就断开(这些条目全宽渲染,
+ *     竖线本来也接不上)
+ *   - 同 turnId——兜住"连续两轮之间没有可见分隔"的情况;历史回放的消息 turnId
+ *     恒为 'history'(claude/history-mapping.ts),这条判据自动失效、退化成纯相邻性,
+ *     正是历史回放需要的效果。
  */
-const firstAssistantIdx = computed(() => {
+function inSameTimeline(a: NormalizedMessage, b: NormalizedMessage): boolean {
+  return a.role === 'assistant' && b.role === 'assistant' && a.turnId === b.turnId
+}
+const assistantTimelineEdges = computed(() => {
   const msgs = messageStore.messages
+  const first = new Set<number>()
+  const last = new Set<number>()
   for (let i = 0; i < msgs.length; i++) {
-    if (msgs[i]!.role === 'assistant') return i
+    const current = msgs[i]!
+    if (current.role !== 'assistant') continue
+    const prev = msgs[i - 1]
+    const next = msgs[i + 1]
+    if (!prev || !inSameTimeline(prev, current)) first.add(i)
+    if (!next || !inSameTimeline(current, next)) last.add(i)
   }
-  return -1
-})
-const lastAssistantIdx = computed(() => {
-  const msgs = messageStore.messages
-  for (let i = msgs.length - 1; i >= 0; i--) {
-    if (msgs[i]!.role === 'assistant') return i
-  }
-  return -1
+  return { first, last }
 })
 
 /**
