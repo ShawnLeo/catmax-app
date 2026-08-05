@@ -17,6 +17,13 @@ import {
   installBackend as runBackendInstall,
 } from '@main/service/backend-installer'
 import { getStoredCredential, setStoredCredential } from '@main/service/bridge-credentials'
+import {
+  createClaudeSettingsProfile as createClaudeProfile,
+  deleteClaudeSettingsProfile as deleteClaudeProfile,
+  listClaudeSettingsProfiles as listClaudeProfiles,
+  renameClaudeSettingsProfile as renameClaudeProfile,
+  selectClaudeSettingsProfile as selectClaudeProfile,
+} from '@main/service/claude-settings-profiles'
 import { logger } from '@main/service/logger'
 import { getBackendConfigFileDescriptor } from '@shared/backend/config-files'
 import type { BackendInstallResult } from '@shared/backend/install'
@@ -206,6 +213,29 @@ export const writeBackendConfigFile = async (args: {
 
 export const validateBackendConfigFile = async (args: { id: string; content: string }) => {
   return validateConfigContent(args.id, args.content)
+}
+
+// Claude Settings Profiles: 只管档本身。档内容的读写继续走上面的 *ConfigFile
+// （同一个稳定 id，路径按当前档解析）——renderer 切档后重新 readConfigFile 即可。
+
+export const listClaudeSettingsProfiles = async () => {
+  return listClaudeProfiles()
+}
+
+export const createClaudeSettingsProfile = async (args: { name: string; copyFromId?: string }) => {
+  return createClaudeProfile(args)
+}
+
+export const renameClaudeSettingsProfile = async (args: { id: string; name: string }) => {
+  return renameClaudeProfile(args)
+}
+
+export const deleteClaudeSettingsProfile = async (args: { id: string }) => {
+  return deleteClaudeProfile(args)
+}
+
+export const selectClaudeSettingsProfile = async (args: { id: string }) => {
+  return selectClaudeProfile(args)
 }
 
 export const revealBackendConfigFile = async (args: { id: string }) => {

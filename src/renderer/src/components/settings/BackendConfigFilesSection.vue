@@ -49,7 +49,7 @@
         <LockIcon v-if="file.sensitive" class="w-3 h-3 opacity-60" />
         <span v-if="!file.exists" class="text-[length:var(--ui-text-d3)] opacity-60">未创建</span>
         <span
-          v-else-if="isDirty(file.id)"
+          v-else-if="isDirty(file.path)"
           class="text-[length:var(--ui-text-d3)] text-amber-600 dark:text-amber-400"
         >
           ●
@@ -76,168 +76,196 @@
     </p>
 
     <template v-if="activeFile">
-      <!-- 路径行：绝对路径 + 在文件夹中显示 + 重新加载 + 文档 -->
-      <div class="flex items-center gap-2 text-[length:var(--ui-text-d3)] text-muted-foreground">
-        <code class="flex-1 truncate font-mono" :title="activeFile.path">{{
-          activeFile.path
-        }}</code>
-        <button class="hover:text-foreground cursor-pointer" title="在文件夹中显示" @click="reveal">
-          <FolderOpenIcon class="w-3.5 h-3.5" />
-        </button>
-        <button
-          class="hover:text-foreground cursor-pointer"
-          title="放弃修改并重新读取"
-          :disabled="loading"
-          @click="load(activeFile.id, { force: true })"
-        >
-          <RotateCcwIcon class="w-3.5 h-3.5" />
-        </button>
-        <button class="hover:text-foreground cursor-pointer" title="查看官方文档" @click="openDocs">
-          <ExternalLinkIcon class="w-3.5 h-3.5" />
-        </button>
-      </div>
+      <!-- Claude Settings Profiles: 多档文件先选档，编辑器编辑的永远是选中的那一档 -->
+      <ClaudeSettingsProfileBar
+        v-if="activeFile.multiProfile"
+        ref="profileBar"
+        @update="onProfilesUpdate"
+      />
 
-      <!-- 影响范围横幅：两类文件字段重叠，必须让用户先看清自己在改哪一份 -->
-      <div
-        :class="[
-          'text-[length:var(--ui-text-d3)] px-3 py-2 rounded-md border',
-          activeFile.location === 'catmax-userdata'
-            ? 'border-sidebar-border bg-muted/30 text-muted-foreground'
-            : 'border-amber-500/30 bg-amber-500/5 text-amber-700 dark:text-amber-400',
-        ]"
+      <!-- 没选中任何档时不给编辑器入口：此时文件路径是个恒不存在的占位，
+           写进去也不会被注入，主进程那边也会直接拒绝保存。 -->
+      <p
+        v-if="!editorReady"
+        class="text-[length:var(--ui-text-d3)] text-muted-foreground px-3 py-2 bg-muted/30 rounded-md"
       >
-        <template v-if="activeFile.location === 'catmax-userdata'">
-          <strong class="font-medium text-foreground">只影响 catmax。</strong>
-          这份文件由 catmax 拥有，保存不会写入用户的后端配置目录。
-        </template>
-        <template v-else>
-          <strong class="font-medium">会影响命令行。</strong>
-          这是后端自己的真配置文件，保存后你在终端直接跑 {{ props.backendId }} 也会读到。
-        </template>
-      </div>
-
-      <div class="flex items-center gap-1.5 text-[length:var(--ui-text-d3)] text-muted-foreground">
-        <span>文件说明</span>
-        <HelpTooltip>{{ activeFile.description }}</HelpTooltip>
-      </div>
-
-      <!-- 敏感文件门禁：含明文密钥（codex auth.json / catmax 覆盖配置的 env 块），默认不渲染内容，点开才读 -->
-      <div
-        v-if="activeFile.sensitive && !revealed"
-        class="flex flex-col items-start gap-2 p-4 rounded-md border border-dashed border-sidebar-border"
-      >
-        <div class="flex items-center gap-2 text-[length:var(--ui-text-base)] text-foreground">
-          <LockIcon class="w-4 h-4" />
-          这个文件可能含明文凭证
-        </div>
-        <p class="text-[length:var(--ui-text-d3)] text-muted-foreground">
-          点开才会读取并显示内容。写盘时强制 0600 权限。
-          <template v-if="activeFile.id === 'codex.auth'">
-            改坏会导致 codex 需要重新登录（<code>codex login</code>）。
-          </template>
-          <template v-else> env 块里常放 ANTHROPIC_AUTH_TOKEN 之类的 API key。 </template>
-        </p>
-        <Button variant="outline" size="sm" @click="revealSensitive">
-          <EyeIcon class="w-3.5 h-3.5" />
-          显示并编辑
-        </Button>
-      </div>
+        选中上面的任一档，或点「新建」建一份，才能编辑覆盖配置的内容。
+      </p>
 
       <template v-else>
-        <!-- 编辑器：纯 textarea，等宽字体。不引入代码编辑器依赖——这里是几十行的配置文件。 -->
-        <textarea
-          v-model="draft"
-          spellcheck="false"
-          autocomplete="off"
-          autocorrect="off"
-          autocapitalize="off"
-          rows="16"
-          :disabled="loading"
-          class="w-full font-mono text-[length:var(--ui-text-d3)] leading-relaxed p-3 rounded-md border border-sidebar-border bg-background text-foreground resize-y focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:opacity-50"
-          :placeholder="loading ? '读取中…' : ''"
-          @keydown.meta.s.prevent="save()"
-          @keydown.ctrl.s.prevent="save()"
-        />
-
-        <!-- 语法校验状态：错误时给出行列，避免用户对着一坨报错找位置 -->
-        <div
-          v-if="syntax && !syntax.ok"
-          class="text-[length:var(--ui-text-d3)] text-destructive whitespace-pre-wrap"
-        >
-          {{ formatLocation(syntax) }}{{ syntax.message }}
-        </div>
-        <div
-          v-else-if="syntax?.ok && isDirty(activeFile.id)"
-          class="text-[length:var(--ui-text-d3)] text-success"
-        >
-          语法校验通过
-        </div>
-
-        <!-- 冲突提示：编辑期间文件被后端或外部工具改过，让用户选，不闷头覆盖 -->
-        <div
-          v-if="conflict"
-          class="flex flex-col gap-2 text-[length:var(--ui-text-d3)] px-3 py-2 rounded-md bg-amber-500/10 text-amber-700 dark:text-amber-400"
-        >
-          <span>文件在你编辑期间被外部修改过（可能是后端自己写的）。</span>
-          <div class="flex gap-2">
-            <Button variant="outline" size="sm" @click="load(activeFile.id, { force: true })">
-              丢弃我的修改，重新加载
-            </Button>
-            <Button variant="destructive" size="sm" @click="save({ force: true })">
-              仍然用我的内容覆盖
-            </Button>
-          </div>
-        </div>
-
-        <div class="flex items-center gap-2">
-          <Button :disabled="!canSave" @click="save()">
-            <SaveIcon class="w-3.5 h-3.5" />
-            {{ saving ? '保存中…' : activeFile.exists ? '保存' : '创建文件' }}
-          </Button>
-          <Button
-            variant="outline"
-            :disabled="!isDirty(activeFile.id) || saving"
-            @click="discard()"
+        <!-- 路径行：绝对路径 + 在文件夹中显示 + 重新加载 + 文档 -->
+        <div class="flex items-center gap-2 text-[length:var(--ui-text-d3)] text-muted-foreground">
+          <code class="flex-1 truncate font-mono" :title="activeFile.path">{{
+            activeFile.path
+          }}</code>
+          <button
+            class="hover:text-foreground cursor-pointer"
+            title="在文件夹中显示"
+            @click="reveal"
           >
-            放弃修改
-          </Button>
-          <span
-            v-if="statusMessage"
-            :class="['text-[length:var(--ui-text-d3)] ml-auto', statusClass]"
+            <FolderOpenIcon class="w-3.5 h-3.5" />
+          </button>
+          <button
+            class="hover:text-foreground cursor-pointer"
+            title="放弃修改并重新读取"
+            :disabled="loading"
+            @click="load(activeFile.id, { force: true })"
           >
-            {{ statusMessage }}
-          </span>
+            <RotateCcwIcon class="w-3.5 h-3.5" />
+          </button>
+          <button
+            class="hover:text-foreground cursor-pointer"
+            title="查看官方文档"
+            @click="openDocs"
+          >
+            <ExternalLinkIcon class="w-3.5 h-3.5" />
+          </button>
+        </div>
+
+        <!-- 影响范围横幅：两类文件字段重叠，必须让用户先看清自己在改哪一份 -->
+        <div
+          :class="[
+            'text-[length:var(--ui-text-d3)] px-3 py-2 rounded-md border',
+            activeFile.location === 'catmax-userdata'
+              ? 'border-sidebar-border bg-muted/30 text-muted-foreground'
+              : 'border-amber-500/30 bg-amber-500/5 text-amber-700 dark:text-amber-400',
+          ]"
+        >
+          <template v-if="activeFile.location === 'catmax-userdata'">
+            <strong class="font-medium text-foreground">只影响 catmax。</strong>
+            这份文件由 catmax 拥有，保存不会写入用户的后端配置目录。
+          </template>
+          <template v-else>
+            <strong class="font-medium">会影响命令行。</strong>
+            这是后端自己的真配置文件，保存后你在终端直接跑 {{ props.backendId }} 也会读到。
+          </template>
         </div>
 
         <div
           class="flex items-center gap-1.5 text-[length:var(--ui-text-d3)] text-muted-foreground"
         >
-          <span>保存后的生效方式</span>
-          <HelpTooltip>
-            <ul class="list-disc ml-5 space-y-0.5">
-              <li v-if="props.backendId === 'codex'">
-                codex 是 long-running 进程——已 spawn 的进程读不到新配置，切走 codex 再切回来才会重新
-                spawn
-              </li>
-              <li v-else-if="props.backendId === 'claude'">
-                claude 每个 turn 由 SDK 新起进程，下一个 turn 就会读到新配置
-              </li>
-              <li v-if="activeFile.location === 'catmax-userdata'">
-                这一层里<strong class="font-medium">没写的 key 会回落到本地配置</strong>——删掉一个
-                key 就等于把这项交还给 {{ props.backendId }} 自己的文件
-              </li>
-              <li v-if="activeFile.id === 'claude.catmaxSettings'">
-                例外：<code>permissions</code> 的 allow/deny 数组是和本地配置<strong
-                  class="font-medium"
-                  >取并集</strong
-                >，这一层只能加权限、减不了
-              </li>
-              <li>
-                这里改的是后端的配置文件，和上面「默认运行时配置」（catmax 自己的兜底值）互不覆盖
-              </li>
-            </ul>
-          </HelpTooltip>
+          <span>文件说明</span>
+          <HelpTooltip>{{ activeFile.description }}</HelpTooltip>
         </div>
+
+        <!-- 敏感文件门禁：含明文密钥（codex auth.json / catmax 覆盖配置的 env 块），默认不渲染内容，点开才读 -->
+        <div
+          v-if="activeFile.sensitive && !revealed"
+          class="flex flex-col items-start gap-2 p-4 rounded-md border border-dashed border-sidebar-border"
+        >
+          <div class="flex items-center gap-2 text-[length:var(--ui-text-base)] text-foreground">
+            <LockIcon class="w-4 h-4" />
+            这个文件可能含明文凭证
+          </div>
+          <p class="text-[length:var(--ui-text-d3)] text-muted-foreground">
+            点开才会读取并显示内容。写盘时强制 0600 权限。
+            <template v-if="activeFile.id === 'codex.auth'">
+              改坏会导致 codex 需要重新登录（<code>codex login</code>）。
+            </template>
+            <template v-else> env 块里常放 ANTHROPIC_AUTH_TOKEN 之类的 API key。 </template>
+          </p>
+          <Button variant="outline" size="sm" @click="revealSensitive">
+            <EyeIcon class="w-3.5 h-3.5" />
+            显示并编辑
+          </Button>
+        </div>
+
+        <template v-else>
+          <!-- 编辑器：纯 textarea，等宽字体。不引入代码编辑器依赖——这里是几十行的配置文件。 -->
+          <textarea
+            v-model="draft"
+            spellcheck="false"
+            autocomplete="off"
+            autocorrect="off"
+            autocapitalize="off"
+            rows="16"
+            :disabled="loading"
+            class="w-full font-mono text-[length:var(--ui-text-d3)] leading-relaxed p-3 rounded-md border border-sidebar-border bg-background text-foreground resize-y focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:opacity-50"
+            :placeholder="loading ? '读取中…' : ''"
+            @keydown.meta.s.prevent="save()"
+            @keydown.ctrl.s.prevent="save()"
+          />
+
+          <!-- 语法校验状态：错误时给出行列，避免用户对着一坨报错找位置 -->
+          <div
+            v-if="syntax && !syntax.ok"
+            class="text-[length:var(--ui-text-d3)] text-destructive whitespace-pre-wrap"
+          >
+            {{ formatLocation(syntax) }}{{ syntax.message }}
+          </div>
+          <div
+            v-else-if="syntax?.ok && isDirty(activeFile.path)"
+            class="text-[length:var(--ui-text-d3)] text-success"
+          >
+            语法校验通过
+          </div>
+
+          <!-- 冲突提示：编辑期间文件被后端或外部工具改过，让用户选，不闷头覆盖 -->
+          <div
+            v-if="conflict"
+            class="flex flex-col gap-2 text-[length:var(--ui-text-d3)] px-3 py-2 rounded-md bg-amber-500/10 text-amber-700 dark:text-amber-400"
+          >
+            <span>文件在你编辑期间被外部修改过（可能是后端自己写的）。</span>
+            <div class="flex gap-2">
+              <Button variant="outline" size="sm" @click="load(activeFile.id, { force: true })">
+                丢弃我的修改，重新加载
+              </Button>
+              <Button variant="destructive" size="sm" @click="save({ force: true })">
+                仍然用我的内容覆盖
+              </Button>
+            </div>
+          </div>
+
+          <div class="flex items-center gap-2">
+            <Button :disabled="!canSave" @click="save()">
+              <SaveIcon class="w-3.5 h-3.5" />
+              {{ saving ? '保存中…' : activeFile.exists ? '保存' : '创建文件' }}
+            </Button>
+            <Button
+              variant="outline"
+              :disabled="!isDirty(activeFile.path) || saving"
+              @click="discard()"
+            >
+              放弃修改
+            </Button>
+            <span
+              v-if="statusMessage"
+              :class="['text-[length:var(--ui-text-d3)] ml-auto', statusClass]"
+            >
+              {{ statusMessage }}
+            </span>
+          </div>
+
+          <div
+            class="flex items-center gap-1.5 text-[length:var(--ui-text-d3)] text-muted-foreground"
+          >
+            <span>保存后的生效方式</span>
+            <HelpTooltip>
+              <ul class="list-disc ml-5 space-y-0.5">
+                <li v-if="props.backendId === 'codex'">
+                  codex 是 long-running 进程——已 spawn 的进程读不到新配置，切走 codex
+                  再切回来才会重新 spawn
+                </li>
+                <li v-else-if="props.backendId === 'claude'">
+                  claude 每个 turn 由 SDK 新起进程，下一个 turn 就会读到新配置
+                </li>
+                <li v-if="activeFile.location === 'catmax-userdata'">
+                  这一层里<strong class="font-medium">没写的 key 会回落到本地配置</strong>——删掉一个
+                  key 就等于把这项交还给 {{ props.backendId }} 自己的文件
+                </li>
+                <li v-if="activeFile.id === 'claude.catmaxSettings'">
+                  例外：<code>permissions</code> 的 allow/deny 数组是和本地配置<strong
+                    class="font-medium"
+                    >取并集</strong
+                  >，这一层只能加权限、减不了
+                </li>
+                <li>
+                  这里改的是后端的配置文件，和上面「默认运行时配置」（catmax 自己的兜底值）互不覆盖
+                </li>
+              </ul>
+            </HelpTooltip>
+          </div>
+        </template>
       </template>
     </template>
 
@@ -252,9 +280,11 @@
 
 <script setup lang="ts">
 import BackendIcon from '@renderer/components/icons/BackendIcon.vue'
+import ClaudeSettingsProfileBar from '@renderer/components/settings/ClaudeSettingsProfileBar.vue'
 import HelpTooltip from '@renderer/components/settings/HelpTooltip.vue'
 import { Button } from '@renderer/components/ui/button'
 import { useSettingsStore } from '@renderer/stores/settings'
+import type { ClaudeSettingsProfilesSnapshot } from '@shared/backend/claude-settings-profiles'
 import type {
   BackendConfigFileContent,
   BackendConfigFileInfo,
@@ -272,7 +302,14 @@ import {
 } from 'lucide-vue-next'
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 
-/** 每个文件的编辑态。切 tab 不丢草稿——用户可能在两个文件之间来回对照着改。 */
+/**
+ * 每个文件的编辑态，**按绝对路径存**（不是文件 id）。
+ *
+ * 切 tab 不丢草稿——用户可能在两个文件之间来回对照着改。用 path 而不是 id 是因为
+ * `claude.catmaxSettings` 这个 id 现在指向"当前档"，切档后同一个 id 是另一个文件：
+ * 按 id 存会让上一档的草稿和 mtime 基线原封不动地落到新档上，保存时要么误判冲突、
+ * 要么把上一档的内容写进新档。按 path 存则切档天然换槽位，两档的草稿也各留各的。
+ */
 interface FileDraft {
   /** 上次从磁盘读到的那一版（含 mtimeMs 基线，写回时做冲突检测） */
   baseline: BackendConfigFileContent
@@ -303,9 +340,20 @@ const files = computed(() =>
   ),
 )
 const activeId = ref<string | null>(null)
+/** key 是文件绝对路径，见 FileDraft 注释 */
 const drafts = ref<Record<string, FileDraft>>({})
-/** 敏感文件被显式点开过的 id 集合——切走再回来仍需重新确认 */
+/**
+ * 敏感文件被显式点开过的 id 集合——切走再回来仍需重新确认。
+ * 这里刻意按 id 而不是 path：用户点开"catmax 覆盖配置"表达的是"我要看这一类文件"，
+ * 每切一档就再问一次纯属打断。
+ */
 const revealedIds = ref<string[]>([])
+/**
+ * Claude Settings Profiles: 当前选中的档 id（''=不启用覆盖）。
+ * 由 ClaudeSettingsProfileBar 推上来，只用于决定要不要给编辑器入口。
+ */
+const currentProfileId = ref<string>('')
+const profileBar = ref<{ refresh: () => Promise<void> } | null>(null)
 
 const loading = ref(false)
 const saving = ref(false)
@@ -315,22 +363,27 @@ const statusMessage = ref<string | null>(null)
 const statusKind = ref<'info' | 'success' | 'error'>('info')
 
 const activeFile = computed(() => files.value.find((f) => f.id === activeId.value) ?? null)
-const activeDraft = computed(() => (activeId.value ? (drafts.value[activeId.value] ?? null) : null))
+const activeDraft = computed(() =>
+  activeFile.value ? (drafts.value[activeFile.value.path] ?? null) : null,
+)
 const revealed = computed(() => !!activeId.value && revealedIds.value.includes(activeId.value))
 const syntax = computed(() => activeDraft.value?.syntax ?? null)
+
+/** 多档文件必须先有当前档才有可编辑的目标文件；普通文件恒为 true */
+const editorReady = computed(() => !activeFile.value?.multiProfile || currentProfileId.value !== '')
 
 const draft = computed({
   get: () => activeDraft.value?.draft ?? '',
   set: (value: string) => {
-    const id = activeId.value
-    const current = id ? drafts.value[id] : null
-    if (!id || !current) return
-    drafts.value = { ...drafts.value, [id]: { ...current, draft: value } }
+    const path = activeFile.value?.path
+    const current = path ? drafts.value[path] : null
+    if (!path || !current) return
+    drafts.value = { ...drafts.value, [path]: { ...current, draft: value } }
   },
 })
 
-function isDirty(id: string): boolean {
-  const state = drafts.value[id]
+function isDirty(path: string): boolean {
+  const state = drafts.value[path]
   if (!state) return false
   return state.draft !== state.baseline.content
 }
@@ -342,7 +395,7 @@ const canSave = computed(() => {
   const state = activeDraft.value
   if (!state || saving.value || loading.value) return false
   if (state.syntax && !state.syntax.ok) return false
-  return isDirty(state.baseline.id) || state.baseline.usingTemplate
+  return isDirty(state.baseline.path) || state.baseline.usingTemplate
 })
 
 const statusClass = computed(() =>
@@ -367,6 +420,20 @@ async function refreshList(): Promise<void> {
   allFiles.value = await window.api.backend.listConfigFiles()
 }
 
+/**
+ * Claude Settings Profiles: 档列表/当前档变了。
+ *
+ * 换档 = 换文件，`listConfigFiles()` 返回的 path 也跟着变，所以先刷文件列表再按新 path
+ * 惰性读 baseline（草稿按 path 存，上一档的草稿留在原槽位，切回去还在）。
+ * 这里刻意**不**回头调 profileBar.refresh()——那会再触发一次 update 事件，绕成死循环。
+ */
+async function onProfilesUpdate(snapshot: ClaudeSettingsProfilesSnapshot): Promise<void> {
+  currentProfileId.value = snapshot.currentId
+  conflict.value = false
+  await refreshList()
+  await ensureLoaded()
+}
+
 /** 当前选中的文件不属于当前后端时，落到该后端的第一个文件上（没有文件就清空）。 */
 async function syncActiveFile(): Promise<void> {
   if (activeId.value && files.value.some((f) => f.id === activeId.value)) return
@@ -385,32 +452,43 @@ async function selectFile(id: string): Promise<void> {
   activeId.value = id
   conflict.value = false
   setStatus(null)
-  const file = files.value.find((f) => f.id === id)
-  // 敏感文件默认不读——内容压根不进 renderer，直到用户点「显示并编辑」
-  if (file?.sensitive && !revealedIds.value.includes(id)) {
-    return
-  }
-  if (!drafts.value[id]) await load(id)
+  await ensureLoaded()
+}
+
+/**
+ * 当前选中的文件还没有草稿时读一份。
+ * 敏感文件默认不读——内容压根不进 renderer，直到用户点「显示并编辑」。
+ */
+async function ensureLoaded(): Promise<void> {
+  const file = activeFile.value
+  if (!file || !editorReady.value) return
+  if (file.sensitive && !revealedIds.value.includes(file.id)) return
+  if (!drafts.value[file.path]) await load(file.id)
 }
 
 async function revealSensitive(): Promise<void> {
-  const id = activeId.value
-  if (!id) return
-  revealedIds.value = [...revealedIds.value, id]
-  if (!drafts.value[id]) await load(id)
+  const file = activeFile.value
+  if (!file) return
+  revealedIds.value = [...revealedIds.value, file.id]
+  if (!drafts.value[file.path]) await load(file.id)
 }
 
-/** 从磁盘读一份新的 baseline。force=true 时连同已有草稿一起丢弃。 */
+/**
+ * 从磁盘读一份新的 baseline。force=true 时连同已有草稿一起丢弃。
+ *
+ * 槽位用**返回内容里的 path**，而不是传入的 id——多档文件同一个 id 在不同档下是不同文件，
+ * 只有主进程解析出的 path 才能唯一定位草稿该落在哪。
+ */
 async function load(id: string, options: { force?: boolean } = {}): Promise<void> {
   loading.value = true
   loadError.value = null
   conflict.value = false
   try {
     const content = await window.api.backend.readConfigFile({ id })
-    if (options.force || !drafts.value[id]) {
+    if (options.force || !drafts.value[content.path]) {
       drafts.value = {
         ...drafts.value,
-        [id]: { baseline: content, draft: content.content, syntax: null },
+        [content.path]: { baseline: content, draft: content.content, syntax: null },
       }
       if (options.force) setStatus('已重新加载', 'info')
     }
@@ -427,7 +505,7 @@ function discard(): void {
   if (!state) return
   drafts.value = {
     ...drafts.value,
-    [state.baseline.id]: { ...state, draft: state.baseline.content, syntax: null },
+    [state.baseline.path]: { ...state, draft: state.baseline.content, syntax: null },
   }
   conflict.value = false
   setStatus(null)
@@ -450,20 +528,22 @@ async function save(options: { force?: boolean } = {}): Promise<void> {
       // 新 baseline = 刚写进去的内容 + 新 mtime，之后的冲突检测从这一版起算
       drafts.value = {
         ...drafts.value,
-        [state.baseline.id]: {
+        [result.info.path]: {
           baseline: { ...result.info, content: state.draft, usingTemplate: false },
           draft: state.draft,
           syntax: { ok: true },
         },
       }
       await refreshList()
+      // 档列表里的「未创建」标记要跟着变
+      if (activeFile.value?.multiProfile) await profileBar.value?.refresh()
       setStatus(result.backupPath ? '已保存（旧内容已备份）' : '已保存', 'success')
       return
     }
     if (result.reason === 'invalid-syntax') {
       drafts.value = {
         ...drafts.value,
-        [state.baseline.id]: { ...state, syntax: result.syntax },
+        [state.baseline.path]: { ...state, syntax: result.syntax },
       }
       setStatus('语法有误，未写入', 'error')
       return
@@ -498,17 +578,18 @@ function openDocs(): void {
 // 保证 UI 的判定和保存时的判定是同一套逻辑，不会出现"UI 说没问题但保存被拒"）。
 let validateTimer: ReturnType<typeof setTimeout> | null = null
 watch(
-  () => (activeId.value ? drafts.value[activeId.value]?.draft : undefined),
+  () => activeDraft.value?.draft,
   (value) => {
     if (validateTimer) clearTimeout(validateTimer)
-    const id = activeId.value
-    if (!id || value === undefined) return
+    const file = activeFile.value
+    if (!file || value === undefined) return
+    const path = file.path
     validateTimer = setTimeout(async () => {
-      const result = await window.api.backend.validateConfigFile({ id, content: value })
-      const current = drafts.value[id]
+      const result = await window.api.backend.validateConfigFile({ id: file.id, content: value })
+      const current = drafts.value[path]
       // 校验期间内容可能又变了——只在还是同一份草稿时落结果
       if (current && current.draft === value) {
-        drafts.value = { ...drafts.value, [id]: { ...current, syntax: result } }
+        drafts.value = { ...drafts.value, [path]: { ...current, syntax: result } }
       }
     }, 400)
   },

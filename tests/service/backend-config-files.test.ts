@@ -30,6 +30,11 @@ const {
   writeBackendConfigFile,
 } = await import('@main/service/backend-config-files')
 
+const { createClaudeSettingsProfile, selectClaudeSettingsProfile } = await import(
+  '@main/service/claude-settings-profiles'
+)
+const { NO_CLAUDE_SETTINGS_PROFILE } = await import('@shared/backend/claude-settings-profiles')
+
 // CODEX_HOME / CLAUDE_CONFIG_DIR 就是生产代码解析配置目录的方式，
 // 测试直接用它们把两个后端指到临时目录，不用 mock fs。
 let tempDir: string
@@ -105,12 +110,32 @@ describe('validateConfigSyntax', () => {
 // catmax 覆盖层：这一份文件 catmax 自己拥有，编辑它绝不能碰用户的 ~/.claude。
 // 这几条是整个特性的核心保证，回归了就等于"应用里改配置把用户本地配置覆盖了"。
 describe('claude.catmaxSettings（catmax 覆盖层）', () => {
+  // Claude Settings Profiles: 这个 id 现在指向"当前选中的档"，所以先建一档再测内容读写。
+  let profilePath: string
+  beforeEach(() => {
+    const snapshot = createClaudeSettingsProfile({ name: '测试档' })
+    profilePath = snapshot.profiles[0]!.path
+  })
+
   test('落在 catmax userData，而不是后端配置目录', () => {
     const info = listBackendConfigFiles().find((f) => f.id === 'claude.catmaxSettings')
     expect(info?.location).toBe('catmax-userdata')
-    expect(info?.path).toBe(join(catmaxBackendConfigDir(), 'claude-settings.json'))
+    expect(info?.multiProfile).toBe(true)
+    expect(info?.path).toBe(profilePath)
+    expect(profilePath.startsWith(join(catmaxBackendConfigDir(), 'claude-profiles'))).toBe(true)
     // 关键否定断言：不在 CLAUDE_CONFIG_DIR 下
     expect(info?.path.startsWith(join(tempDir, 'claude'))).toBe(false)
+  })
+
+  test('没有选中任何档时拒绝写入——写了也不会被注入，不能留个静默失效的文件', () => {
+    selectClaudeSettingsProfile({ id: NO_CLAUDE_SETTINGS_PROFILE })
+    const result = writeBackendConfigFile({
+      id: 'claude.catmaxSettings',
+      content: '{"model":"nowhere"}\n',
+      expectedMtimeMs: null,
+    })
+    expect(result.ok).toBe(false)
+    expect(claudeOverrideSettingsPath()).toBeNull()
   })
 
   test('保存覆盖层不产生 ~/.claude 里的任何文件', () => {
@@ -138,8 +163,7 @@ describe('claude.catmaxSettings（catmax 覆盖层）', () => {
       content: '{"env":{"ANTHROPIC_AUTH_TOKEN":"sk-test"}}\n',
       expectedMtimeMs: null,
     })
-    const path = join(catmaxBackendConfigDir(), 'claude-settings.json')
-    expect(statSync(path).mode & 0o777).toBe(0o600)
+    expect(statSync(profilePath).mode & 0o777).toBe(0o600)
   })
 
   test('claudeOverrideSettingsPath：不存在返回 null，存在返回绝对路径', () => {
@@ -152,9 +176,7 @@ describe('claude.catmaxSettings（catmax 覆盖层）', () => {
       content: '{}\n',
       expectedMtimeMs: null,
     })
-    expect(claudeOverrideSettingsPath()).toBe(
-      join(catmaxBackendConfigDir(), 'claude-settings.json'),
-    )
+    expect(claudeOverrideSettingsPath()).toBe(profilePath)
   })
 
   test('和 claude.settings 是两个互不干扰的文件', () => {

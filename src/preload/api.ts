@@ -152,6 +152,22 @@ export const api = {
     revealConfigFile: requestMain<BackendHandlers, 'backend.revealConfigFile'>(
       IPC.BACKEND_REVEAL_CONFIG_FILE,
     ),
+    // Claude Settings Profiles: catmax 覆盖配置的多档管理（内容读写走上面的 *ConfigFile）
+    listClaudeProfiles: requestMain<BackendHandlers, 'backend.listClaudeProfiles'>(
+      IPC.BACKEND_LIST_CLAUDE_PROFILES,
+    ),
+    createClaudeProfile: requestMain<BackendHandlers, 'backend.createClaudeProfile'>(
+      IPC.BACKEND_CREATE_CLAUDE_PROFILE,
+    ),
+    renameClaudeProfile: requestMain<BackendHandlers, 'backend.renameClaudeProfile'>(
+      IPC.BACKEND_RENAME_CLAUDE_PROFILE,
+    ),
+    deleteClaudeProfile: requestMain<BackendHandlers, 'backend.deleteClaudeProfile'>(
+      IPC.BACKEND_DELETE_CLAUDE_PROFILE,
+    ),
+    selectClaudeProfile: requestMain<BackendHandlers, 'backend.selectClaudeProfile'>(
+      IPC.BACKEND_SELECT_CLAUDE_PROFILE,
+    ),
     // Protocol Bridge: 本机协议转换桥
     bridgeStatus: requestMain<BackendHandlers, 'backend.bridgeStatus'>(IPC.BACKEND_BRIDGE_STATUS),
     setBridgeCredential: requestMain<BackendHandlers, 'backend.setBridgeCredential'>(

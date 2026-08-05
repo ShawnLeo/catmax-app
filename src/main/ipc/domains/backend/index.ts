@@ -5,11 +5,14 @@ import { handleRendererRequest } from '../../typed'
 import {
   bridgeCredentialReady,
   cancelBackendInstall,
+  createClaudeSettingsProfile,
+  deleteClaudeSettingsProfile,
   getCurrentBackend,
   installBackend,
   interruptTurn,
   listBackendConfigFiles,
   listBackends,
+  listClaudeSettingsProfiles,
   listModels,
   listModelsFor,
   listTurnRuns,
@@ -17,10 +20,12 @@ import {
   readBackgroundTaskOutput,
   refreshModels,
   refreshModelsFor,
+  renameClaudeSettingsProfile,
   respondApproval,
   respondQuestion,
   getBridgeStatus,
   revealBackendConfigFile,
+  selectClaudeSettingsProfile,
   setBridgeCredential,
   testBridgeUpstream,
   slashCommands,
@@ -110,6 +115,27 @@ export function registerBackendHandlers(): void {
   handleRendererRequest<BackendHandlers, 'backend.revealConfigFile'>(
     'backend.revealConfigFile',
     revealBackendConfigFile,
+  )
+  // Claude Settings Profiles: catmax 覆盖配置的多档管理
+  handleRendererRequest<BackendHandlers, 'backend.listClaudeProfiles'>(
+    'backend.listClaudeProfiles',
+    listClaudeSettingsProfiles,
+  )
+  handleRendererRequest<BackendHandlers, 'backend.createClaudeProfile'>(
+    'backend.createClaudeProfile',
+    createClaudeSettingsProfile,
+  )
+  handleRendererRequest<BackendHandlers, 'backend.renameClaudeProfile'>(
+    'backend.renameClaudeProfile',
+    renameClaudeSettingsProfile,
+  )
+  handleRendererRequest<BackendHandlers, 'backend.deleteClaudeProfile'>(
+    'backend.deleteClaudeProfile',
+    deleteClaudeSettingsProfile,
+  )
+  handleRendererRequest<BackendHandlers, 'backend.selectClaudeProfile'>(
+    'backend.selectClaudeProfile',
+    selectClaudeSettingsProfile,
   )
   handleRendererRequest<BackendHandlers, 'backend.bridgeStatus'>(
     'backend.bridgeStatus',

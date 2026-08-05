@@ -31,7 +31,7 @@ import {
   writeSync,
 } from 'node:fs'
 import { homedir } from 'node:os'
-import { dirname, join } from 'node:path'
+import { basename, dirname, join } from 'node:path'
 
 import {
   BACKEND_CONFIG_BACKUP_KEEP,
@@ -46,10 +46,15 @@ import {
   type ConfigSyntaxError,
   type ConfigSyntaxResult,
 } from '@shared/backend/config-files'
-import type { BackendId } from '@shared/constants'
 import { app } from 'electron'
 import { parse as parseToml, TomlError } from 'smol-toml'
 
+import { catmaxBackendConfigDir, resolveBackendConfigDir } from './backend-config-paths'
+import {
+  currentClaudeProfilePath,
+  currentClaudeProfilePathOrPlaceholder,
+  hasCurrentClaudeProfile,
+} from './claude-settings-profiles'
 import { logger } from './logger'
 
 const log = logger.domain('backend-config-files')
@@ -60,35 +65,15 @@ const DEFAULT_FILE_MODE = 0o644
 /** 新建后端配置目录时用 0700——auth.json 就住在里面 */
 const CONFIG_DIR_MODE = 0o700
 
-/**
- * 后端配置目录。两个后端都支持用环境变量改默认位置，这里跟随——
- * 否则用户明明把 codex 指到别处，设置页却在编辑一个 codex 根本不读的文件。
- */
-export function resolveBackendConfigDir(backendId: BackendId): string {
-  if (backendId === 'codex') {
-    const override = process.env.CODEX_HOME?.trim()
-    return override ? override : join(homedir(), '.codex')
-  }
-  if (backendId === 'claude') {
-    const override = process.env.CLAUDE_CONFIG_DIR?.trim()
-    return override ? override : join(homedir(), '.claude')
-  }
-  return join(homedir(), `.${backendId}`)
-}
-
-/**
- * catmax 自己拥有的后端覆盖配置目录。和 backupRoot() 一样带非 Electron 回退，
- * 好让 vitest 里不 mock electron 也能跑。
- */
-export function catmaxBackendConfigDir(): string {
-  try {
-    return join(app.getPath('userData'), 'backend-settings')
-  } catch {
-    return join(homedir(), '.catmax', 'backend-settings')
-  }
-}
+// 路径解析住在单独的模块里（见其顶部注释：避免和 claude-settings-profiles 循环 import）。
+// 这里 re-export 保持既有 import 点不动。
+export { catmaxBackendConfigDir, resolveBackendConfigDir }
 
 export function resolveBackendConfigPath(descriptor: BackendConfigFileDescriptor): string {
+  // Claude Settings Profiles: 多档文件的路径由「当前选中的档」决定，descriptor.relativePath
+  // 在这条路径上已经不参与定位（它只剩下"迁移源文件名"这一个用途）。
+  if (descriptor.multiProfile) return currentClaudeProfilePathOrPlaceholder()
+
   const dir =
     descriptor.location === 'catmax-userdata'
       ? catmaxBackendConfigDir()
@@ -97,14 +82,15 @@ export function resolveBackendConfigPath(descriptor: BackendConfigFileDescriptor
 }
 
 /**
- * catmax 覆盖配置的绝对路径。不存在时返回 null——
- * 调用方（CladueAdapter）据此决定要不要给 SDK 传 `Options.settings`：
- * 传一个不存在的路径会让 SDK 报错，而"没有覆盖配置"应当等价于"全部走本地配置"。
+ * catmax 覆盖配置的绝对路径。返回 null 时调用方（ClaudeAdapter）完全不给 SDK 传
+ * `Options.settings`——传一个不存在的路径会让 SDK 报错，而"没有覆盖配置"应当
+ * 等价于"全部走本地配置"。
+ *
+ * 两种 null：用户显式选了"不启用覆盖"（没有当前档），或当前档还没落盘。
  */
 export function claudeOverrideSettingsPath(): string | null {
-  const descriptor = getBackendConfigFileDescriptor('claude.catmaxSettings')
-  if (!descriptor) return null
-  const path = resolveBackendConfigPath(descriptor)
+  const path = currentClaudeProfilePath()
+  if (path === null) return null
   try {
     return statSync(path).isFile() ? path : null
   } catch {
@@ -172,6 +158,8 @@ function describeConfigFile(descriptor: BackendConfigFileDescriptor): BackendCon
     format: descriptor.format,
     sensitive: descriptor.sensitive,
     docsUrl: descriptor.docsUrl,
+    // exactOptionalPropertyTypes：不是多档文件时整个字段不带，而不是显式 undefined
+    ...(descriptor.multiProfile ? { multiProfile: true } : {}),
     path,
     exists,
     size,
@@ -276,7 +264,11 @@ function backupExisting(
   sourcePath: string,
 ): string | null {
   try {
-    const dir = join(backupRoot(), descriptor.id)
+    // 多档文件按档分子目录——否则几份配置的备份混在一个目录里，
+    // 保留最近 10 份会被切换频繁的那一档挤掉别档的历史。
+    const dir = descriptor.multiProfile
+      ? join(backupRoot(), descriptor.id, basename(sourcePath, '.json'))
+      : join(backupRoot(), descriptor.id)
     mkdirSync(dir, { recursive: true, mode: CONFIG_DIR_MODE })
     // 冒号在 Windows 上不是合法文件名字符——ISO 串里的 : 和 . 全换成 -，
     // 换完仍然是定宽的字典序 == 时间序，轮转排序可以直接用文件名。
@@ -364,6 +356,16 @@ export function writeBackendConfigFile(args: WriteBackendConfigArgs): BackendCon
     return { ok: false, reason: 'invalid-syntax', syntax }
   }
 
+  // Claude Settings Profiles: 没有当前档时路径是个恒不存在的占位（见 claude-settings-profiles.ts），
+  // 真写进去也不会被注入。UI 在这种状态下不给编辑器入口，这里是防止绕过 UI 写出一个静默失效的文件。
+  if (descriptor.multiProfile && !hasCurrentClaudeProfile()) {
+    return {
+      ok: false,
+      reason: 'io-error',
+      message: '当前没有选中任何 catmax 覆盖配置，请先新建或选中一份',
+    }
+  }
+
   if (Buffer.byteLength(args.content, 'utf-8') > MAX_BACKEND_CONFIG_BYTES) {
     return {
       ok: false,
@@ -387,28 +389,6 @@ export function writeBackendConfigFile(args: WriteBackendConfigArgs): BackendCon
     const message = e instanceof Error ? e.message : String(e)
     log.error(`write failed for ${descriptor.id}:`, e)
     return { ok: false, reason: 'io-error', message }
-  }
-}
-
-/**
- * 删除某个后端配置文件。文件不存在视为成功（幂等）。
- *
- * Internal Beta Login: 退出登录时用来清掉 claude.catmaxSettings 里的密钥——
- * 这份覆盖文件是登录时自动生成的内测默认配置，退出后整体没意义，删文件比清字段干净
- * （避免残留半个配置被 SDK 当成有效覆盖层）。
- */
-export function deleteBackendConfigFile(id: string): { ok: boolean; message?: string } {
-  const descriptor = requireDescriptor(id)
-  const info = describeConfigFile(descriptor)
-  if (!info.exists) return { ok: true } // 幂等
-  try {
-    unlinkSync(info.path)
-    log.info(`deleted ${descriptor.id} (${info.path})`)
-    return { ok: true }
-  } catch (e) {
-    const message = e instanceof Error ? e.message : String(e)
-    log.error(`delete failed for ${descriptor.id}:`, e)
-    return { ok: false, message }
   }
 }
 

@@ -2,6 +2,7 @@
  * backend domain IPC 契约。
  * 函数签名即契约——main 实现，renderer 通过 window.api 调用。
  */
+import type { ClaudeSettingsProfilesSnapshot } from '../backend/claude-settings-profiles'
 import type {
   BackendConfigFileContent,
   BackendConfigFileInfo,
@@ -120,6 +121,30 @@ export type BackendHandlers = {
   }) => Promise<ConfigSyntaxResult>
   /** 在系统文件管理器里定位该文件；文件不存在时打开其所在目录 */
   'backend.revealConfigFile': (args: { id: string }) => Promise<void>
+  /**
+   * Claude Settings Profiles: catmax 覆盖配置的多档管理。
+   *
+   * 只管**档本身**（增删改名切换）；档内容的读写继续走上面的 `*ConfigFile`，
+   * 用同一个稳定 id `claude.catmaxSettings`——主进程按当前档解析路径。
+   * 所以每次切换/删除后 renderer 必须重新 `readConfigFile` 拿新的 baseline，
+   * 否则手上的 mtime 基线还是上一档的。
+   *
+   * 全部返回切换后的完整快照，省掉 renderer 自己维护一份可能不同步的镜像。
+   */
+  'backend.listClaudeProfiles': () => Promise<ClaudeSettingsProfilesSnapshot>
+  /** 新建并自动切过去。`copyFromId` 是"另存为"：从该档复制内容起手。 */
+  'backend.createClaudeProfile': (args: {
+    name: string
+    copyFromId?: string
+  }) => Promise<ClaudeSettingsProfilesSnapshot>
+  'backend.renameClaudeProfile': (args: {
+    id: string
+    name: string
+  }) => Promise<ClaudeSettingsProfilesSnapshot>
+  /** 连档带文件删掉；删的是当前档时回落到剩下的第一档 */
+  'backend.deleteClaudeProfile': (args: { id: string }) => Promise<ClaudeSettingsProfilesSnapshot>
+  /** 切换当前档；`id` 传空串表示不启用任何覆盖（完全走用户本地 ~/.claude） */
+  'backend.selectClaudeProfile': (args: { id: string }) => Promise<ClaudeSettingsProfilesSnapshot>
   /**
    * Protocol Bridge: 本机协议转换桥的状态。
    * 只回运行态和「凭证是否就绪」，**密钥本身永不过 IPC**。

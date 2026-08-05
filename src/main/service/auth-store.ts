@@ -44,8 +44,9 @@ import {
 } from '@shared/protocol/bridge-config'
 import { app } from 'electron'
 
-import { deleteBackendConfigFile, writeBackendConfigFile } from './backend-config-files'
+import { writeBackendConfigFile } from './backend-config-files'
 import { clearStoredCredential, setStoredCredential } from './bridge-credentials'
+import { ensureInternalBetaProfile, removeInternalBetaProfile } from './claude-settings-profiles'
 import { logger } from './logger'
 
 const log = logger.domain('auth-store')
@@ -163,12 +164,17 @@ export class AuthStore {
   /**
    * 把内测默认 Claude 覆盖配置写到 claude.catmaxSettings，密钥占位符替换成真实值。
    * 复用 writeBackendConfigFile：拿到 0600 权限 + 512KB 限制 + 原子写 + 备份。
+   *
+   * Claude Settings Profiles: 先切到内测专用档再写。
+   * 这里写的是 `force: true` 的整份覆盖——单档时代它会把用户手写的覆盖配置直接冲掉。
+   * 现在它只落在自己那一档上，用户的档一个字节都不动，登出时也能连档带文件删干净。
    */
   private writeClaudeDefaultOverride(secretKey: string): void {
     const content = CLAUDE_INTERNAL_DEFAULT_OVERRIDE.replace(
       ANTHROPIC_AUTH_TOKEN_PLACEHOLDER,
       secretKey,
     )
+    ensureInternalBetaProfile()
     const result = writeBackendConfigFile({
       id: 'claude.catmaxSettings',
       content,
@@ -186,14 +192,18 @@ export class AuthStore {
    * main 职责：清登录态 + 删 Claude 覆盖 + 清 bridge-credentials 密钥。
    * 桥 settings 的清理交给 renderer（走 settings.update IPC）。
    * 各步失败都不阻断退出（登录态优先）。
+   *
+   * Claude Settings Profiles: 只删内测那一档（连档带文件），用户自己建的档保留；
+   * 当前档若正是内测档，会回落到剩下的第一档，一档不剩才变成"不启用覆盖"。
    */
   logout(): AuthStatus {
     const state: AuthFile = { ...DEFAULT_STATE }
     this.cache = state
     writeFile(state)
-    const result = deleteBackendConfigFile('claude.catmaxSettings')
-    if (!result.ok) {
-      log.warn('退出登录时删除 Claude 覆盖配置失败，密钥可能仍残留在磁盘', result)
+    try {
+      removeInternalBetaProfile()
+    } catch (e) {
+      log.warn('退出登录时删除 Claude 内测覆盖配置失败，密钥可能仍残留在磁盘', e)
     }
     try {
       clearStoredCredential(INTERNAL_BETA_PROVIDER_ID)

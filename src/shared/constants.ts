@@ -77,6 +77,12 @@ export const IPC = {
   BACKEND_WRITE_CONFIG_FILE: 'backend.writeConfigFile',
   BACKEND_VALIDATE_CONFIG_FILE: 'backend.validateConfigFile',
   BACKEND_REVEAL_CONFIG_FILE: 'backend.revealConfigFile',
+  // Claude Settings Profiles: catmax 覆盖配置的多档管理（内容读写仍走上面的 *ConfigFile）
+  BACKEND_LIST_CLAUDE_PROFILES: 'backend.listClaudeProfiles',
+  BACKEND_CREATE_CLAUDE_PROFILE: 'backend.createClaudeProfile',
+  BACKEND_RENAME_CLAUDE_PROFILE: 'backend.renameClaudeProfile',
+  BACKEND_DELETE_CLAUDE_PROFILE: 'backend.deleteClaudeProfile',
+  BACKEND_SELECT_CLAUDE_PROFILE: 'backend.selectClaudeProfile',
   // Protocol Bridge: 本机协议转换桥（Responses ↔ Anthropic 等）
   BACKEND_BRIDGE_STATUS: 'backend.bridgeStatus',
   BACKEND_SET_BRIDGE_CREDENTIAL: 'backend.setBridgeCredential',

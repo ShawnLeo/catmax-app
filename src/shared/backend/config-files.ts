@@ -41,8 +41,22 @@ export interface BackendConfigFileDescriptor {
   id: BackendConfigFileId
   backendId: BackendId
   location: BackendConfigLocation
-  /** 相对所属目录（见 location）的路径。必须是纯文件名或不含 `..` 的相对路径。 */
+  /**
+   * 相对所属目录（见 location）的路径。必须是纯文件名或不含 `..` 的相对路径。
+   *
+   * `multiProfile: true` 的文件**不用这个字段定位**——路径由当前选中的档决定
+   * （见 main/service/claude-settings-profiles.ts）。这里保留的是单档时代的文件名，
+   * 它现在只有一个用途：首次启动时把旧文件迁移成第一档。
+   */
   relativePath: string
+  /**
+   * Claude Settings Profiles: 这个文件可以存多份、由用户选一份生效。
+   *
+   * 打开后 read/write/validate/reveal 的 `id` 依旧是这条 descriptor 的稳定 id，
+   * 但路径解析会转向「当前档」的文件——所以 adapter 的注入、warmup、编辑器全都自动跟随，
+   * 不需要各自认识档的概念。档的增删改查走单独的 IPC（`backend.*ClaudeSettingsProfile*`）。
+   */
+  multiProfile?: boolean
   /** UI 上的短标题，例如 "config.toml" */
   label: string
   /** UI 上的一句话说明——告诉用户这个文件管什么 */
@@ -140,9 +154,10 @@ export const BACKEND_CONFIG_FILES: readonly BackendConfigFileDescriptor[] = [
     backendId: 'claude',
     location: 'catmax-userdata',
     relativePath: 'claude-settings.json',
+    multiProfile: true,
     label: 'catmax 覆盖配置',
     description:
-      '只影响 catmax 内的会话，不会写入 ~/.claude。这里写了的 key 覆盖本地配置，没写的 key 回落到本地配置——删掉一个 key 就等于"这项交还给本地"。注意 permissions 数组是和本地取并集，这一层只能加权限、减不了。',
+      '只影响 catmax 内的会话，不会写入 ~/.claude。可以存多份、随时切换，当前选中的那份才生效。这里写了的 key 覆盖本地配置，没写的 key 回落到本地配置——删掉一个 key 就等于"这项交还给本地"。注意 permissions 数组是和本地取并集，这一层只能加权限、减不了。',
     format: 'json',
     // env 块常被用来放 ANTHROPIC_AUTH_TOKEN / ANTHROPIC_BASE_URL，按敏感文件对待：
     // 写盘强制 0600，UI 默认遮罩。
@@ -217,7 +232,12 @@ export interface BackendConfigFileInfo {
   format: BackendConfigFormat
   sensitive: boolean
   docsUrl: string
-  /** 主进程解析出的绝对路径（renderer 只做展示，不能用它反向请求读写） */
+  /** Claude Settings Profiles: 见 descriptor 上的同名字段。UI 据此决定要不要显示档位选择条 */
+  multiProfile?: boolean
+  /**
+   * 主进程解析出的绝对路径（renderer 只做展示，不能用它反向请求读写）。
+   * 多档文件的这个值会随「当前档」变化——renderer 的草稿槽位就是按它分的。
+   */
   path: string
   exists: boolean
   /** 不存在时为 0 */

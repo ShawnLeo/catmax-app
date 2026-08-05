@@ -1380,8 +1380,12 @@ export class ClaudeAdapter implements AgentBackend {
   // ============ catmax 覆盖配置注入 ============
 
   /**
-   * 把 catmax 自己的覆盖配置（userData/backend-settings/claude-settings.json）
-   * 交给 SDK 的 `Options.settings`。
+   * 把 catmax 自己的覆盖配置交给 SDK 的 `Options.settings`。
+   *
+   * Claude Settings Profiles: 具体是哪个文件由「当前选中的档」决定
+   * （userData/backend-settings/claude-profiles/<档 id>.json），
+   * `claudeOverrideSettingsPath()` 已经把这一层解析掉了——这里不认识档的概念。
+   * 用户选了「不启用」时它返回 null，等价于下面说的"没有覆盖配置"。
    *
    * ⚠️ 这里**故意不设 `settingSources`**。省略时 SDK 按 CLI 默认加载 user/project/local 三层，
    * 覆盖层落在优先级更高的 'flag' 层（managed > flag > user > project > local），于是
