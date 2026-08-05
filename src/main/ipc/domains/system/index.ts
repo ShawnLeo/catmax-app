@@ -8,6 +8,7 @@ import {
   openDialog,
   openExternal,
   saveImage,
+  takeTrayCommand,
   windowClose,
   windowIsAlwaysOnTop,
   windowIsMaximized,
@@ -46,6 +47,10 @@ export function registerSystemHandlers(): void {
     windowIsAlwaysOnTop,
   )
   handleRendererRequest<SystemHandlers, 'system.saveImage'>('system.saveImage', saveImage)
+  handleRendererRequest<SystemHandlers, 'system.takeTrayCommand'>(
+    'system.takeTrayCommand',
+    takeTrayCommand,
+  )
 }
 
 export type { SystemHandlers } from '@shared/ipc/system'

@@ -3,7 +3,13 @@ import { writeFileSync } from 'node:fs'
 
 import { parseSystemProxy } from '@main/backend/proxy-env'
 import { ctx } from '@main/context'
-import type { DetectedSystemProxy, OpenDialogArgs, PlatformInfo } from '@shared/ipc/system'
+import { takePendingTrayCommand } from '@main/tray'
+import type {
+  DetectedSystemProxy,
+  OpenDialogArgs,
+  PlatformInfo,
+  TrayCommandId,
+} from '@shared/ipc/system'
 import { dialog, net, shell } from 'electron'
 
 export const getPlatformInfo = async (): Promise<PlatformInfo> => {
@@ -156,6 +162,14 @@ export const windowToggleAlwaysOnTop = async (): Promise<boolean> => {
 /** 窗口控制：检查是否始终置顶。 */
 export const windowIsAlwaysOnTop = async (): Promise<boolean> => {
   return ctx.getMainWindow()?.isAlwaysOnTop() ?? false
+}
+
+/**
+ * Tray: 渲染层启动时来取"窗口是被托盘菜单拉起来的"这条命令。
+ * take-once 语义，取完主进程侧就清空，避免下次窗口重建时重放旧命令。
+ */
+export const takeTrayCommand = async (): Promise<TrayCommandId | null> => {
+  return takePendingTrayCommand()
 }
 
 /**

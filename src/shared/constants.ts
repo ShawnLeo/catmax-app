@@ -44,6 +44,8 @@ export const IPC = {
   SYSTEM_WINDOW_IS_ALWAYS_ON_TOP: 'system.windowIsAlwaysOnTop',
   // 图片预览下载：data:URL / http(s) URL → 弹保存对话框写盘
   SYSTEM_SAVE_IMAGE: 'system.saveImage',
+  /** Tray: 取走主进程暂存的托盘命令（窗口是被托盘点开的场景，见 main/tray.ts） */
+  SYSTEM_TAKE_TRAY_COMMAND: 'system.takeTrayCommand',
   // backend
   BACKEND_LIST: 'backend.list',
   BACKEND_CURRENT: 'backend.current',
@@ -141,6 +143,8 @@ export const PUSH = {
   PTY_EXIT: 'pty:exit',
   /** Unified Skill Center: 后端报告技能集合变了，renderer 重扫 */
   SKILLS_CHANGED: 'skills:changed',
+  /** Tray: 托盘右键菜单点了"新建会话"/"设置"，renderer 转交给 commandRegistry 执行 */
+  TRAY_COMMAND: 'system:trayCommand',
 } as const
 
 /** 存储相关 */
