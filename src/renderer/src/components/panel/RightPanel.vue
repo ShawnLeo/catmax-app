@@ -9,7 +9,7 @@
     :class="[
       'flex flex-col bg-card overflow-hidden',
       isOverlay
-        ? 'h-full border-l border-border shadow-xl'
+        ? 'h-full border-l border-border shadow-lg'
         : [
             'shrink-0',
             uiStore.panelDragging ? '' : 'transition-[width,border-color] duration-200 ease-out',
