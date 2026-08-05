@@ -29,6 +29,18 @@ export interface DetectedSystemProxy {
   source: 'macos-scutil' | 'windows-registry' | 'linux-env' | 'none'
 }
 
+/**
+ * Tray: 托盘菜单能触发的渲染层命令。
+ *
+ * 取值刻意就是 commandRegistry 的命令 id——主进程只负责报"用户点了哪一项"，
+ * 具体行为仍然只在 renderer/lib/commands.ts 里定义一份，不在主进程复制一遍路由逻辑。
+ */
+export type TrayCommandId = 'session.new' | 'app.go-settings'
+
+export type SystemPushEvents = {
+  'system:trayCommand': { command: TrayCommandId }
+}
+
 export type SystemHandlers = {
   'system.platformInfo': () => Promise<PlatformInfo>
   'system.openDialog': (args: OpenDialogArgs) => Promise<OpenDialogResult>
@@ -54,4 +66,11 @@ export type SystemHandlers = {
     /** 建议的文件名（不含目录） */
     suggestedName?: string
   }) => Promise<string | null>
+  /**
+   * Tray: 取走主进程暂存的托盘命令（take-once，取完即清）。
+   *
+   * 只在"托盘菜单把已关闭的窗口重新拉起来"时非空：那一刻渲染层还不存在，
+   * push 无处可发，主进程先存着，等渲染层起来自己来拿。
+   */
+  'system.takeTrayCommand': () => Promise<TrayCommandId | null>
 }

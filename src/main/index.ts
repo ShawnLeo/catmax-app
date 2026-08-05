@@ -7,9 +7,24 @@ import { registerAllHandlers } from './ipc/register'
 import { bridgeManager } from './protocol/manager'
 import { logger } from './service/logger'
 import { cleanupWarmupTranscripts } from './service/warmup-cleanup'
-import { createMainWindow } from './window'
+import { createTray } from './tray'
+import { createMainWindow, showMainWindow } from './window'
 
 const log = logger.domain('main')
+
+// Single Instance: 第二个实例直接退出，把已有窗口带到前台。
+// 除了体验问题，更重要的是两个进程会同时打开同一个 sqlite、抢同一个 Protocol Bridge 端口。
+// 用 app.exit(0) 而不是 app.quit()：quit 会触发下面的 before-quit 去 dispose 后端和 bridge，
+// 而这个副本压根没启动过它们，跑那套清理只会误伤第一个实例正在用的资源。
+// 注意 ESM 的 import 已经先跑完了，ctx 构造时 sqlite 已被打开——但这个副本毫秒级就退出，
+// 且 better-sqlite3 是 WAL 模式，短暂的并发打开是安全的。
+if (!app.requestSingleInstanceLock()) {
+  app.exit(0)
+}
+
+app.on('second-instance', () => {
+  showMainWindow()
+})
 
 // 启用 Chrome DevTools Protocol (CDP) 远程调试。
 // 必须在 app.whenReady() 之前调用——Chromium 在 renderer 初始化前读取这些 switch。
@@ -66,6 +81,10 @@ void app.whenReady().then(async () => {
   }
 
   createMainWindow()
+
+  // Tray: 必须在 whenReady 之后创建。图标资源缺失时 createTray 返回 null 并只打 warn，
+  // 托盘是增强入口，没有它 App 照常可用，不该让启动失败。
+  createTray()
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) {

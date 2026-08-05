@@ -195,3 +195,34 @@ export function createMainWindow(): BrowserWindow {
   ctx.registerWindow('main', win)
   return win
 }
+
+export interface ShowMainWindowResult {
+  win: BrowserWindow
+  /** true = 窗口是这次新建的，渲染层还没就绪，此刻广播过去的 push 会丢。 */
+  created: boolean
+}
+
+/**
+ * Tray / Single Instance: 把主窗口带到前台，是"点托盘图标"和"重复启动 App"的共同落点。
+ *
+ * 要覆盖三种状态，缺一种就会表现成"点了没反应"：
+ * - 已销毁：macOS 下 window-all-closed 不 quit，关掉窗口后进程还活着，只能重建；
+ * - 最小化：show() 对最小化窗口无效，必须先 restore()；
+ * - 隐藏 / 失焦：show() + focus()。
+ *
+ * macOS 还要额外一步：App 整体在后台时 win.focus() 只会让窗口在自己 App 内获得焦点，
+ * 不会把 App 切到前台，必须 app.focus({ steal: true })（steal 仅 macOS 支持）。
+ */
+export function showMainWindow(): ShowMainWindowResult {
+  const existing = ctx.getMainWindow()
+  if (!existing || existing.isDestroyed()) {
+    return { win: createMainWindow(), created: true }
+  }
+
+  if (existing.isMinimized()) existing.restore()
+  if (!existing.isVisible()) existing.show()
+  existing.focus()
+  if (process.platform === 'darwin') app.focus({ steal: true })
+
+  return { win: existing, created: false }
+}

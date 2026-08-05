@@ -7,7 +7,7 @@ import type { PtyHandlers, PtyPushEvents } from '@shared/ipc/pty'
 import type { SessionHandlers, SessionPushEvents } from '@shared/ipc/session'
 import type { SettingsHandlers } from '@shared/ipc/settings'
 import type { SkillsHandlers, SkillsPushEvents } from '@shared/ipc/skills'
-import type { SystemHandlers } from '@shared/ipc/system'
+import type { SystemHandlers, SystemPushEvents } from '@shared/ipc/system'
 import type { WorkspaceHandlers } from '@shared/ipc/workspace'
 import * as electron from 'electron'
 
@@ -75,6 +75,13 @@ export const api = {
       IPC.SYSTEM_WINDOW_IS_ALWAYS_ON_TOP,
     ),
     saveImage: requestMain<SystemHandlers, 'system.saveImage'>(IPC.SYSTEM_SAVE_IMAGE),
+    /** Tray: 取走主进程暂存的托盘命令（窗口是被托盘拉起来的场景），take-once。 */
+    takeTrayCommand: requestMain<SystemHandlers, 'system.takeTrayCommand'>(
+      IPC.SYSTEM_TAKE_TRAY_COMMAND,
+    ),
+    /** Tray: 窗口本来就活着时，托盘菜单的命令走这条 push。 */
+    onTrayCommand: (cb: (payload: SystemPushEvents['system:trayCommand']) => void) =>
+      subscribeToMainEvent<SystemPushEvents, 'system:trayCommand'>(PUSH.TRAY_COMMAND, cb),
   },
   backend: {
     list: requestMain<BackendHandlers, 'backend.list'>(IPC.BACKEND_LIST),
