@@ -103,7 +103,7 @@
           </p>
 
           <div
-            class="mt-5 flex flex-col items-center gap-2 text-[length:var(--ui-text-d3)] leading-none text-muted-foreground"
+            class="mt-5 flex flex-col items-center gap-3 text-[length:var(--ui-text-d3)] leading-none text-muted-foreground"
           >
             <div class="flex items-center justify-center gap-3">
               <span class="inline-flex items-center gap-1.5">

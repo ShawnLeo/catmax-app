@@ -87,6 +87,24 @@ describe('encodeRequest', () => {
     expect(body.max_tokens as number).toBeGreaterThan(16384)
   })
 
+  test('开思考时 budget 之外要留出完整的可见输出额度', () => {
+    // 回归：曾经是 Math.max(maxTokens, budget + 1024)，medium/high/xhigh 三档留给正文和
+    // 工具调用的空间都只有 1024 token。实测上游不把 thinking 卡在 budget 内，于是模型
+    // 思考完就被截断，响应里只剩 reasoning，codex 静默 task_complete。
+    for (const [effort, budget] of [
+      ['medium', 8192],
+      ['high', 16384],
+      ['xhigh', 32768],
+    ] as const) {
+      const body = encode(
+        baseRequest({ maxOutputTokens: null, reasoning: { enabled: true, effort } }),
+      )
+      const headroom = (body.max_tokens as number) - budget
+      expect((body.thinking as { budget_tokens: number }).budget_tokens).toBe(budget)
+      expect(headroom).toBe(DEFAULT_UPSTREAM_CAPABILITIES.defaultMaxOutputTokens)
+    }
+  })
+
   test('tool_result 块被提到 user 消息最前面', () => {
     const body = encode(
       baseRequest({

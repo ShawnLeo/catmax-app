@@ -358,6 +358,33 @@ describe('createResponseEncoder', () => {
     expect(sse).toContain('半句话')
   })
 
+  test('撞 max_tokens 且只有 reasoning：补一个文本 item，不让 codex 静默收工', () => {
+    const sse = encodeAll([
+      { type: 'block_start', index: 0, block: { kind: 'reasoning' } },
+      { type: 'block_delta', index: 0, delta: '想了很久' },
+      { type: 'block_end', index: 0 },
+      { type: 'end', stopReason: 'max_tokens' },
+    ])
+    expect(sse).toContain('catmax bridge')
+    expect(sse).toContain('max_tokens')
+    // 补出来的必须是完整配对的 message item，否则 codex 侧解不出来
+    expect(eventNames(sse).filter((n) => n === 'response.output_item.added')).toHaveLength(2)
+    expect(eventNames(sse).filter((n) => n === 'response.output_item.done')).toHaveLength(2)
+    expect(eventNames(sse).filter((n) => n === 'response.completed')).toHaveLength(1)
+    expect(sse).toContain('"reason":"max_output_tokens"')
+  })
+
+  test('撞 max_tokens 但已有可见产出：不插旁白', () => {
+    const sse = encodeAll([
+      { type: 'block_start', index: 0, block: { kind: 'text' } },
+      { type: 'block_delta', index: 0, delta: '正文' },
+      { type: 'block_end', index: 0 },
+      { type: 'end', stopReason: 'max_tokens' },
+    ])
+    expect(sse).not.toContain('catmax bridge')
+    expect(eventNames(sse).filter((n) => n === 'response.output_item.done')).toHaveLength(1)
+  })
+
   test('一个字都没吐就断流：报 failed 而不是伪装成功', () => {
     const sse = encodeAll([], 'truncated')
     expect(eventNames(sse)).toContain('response.failed')

@@ -89,12 +89,12 @@ const props = defineProps<{
   running?: boolean | undefined
 }>()
 
-// A live turn starts open and stays where the user left it. A freshly loaded history starts closed.
+// A live turn starts open, then auto-collapses when it ends. A freshly loaded history starts closed.
 const open = ref(props.running === true)
 watch(
   () => props.running,
   (running) => {
-    if (running) open.value = true
+    open.value = running === true
   },
 )
 
