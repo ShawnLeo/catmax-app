@@ -137,16 +137,36 @@ watch(
   },
   { immediate: true },
 )
+
+/**
+ * running → false 的瞬间冻结 turn 结束时刻。completed 态用它算「首个活动起 → 结束」
+ * 的总时长——跟 running 计时同口径，避免回落到 reasoning 的「思考时长」
+ * （后者通常远小于总时长，会被 durationLabel 的 Math.max(1, …) 拉成"1s"）。
+ *
+ * 仅覆盖实时流刚结束的 turn：历史回放时 message.createdAt = 0，activityStartedAt
+ * 也为 0，下面的 > 0 守卫会跳过本路，回落到 reasoning.durationMs（app-server 权威值）。
+ */
+const turnEndedAt = ref<number | undefined>(undefined)
+watch(
+  () => props.running,
+  (running, prev) => {
+    if (prev && !running && activityStartedAt.value !== undefined && activityStartedAt.value > 0) {
+      turnEndedAt.value = Date.now()
+    }
+  },
+)
 onUnmounted(() => {
   if (tickTimer) clearInterval(tickTimer)
 })
 
 /**
- * 顶部状态行耗时（毫秒），三路取值优先级递减：
+ * 顶部状态行耗时（毫秒），取值优先级递减：
  *   1. running 态：now - activityStartedAt（实时递增，处理中态专用）
- *   2. completed 态、有 reasoning：reasoning.durationMs（历史回放）或 endedAt - startedAt（实时流结束）
- *   3. completed 态、无 reasoning：所有 codex_activity 块 durationMs 之和（兜底）
- * 三路都拿不到 → undefined → durationLabel 为空，不显示。
+ *   2. completed 态：reasoning.durationMs（历史回放，app-server 的 turn.durationMs 权威值）
+ *   3. completed 态（实时流刚结束）：turnEndedAt - activityStartedAt（与 running 同口径的总时长）
+ *   4. completed 态、有 reasoning 边界：endedAt - startedAt（思考时长，兜底）
+ *   5. completed 态、无 reasoning：所有 codex_activity 块 durationMs 之和（兜底）
+ * 都拿不到 → undefined → durationLabel 为空，不显示。
  */
 const durationMs = computed(() => {
   if (props.running) {
@@ -157,6 +177,15 @@ const durationMs = computed(() => {
     (block): block is ReasoningContentBlock => block.type === 'reasoning',
   )
   if (reasoning?.durationMs !== undefined) return reasoning.durationMs
+  // 实时流刚结束：用与 running 计时同口径的「首个活动起 → 结束」总时长，
+  // 不回落到 reasoning 思考时长（模型很快决定动手时思考时长≈0，会被拉成"1s"）。
+  if (
+    turnEndedAt.value !== undefined &&
+    activityStartedAt.value !== undefined &&
+    activityStartedAt.value > 0
+  ) {
+    return Math.max(0, turnEndedAt.value - activityStartedAt.value)
+  }
   if (reasoning?.startedAt !== undefined && reasoning.endedAt !== undefined) {
     return Math.max(0, reasoning.endedAt - reasoning.startedAt)
   }
