@@ -85,6 +85,10 @@ export const api = {
     takeTrayCommand: requestMain<SystemHandlers, 'system.takeTrayCommand'>(
       IPC.SYSTEM_TAKE_TRAY_COMMAND,
     ),
+    /** Tray: 上报托盘菜单门控条件（路由 / 工作区变化时）。 */
+    setTrayContext: requestMain<SystemHandlers, 'system.setTrayContext'>(
+      IPC.SYSTEM_SET_TRAY_CONTEXT,
+    ),
     /** Tray: 窗口本来就活着时，托盘菜单的命令走这条 push。 */
     onTrayCommand: (cb: (payload: SystemPushEvents['system:trayCommand']) => void) =>
       subscribeToMainEvent<SystemPushEvents, 'system:trayCommand'>(PUSH.TRAY_COMMAND, cb),

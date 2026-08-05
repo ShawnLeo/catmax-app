@@ -51,9 +51,10 @@ export async function registerDefaultCommands(): Promise<void> {
     category: 'Session',
     keywords: ['session', 'new', 'chat'],
     shortcut: 'mod+n',
-    action: () => {
-      const s = useSessionStore()
-      s.setCurrent('')
+    action: async () => {
+      // 三个 store 都要动，逻辑集中在 lib/new-session.ts（与侧边栏按钮共用一份）。
+      const { startNewSession } = await import('@renderer/lib/new-session')
+      await startNewSession()
       void router.push('/chat')
     },
   })

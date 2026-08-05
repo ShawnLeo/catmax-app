@@ -7,9 +7,10 @@ import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 
 import { PUSH } from '@shared/constants'
-import { type TrayCommandId } from '@shared/ipc/system'
+import { type TrayCommandId, type TrayContext } from '@shared/ipc/system'
 import { app, Menu, nativeImage, nativeTheme, Tray, type NativeImage } from 'electron'
 
+import { ctx } from './context'
 import { logger } from './service/logger'
 import { showMainWindow } from './window'
 
@@ -32,6 +33,17 @@ export function takePendingTrayCommand(): TrayCommandId | null {
   const command = pendingCommand
   pendingCommand = null
   return command
+}
+
+/**
+ * Tray Gating: 渲染层上报的门控条件（见 shared/ipc/system.ts 的 TrayContext）。
+ *
+ * 初值 false 是安全侧：窗口还没起来 / 已经关掉时，"新建会话"本来就无处可去。
+ */
+let trayContext: TrayContext = { canCreateSession: false }
+
+export function setTrayContext(next: TrayContext): void {
+  trayContext = next
 }
 
 /**
@@ -90,7 +102,28 @@ function dispatchTrayCommand(command: TrayCommandId): void {
   win.webContents.send(PUSH.TRAY_COMMAND, { command })
 }
 
+/**
+ * Tray Gating: 每次右键弹出时重建菜单，而不是启动时建一次留着。
+ *
+ * 菜单项的启用状态取决于登录态和当前路由，两者都会在 App 运行期间变。
+ * 与其订阅每一处变化再 setContextMenu，不如在唯一会被看见的那一刻现算——
+ * 弹出瞬间读到的状态必然是最新的，也就不存在"忘了在某个入口刷新菜单"这类漏。
+ *
+ * 门控规则：
+ * - 未登录：路由守卫会把一切导航拦回 /login，所以「新建会话」「设置」点了也只会
+ *   弹到登录页，一律置灰。用 enabled: false 而不是隐藏——菜单项数量保持稳定，
+ *   用户看得见功能存在、只是当前不可用，不会以为版本缺功能。
+ * - 「退出应用」始终可点：它不经过渲染层，未登录时也必须留给用户退出的路，
+ *   否则托盘上只剩一个打不开有效界面的图标。
+ *
+ * 还要额外看窗口是否活着：macOS 关窗后进程不退，trayContext 会停在关窗前那一刻的值，
+ * 用户在 /chat 关掉窗口后右键仍会看到「新建会话」可点，点下去却是新窗口从欢迎页启动，
+ * 命令落到一个还没有工作区的页面上。窗口不在就一律当作不能建会话。
+ */
 function buildMenu(): Menu {
+  const loggedIn = ctx.authStore.getStatus().loggedIn
+  const windowAlive = !!ctx.getMainWindow()
+
   return Menu.buildFromTemplate([
     {
       label: '打开应用',
@@ -99,8 +132,12 @@ function buildMenu(): Menu {
       },
     },
     { type: 'separator' },
-    { label: '新建会话', click: () => dispatchTrayCommand('session.new') },
-    { label: '设置', click: () => dispatchTrayCommand('app.go-settings') },
+    {
+      label: '新建会话',
+      enabled: loggedIn && windowAlive && trayContext.canCreateSession,
+      click: () => dispatchTrayCommand('session.new'),
+    },
+    { label: '设置', enabled: loggedIn, click: () => dispatchTrayCommand('app.go-settings') },
     { type: 'separator' },
     {
       label: '退出应用',
@@ -126,8 +163,6 @@ export function createTray(): Tray | null {
   tray = new Tray(image)
   tray.setToolTip('Catmax')
 
-  const menu = buildMenu()
-
   // 关键：不调 tray.setContextMenu()。一旦设了 context menu，Windows 上左键单击也会
   // 弹菜单、拿不到 click 事件，macOS 上 click/double-click 会失效
   // （electron/electron#24196、#5058）。改成两个事件里手动处理，两个平台行为才一致。
@@ -135,7 +170,7 @@ export function createTray(): Tray | null {
     showMainWindow()
   })
   tray.on('right-click', () => {
-    tray?.popUpContextMenu(menu)
+    tray?.popUpContextMenu(buildMenu())
   })
 
   // Windows 任务栏在浅色/深色之间切换时换一套图标；macOS 是模板图，系统自己反色，不用管。

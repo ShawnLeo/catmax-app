@@ -37,6 +37,19 @@ export interface DetectedSystemProxy {
  */
 export type TrayCommandId = 'session.new' | 'app.go-settings'
 
+/**
+ * Tray: 渲染层上报的托盘菜单门控条件。
+ *
+ * 为什么只有 canCreateSession 一项、而没有 loggedIn——登录态的真相源在主进程
+ * （auth-store 落盘的 auth.json），主进程自己读就是权威值，而且窗口关掉后它依然准；
+ * 反过来「当前是不是停在能建会话的页面」只有渲染层知道路由和工作区，主进程无从判断，
+ * 也不该把路由规则在主进程复制一份（与 TrayCommandId 的分工一致）。
+ */
+export interface TrayContext {
+  /** 当前页面允许新建会话：已登录 + 停在 /chat + 有选中的工作区。 */
+  canCreateSession: boolean
+}
+
 export type SystemPushEvents = {
   'system:trayCommand': { command: TrayCommandId }
 }
@@ -73,4 +86,11 @@ export type SystemHandlers = {
    * push 无处可发，主进程先存着，等渲染层起来自己来拿。
    */
   'system.takeTrayCommand': () => Promise<TrayCommandId | null>
+  /**
+   * Tray: 上报托盘菜单的门控条件（路由 / 工作区变化时调）。
+   *
+   * 主进程只存不算——菜单在右键弹出的那一刻才用最新值重建，
+   * 所以这里漏报一次最多让某一项的启用状态慢一拍，不会留下错误的常驻菜单。
+   */
+  'system.setTrayContext': (args: TrayContext) => Promise<void>
 }

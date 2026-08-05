@@ -8,6 +8,7 @@ import {
   openDialog,
   openExternal,
   saveImage,
+  setTrayContext,
   takeTrayCommand,
   windowClose,
   windowIsAlwaysOnTop,
@@ -50,6 +51,10 @@ export function registerSystemHandlers(): void {
   handleRendererRequest<SystemHandlers, 'system.takeTrayCommand'>(
     'system.takeTrayCommand',
     takeTrayCommand,
+  )
+  handleRendererRequest<SystemHandlers, 'system.setTrayContext'>(
+    'system.setTrayContext',
+    setTrayContext,
   )
 }
 

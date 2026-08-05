@@ -46,6 +46,8 @@ export const IPC = {
   SYSTEM_SAVE_IMAGE: 'system.saveImage',
   /** Tray: 取走主进程暂存的托盘命令（窗口是被托盘点开的场景，见 main/tray.ts） */
   SYSTEM_TAKE_TRAY_COMMAND: 'system.takeTrayCommand',
+  /** Tray: 渲染层上报托盘菜单的门控条件（当前页面能否新建会话） */
+  SYSTEM_SET_TRAY_CONTEXT: 'system.setTrayContext',
   // backend
   BACKEND_LIST: 'backend.list',
   BACKEND_CURRENT: 'backend.current',

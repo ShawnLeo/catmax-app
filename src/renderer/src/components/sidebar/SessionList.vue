@@ -90,11 +90,10 @@
 
 <script setup lang="ts">
 import { ContextMenu, type ContextMenuItem } from '@renderer/components/ui/context-menu'
-import { toPlainWorkspaceFolders } from '@renderer/lib/workspace-folder-context'
+import { startNewSession } from '@renderer/lib/new-session'
 import { useBackendStore } from '@renderer/stores/backend'
 import { useMessageStore } from '@renderer/stores/message'
 import { useSessionStore } from '@renderer/stores/session'
-import { useSettingsStore } from '@renderer/stores/settings'
 import { useWorkspaceStore } from '@renderer/stores/workspace'
 import { type BackendId } from '@shared/constants'
 import type { SessionView } from '@shared/domain'
@@ -116,7 +115,6 @@ import SessionItem from './SessionItem.vue'
 const workspaceStore = useWorkspaceStore()
 const sessionStore = useSessionStore()
 const backendStore = useBackendStore()
-const settings = useSettingsStore()
 
 /** 「扫描导入」对话框显隐——点按钮打开，dialog 关闭时刷新会话列表 */
 const importDialogOpen = ref(false)
@@ -372,44 +370,9 @@ async function removeSession(id: string): Promise<void> {
   await sessionStore.remove(id)
 }
 
-/**
- * 新建会话——先切到设置里的默认后端，再清空当前会话。
- *
- * 必须切的原因：onSend 用 backendStore.currentId（当前 adapter）创建会话，
- * 如果不切，刚浏览过 claude 会话后点「新建会话」会以 claude adapter 起线程，
- * 但默认后端可能是 codex——发出去的消息会建出 backend 不匹配的会话。
- * 默认后端不可用时静默跳过（沿用当前 adapter，让用户至少能发消息）。
- *
- * Claude 会在清空后异步预热共享 prompt cache。预热使用独立临时 session，
- * 不提前创建 Catmax 用户会话；用户发送首条真实消息时仍走原来的延迟创建流程。
- */
+/** 新建会话。实现在 lib/new-session.ts——命令面板 / ⌘N / 托盘菜单共用同一份。 */
 async function newSession(): Promise<void> {
-  const def = settings.settings?.defaultBackend
-  if (def && def !== backendStore.currentId && isBackendAvailable(def)) {
-    await backendStore.switchTo(def)
-  }
-  sessionStore.setCurrent('')
-  messageStore.setCurrentSession(null)
-
-  const workspace = workspaceStore.currentWorkspace
-  if (backendStore.currentId !== 'claude' || !workspace) return
-
-  // 使用最近一次 Claude 运行配置，使 Warmup 的 model/effort 尽量匹配随后发送的首条消息。
-  // fire-and-forget：点击新建后 UI 立即可输入，预热失败也不影响真实会话。
-  void (async () => {
-    try {
-      const last = await window.api.session.getLastRuntimeConfig()
-      const config: Parameters<typeof window.api.backend.warmup>[0]['config'] = {
-        cwd: workspace.path,
-        workspaceFolders: toPlainWorkspaceFolders(workspace.folders),
-      }
-      if (last?.backend === 'claude' && last.model) config.model = last.model
-      if (last?.backend === 'claude' && last.effort) config.effort = last.effort
-      await window.api.backend.warmup({ id: 'claude', config })
-    } catch (error) {
-      console.warn('[SessionList] Claude warmup failed:', error)
-    }
-  })()
+  await startNewSession()
 }
 
 /** 手动刷新当前工作区，并与当前后端的真实会话状态重新对账。 */

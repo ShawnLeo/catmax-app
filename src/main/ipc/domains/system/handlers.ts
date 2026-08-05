@@ -3,12 +3,13 @@ import { writeFileSync } from 'node:fs'
 
 import { parseSystemProxy } from '@main/backend/proxy-env'
 import { ctx } from '@main/context'
-import { takePendingTrayCommand } from '@main/tray'
+import { setTrayContext as applyTrayContext, takePendingTrayCommand } from '@main/tray'
 import type {
   DetectedSystemProxy,
   OpenDialogArgs,
   PlatformInfo,
   TrayCommandId,
+  TrayContext,
 } from '@shared/ipc/system'
 import { dialog, net, shell } from 'electron'
 
@@ -170,6 +171,14 @@ export const windowIsAlwaysOnTop = async (): Promise<boolean> => {
  */
 export const takeTrayCommand = async (): Promise<TrayCommandId | null> => {
   return takePendingTrayCommand()
+}
+
+/**
+ * Tray: 渲染层上报托盘菜单的门控条件（路由 / 工作区 / 登录态变化时）。
+ * 只存不算——菜单在右键弹出那一刻才用最新值重建（见 main/tray.ts 的 buildMenu）。
+ */
+export const setTrayContext = async (args: TrayContext): Promise<void> => {
+  applyTrayContext(args)
 }
 
 /**
