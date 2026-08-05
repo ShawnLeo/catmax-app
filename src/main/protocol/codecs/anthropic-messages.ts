@@ -229,8 +229,15 @@ export function encodeAnthropicRequest(ir: IrRequest, caps: UpstreamCapabilities
   const maxTokens = ir.maxOutputTokens ?? caps.defaultMaxOutputTokens
   const body: Record<string, unknown> = {
     model: ir.model,
-    // Anthropic 的 max_tokens 是必填项，且必须大于 thinking budget
-    max_tokens: thinkingEnabled ? Math.max(maxTokens, budget + 1024) : maxTokens,
+    // Anthropic 的 max_tokens 是必填项，且**包含** thinking 的消耗，所以开思考时必须在
+    // 可见输出额度之上再加一整份 budget，而不是 Math.max(maxTokens, budget + 1024)。
+    //
+    // 后者留给正文和 tool call 的空间在 medium/high/xhigh 三档都恰好是 1024 token，
+    // 而实测上游并不把 thinking 卡在 budget 内（GLM 在 budget=2048 时烧满了 3072 的
+    // 全部额度），于是模型思考完就被截断：响应里只有 reasoning，没有 message、没有
+    // function_call，stop_reason=max_tokens。codex 收到的是一个合法的、没有工具调用的
+    // 完成响应，直接 task_complete —— 用户看到的就是「执行到一半停住不动」，且全程无报错。
+    max_tokens: thinkingEnabled ? budget + maxTokens : maxTokens,
     messages: encodeMessages(ir.messages, caps, thinkingEnabled),
     stream: ir.stream,
   }

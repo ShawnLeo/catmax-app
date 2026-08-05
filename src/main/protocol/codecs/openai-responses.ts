@@ -348,6 +348,11 @@ function stopReasonToStatus(reason: IrStopReason): string {
   return reason === 'max_tokens' ? 'incomplete' : 'completed'
 }
 
+/** 撞上 max_tokens 且没有任何可见产出时，替上游说的一句话（见 emitTruncationNotice） */
+const TRUNCATION_NOTICE =
+  '[catmax bridge] 本轮输出在思考阶段就撞到了上游的 max_tokens 上限，模型没来得及给出正文或工具调用。' +
+  '可在设置 → 协议桥 → 当前上游的「默认最大输出 token」调大该值，或把推理强度调低一档。'
+
 /**
  * Responses SSE 编码器。
  *
@@ -597,6 +602,18 @@ class ResponsesEncoder implements ResponseEncoder {
     for (const index of [...this.blocks.keys()].sort((a, b) => a - b)) {
       frames.push(...this.closeBlock(index))
     }
+
+    // Bridge 截断可见化：撞上 max_tokens 且这一轮**只**产出了 reasoning 时，补一个
+    // 文本 item 说明原因。
+    //
+    // 不补的话这里发出去的是一个合法的、没有 message 也没有 function_call 的
+    // response.completed，codex 认定该轮做完 → task_complete(last_agent_message=null)，
+    // 既不重试也不报错，用户看到的是「执行到一半停住」且无任何线索。上游的 error
+    // 通知在这条路径上根本不存在，所以唯一能让用户知情的位置就是这里。
+    if (kind === 'completed' && (stopReason ?? this.stopReason) === 'max_tokens') {
+      frames.push(...this.emitTruncationNotice())
+    }
+
     this.terminated = true
 
     if (kind === 'error') {
@@ -613,6 +630,28 @@ class ResponsesEncoder implements ResponseEncoder {
     }
     frames.push(encodeSseFrame('response.completed', { type: 'response.completed', response }))
     return frames
+  }
+
+  /**
+   * 只在「本轮没有任何可见产出」时才补：已经吐出过正文或工具调用的截断，codex 会把
+   * 已有内容正常呈现，用户看得见发生了什么，再插一段旁白反而是噪音。
+   */
+  private emitTruncationNotice(): Buffer[] {
+    const hasVisibleOutput = this.completedItems.some((entry) => {
+      const type = (entry.item as { type?: unknown } | null)?.type
+      return type === 'message' || type === 'function_call'
+    })
+    if (hasVisibleOutput) return []
+
+    // 用一个不会和上游 index 撞车的 key，走正常的 open/delta/close 三步，
+    // 让 added/done 配对和 output_index 分配保持编码器的既有不变量。
+    const index = Number.MAX_SAFE_INTEGER
+    if (this.blocks.has(index)) return []
+    return [
+      ...this.openBlock(index, { kind: 'text' }),
+      ...this.pushDelta(index, TRUNCATION_NOTICE),
+      ...this.closeBlock(index),
+    ]
   }
 
   private itemValue(block: EncoderBlock, status: 'in_progress' | 'completed'): unknown {
