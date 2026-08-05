@@ -8,11 +8,11 @@
   -->
   <aside
     :class="[
-      'flex flex-col bg-sidebar overflow-hidden',
+      'flex flex-col overflow-hidden',
       isOverlay
-        ? 'h-full shadow-xl'
+        ? 'h-full shadow-lg bg-sidebar/80 backdrop-blur-sm'
         : [
-            'shrink-0',
+            'shrink-0 bg-sidebar',
             // 拖拽 resize 期间禁用 transition（否则动画追赶鼠标造成卡顿）；
             // 仅折叠/展开切换时保留过渡动画。
             uiStore.panelDragging ? '' : 'transition-[width] duration-200 ease-in-out',
@@ -23,7 +23,10 @@
     <!-- 内层固定宽度容器：折叠时外层宽度收 0 把它裁掉，内层保持原宽避免内容被挤压重排 -->
     <div class="flex flex-col h-full" :style="{ width: uiStore.sidebarWidth + 'px' }">
       <!-- 右侧内阴影只覆盖工作区 + 会话列表，不延伸到底部用户/设置栏。 -->
-      <div class="sidebar-content flex min-h-0 flex-1 flex-col border-r border-sidebar-border">
+      <div
+        class="sidebar-content flex min-h-0 flex-1 flex-col border-r border-sidebar-border"
+        :class="{ 'is-floating': isOverlay }"
+      >
         <!--
           顶部：工作区切换。两种 overlay 用法对它的需求不同：
           - peek（折叠态临时瞥看）：不渲染——浮层从顶栏下方开始（top-12），工作区位置
@@ -86,8 +89,10 @@ const outerWidth = computed(() => {
 </script>
 
 <style scoped>
-/* Panel Depth: 宽幅多段渐变模拟柔焦内阴影，避免分隔边缘出现突兀的黑线。 */
-.sidebar-content::after {
+/* Panel Depth: 宽幅多段渐变模拟柔焦内阴影，避免分隔边缘出现突兀的黑线。
+   仅停靠形态需要——它要在侧栏与聊天区的接缝处制造深度感。
+   浮层/滑出形态（窄窗口）用较轻的 shadow-lg 外投影，内阴影在这里冗余，不显示。 */
+.sidebar-content:not(.is-floating)::after {
   position: absolute;
   z-index: 20;
   top: 0;
