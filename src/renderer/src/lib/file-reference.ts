@@ -68,6 +68,31 @@ const DOTFILE_NAMES = new Set([
 ])
 
 /**
+ * 技术名黑名单：形如 `name.ext` 且扩展名在白名单里，但实际是技术/产品名而不是文件。
+ *
+ * `Node.js` / `Next.js` 这类在 AI 回复的正文里出现频率很高，而正文纯文本扫描
+ * （见 file-reference-dom.ts）会把它们当成 basename 命中 `.js`，标成可点击后
+ * 用户一点得到"文件不存在"。只在**整串完全匹配**时排除——`src/node.js` 仍是文件，
+ * 因为它带了目录，是真在指一个路径。
+ */
+const NON_FILE_NAMES = new Set([
+  'node.js',
+  'next.js',
+  'nuxt.js',
+  'vue.js',
+  'react.js',
+  'angular.js',
+  'ember.js',
+  'backbone.js',
+  'three.js',
+  'd3.js',
+  'chart.js',
+  'express.js',
+  'jquery.js',
+  'socket.io',
+])
+
+/**
  * 常见文件扩展名白名单（用于纯 basename 判断，如 `FilePreview.vue`）。
  * 仅收录代码、配置、文档、媒体等真实会出现在文件引用里的类型；
  * 排除 `.name`/`.cn`/`.url`/`.type` 等变量属性、域名后缀、类型标注。
@@ -160,6 +185,9 @@ export function looksLikeFileReference(value: string): boolean {
 
   // 路径前缀形态：家目录、绝对、file URI、显式相对、Windows 盘符。足够明确，直接放行。
   if (PATH_PREFIX.test(value)) return true
+
+  // 技术名（Node.js / Next.js …）：形态像 basename，但不是文件。仅整串匹配时排除。
+  if (NON_FILE_NAMES.has(value.toLowerCase())) return false
 
   // 纯 dotfile（无扩展名结构）：.env、.gitignore 等已知隐藏配置文件。
   if (DOTFILE_NAMES.has(value)) return true

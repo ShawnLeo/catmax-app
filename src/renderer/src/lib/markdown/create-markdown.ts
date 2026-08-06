@@ -21,6 +21,8 @@
 import Shiki from '@shikijs/markdown-it'
 import MarkdownIt from 'markdown-it'
 
+import { looksLikeFileReference } from '../file-reference'
+
 import { taskListPlugin } from './markdown-task-lists'
 
 /** 引擎实例对外暴露的渲染 API。每个后端各持一份独立实例。 */
@@ -53,6 +55,31 @@ const DEFAULT_SHIKI_THEMES = {
 }
 
 const MAX_CACHE_SIZE = 256
+
+/**
+ * Linkify File Names:
+ * `linkify: true` 会把没有协议头的裸文本按域名识别（linkify-it 的 fuzzyLink），
+ * 而「文件扩展名」和「顶级域名」大面积重叠——`.md` 是马尔代夫、`.ts` 是东帝汶、
+ * `.sh` 是圣赫勒拿、`.py`/`.rs`/`.zip`/`.mov` 同理。于是聊天里提到仓库根目录的
+ * `CLAUDE.md`、`README.md` 被渲染成 `<a href="http://claude.md">`，用户一点，
+ * MarkdownView 的外链分支就把它扔给系统浏览器了——这是纯粹的误判，不是用户意图。
+ *
+ * 这里包住 linkify.match：只丢弃「无协议头（schema === ''）且看起来像文件引用」的匹配，
+ * 显式写了 `http://claude.md` 的仍然是链接，`example.com` / `www.foo.cn` 也不受影响
+ * （`com`/`cn` 不在文件扩展名白名单里）。判定复用 file-reference 的同一份白名单，
+ * 保证「什么算文件」在 linkify 与点击预览两处永远是同一个答案。
+ */
+function applyLinkifyFileNameGuard(md: MarkdownIt): void {
+  const linkify = md.linkify
+  const originalMatch = linkify.match.bind(linkify)
+  linkify.match = (text: string) => {
+    const matches = originalMatch(text)
+    if (!matches) return matches
+    // 全部被过滤掉时返回空数组而非 null：markdown-it 的 linkify 规则先跑 pretest，
+    // 通过后直接读 `matches.length`，此处返回 null 会让它抛 TypeError。
+    return matches.filter((m) => m.schema !== '' || !looksLikeFileReference(m.raw))
+  }
+}
 
 /**
  * 创建一份独立的 markdown 引擎实例。
@@ -94,6 +121,8 @@ export function createMarkdownInstance(options: MarkdownInstanceOptions = {}): M
       // GFM 任务列表：`- [ ]` / `- [x]` → <li class="task-list-item"><input type="checkbox">
       // 用本地实现的 taskListPlugin（不引外部包——CJS default 在 electron-vite 下有歧义）
       md.use(taskListPlugin, { enabled: true })
+
+      applyLinkifyFileNameGuard(md)
 
       // 自定义 fence 渲染：在 <pre> 外面包一层 wrapper，加语言标签 + 复制按钮
       // 复制按钮的点击靠 MarkdownView.vue 里的事件委托处理（[data-action="copy-code"]）

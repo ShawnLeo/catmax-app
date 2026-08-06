@@ -32,7 +32,7 @@
 </template>
 
 <script setup lang="ts">
-import { looksLikeFileReference } from '@renderer/lib/file-reference'
+import { decorateFileReferences as decorateFileReferencesIn } from '@renderer/lib/file-reference-dom'
 import { renderCodexMarkdown, renderCodexMarkdownSync } from '@renderer/lib/markdown/codex'
 import { useFilesStore } from '@renderer/stores/files'
 import { useWorkspaceStore } from '@renderer/stores/workspace'
@@ -139,25 +139,11 @@ function onClick(e: MouseEvent): void {
   void filesStore.openFileReference(workspaceId, reference)
 }
 
-// Chat File Reference: 将 inline code 和非外链锚点标记为可点击文件，但跳过代码块。
+// Chat File Reference: inline code / 非外链锚点 / 正文纯文本三类来源统一走
+// lib/file-reference-dom（规则必须与 base 版 MarkdownView 一致，故不在组件里各写一份）。
 function decorateFileReferences(): void {
   if (!container.value) return
-  for (const code of container.value.querySelectorAll('code')) {
-    if (code.closest('pre')) continue
-    const reference = code.textContent?.trim() ?? ''
-    if (looksLikeFileReference(reference)) markFileReference(code as HTMLElement, reference)
-  }
-  for (const anchor of container.value.querySelectorAll('a')) {
-    const href = anchor.getAttribute('href') ?? ''
-    if (!href || /^(https?:|mailto:|#)/i.test(href)) continue
-    markFileReference(anchor as HTMLElement, href)
-  }
-}
-
-function markFileReference(element: HTMLElement, reference: string): void {
-  element.dataset.fileReference = reference
-  element.classList.add('file-reference')
-  element.title = `在文件面板中预览 ${reference}`
+  decorateFileReferencesIn(container.value)
 }
 </script>
 
@@ -351,6 +337,24 @@ function markFileReference(element: HTMLElement, reference: string): void {
 
 .markdown-body :deep(.file-reference:hover) {
   background-color: color-mix(in oklch, var(--color-muted), var(--color-foreground) 8%);
+}
+
+/* Chat File Reference（正文变体）：正文里的文件名不做成 inline code 那样的灰底胶囊——
+ * 一段回复里常出现三五个文件名，全胶囊化整段就花了；中英混排下切等宽字体还会让行内
+ * 字宽跳动。这里只留一条虚下划线暗示可点，hover 才浮出底色。
+ * 明确写的 `code` 引用仍走上面的胶囊样式，两种写法保持可区分。 */
+.markdown-body :deep(.file-reference-text) {
+  padding: 0;
+  font-family: inherit;
+  background-color: transparent;
+  text-decoration: underline dotted;
+  text-underline-offset: 0.2em;
+  text-decoration-color: color-mix(in oklch, currentColor, transparent 55%);
+}
+
+.markdown-body :deep(.file-reference-text:hover) {
+  background-color: var(--color-muted);
+  text-decoration-color: currentColor;
 }
 
 /* ============ 引用 / 分隔线 / 链接 / 图片 / 删除线 ============ */

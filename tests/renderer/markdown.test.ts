@@ -68,4 +68,34 @@ describe('renderMarkdown', () => {
     expect(html).toContain('<p>')
     expect(html).toContain('hello world')
   })
+
+  // Linkify File Names: 文件扩展名与顶级域名大面积重叠（.md/.ts/.sh/.py…），
+  // linkify 的 fuzzyLink 会把裸文件名当域名，点击后跳浏览器。
+  describe('裸文件名不被 linkify 成外链', () => {
+    test.each([
+      '根目录的 CLAUDE.md 写了规范',
+      '见 README.md',
+      '改 create-markdown.ts 就行',
+      '跑一下 build.sh',
+      'setup.py 里配置',
+    ])('%s', async (text) => {
+      const html = await renderMarkdown(text)
+      expect(html).not.toContain('<a ')
+    })
+
+    test('真实裸域名仍然成链接', async () => {
+      const html = await renderMarkdown('打开 example.com 看看')
+      expect(html).toContain('href="http://example.com"')
+    })
+
+    test('显式协议头的 .md 域名仍然成链接', async () => {
+      const html = await renderMarkdown('打开 http://claude.md 看看')
+      expect(html).toContain('href="http://claude.md"')
+    })
+
+    test('markdown 链接语法不受影响', async () => {
+      const html = await renderMarkdown('[规范](CLAUDE.md)')
+      expect(html).toContain('href="CLAUDE.md"')
+    })
+  })
 })
