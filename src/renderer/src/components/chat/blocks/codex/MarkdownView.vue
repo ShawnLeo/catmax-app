@@ -33,6 +33,7 @@
 
 <script setup lang="ts">
 import { decorateFileReferences as decorateFileReferencesIn } from '@renderer/lib/file-reference-dom'
+import { resolveInlineImages } from '@renderer/lib/inline-image-dom'
 import { renderCodexMarkdown, renderCodexMarkdownSync } from '@renderer/lib/markdown/codex'
 import { useFilesStore } from '@renderer/stores/files'
 import { useWorkspaceStore } from '@renderer/stores/workspace'
@@ -141,9 +142,13 @@ function onClick(e: MouseEvent): void {
 
 // Chat File Reference: inline code / 非外链锚点 / 正文纯文本三类来源统一走
 // lib/file-reference-dom（规则必须与 base 版 MarkdownView 一致，故不在组件里各写一份）。
+// Chat Inline Image: 同一次渲染后处理里顺带把本地图片换成 data URL（CSP 拦 file://，
+// 相对路径也不指向工作区——不换就是一张永远加载不出来的空框）。
 function decorateFileReferences(): void {
   if (!container.value) return
   decorateFileReferencesIn(container.value)
+  const workspaceId = workspaceStore.currentWorkspace?.id
+  if (workspaceId) resolveInlineImages(container.value, workspaceId)
 }
 </script>
 
@@ -372,6 +377,15 @@ function decorateFileReferences(): void {
 
 .markdown-body :deep(img) {
   @apply max-w-full rounded-md my-2;
+}
+
+/* Chat Inline Image: 本地图片解析不到时 src 已被抽掉（见 lib/inline-image-dom），
+ * 浏览器改显示 alt 文本。给一圈虚线框把它跟正文区分开——用户至少知道
+ * 这里本该有张图，而不是以为模型漏说了。 */
+.markdown-body :deep(img[data-inline-image='missing']) {
+  @apply inline-block text-muted-foreground text-[length:var(--chat-text-d1)];
+  padding: 0.25rem 0.5rem;
+  border: 1px dashed var(--color-border);
 }
 
 .markdown-body :deep(del) {

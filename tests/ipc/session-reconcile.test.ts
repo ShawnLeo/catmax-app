@@ -59,6 +59,7 @@ describe('Bug B: reconcileSessions 容错', () => {
       id: randomUUID(),
       path: mkdtempSync(join(tmpdir(), 'ws-')),
       name: 'test-ws',
+      folders: [],
       preferredEditor: null,
       lastOpenedAt: now,
       createdAt: now,
@@ -95,6 +96,7 @@ describe('跨 backend reconcile 不误标 stale', () => {
       id: 'ws-cross',
       path: mkdtempSync(join(tmpdir(), 'ws-cross-')),
       name: 'test-ws-cross',
+      folders: [],
       preferredEditor: null,
       lastOpenedAt: now,
       createdAt: now,
@@ -151,5 +153,93 @@ describe('跨 backend reconcile 不误标 stale', () => {
     // codex 会话 db 里仍是 stale=false（没被 markSessionStale 碰过）
     const codexSession = db.findSessionById('sess-codex')
     expect(codexSession).not.toBeNull()
+  })
+})
+
+/**
+ * Session Title Fallback: 空标题回填。
+ *
+ * 早先登记进来的会话 title 可能是 null（claude 侧只认 jsonl 的 ai-title 行，而
+ * SDK 跑出来的会话没有那一行），侧边栏一直显示 "(新会话)"。扫描现在能派生标题了，
+ * reconcile 要把这些空标题补上——但只补空的，不覆盖已有标题，更不碰用户改过名的。
+ */
+describe('reconcileSessions 回填空标题', () => {
+  const now = Date.now()
+
+  /** 造一个只含指定会话的干净 workspace */
+  function setupWorkspace(
+    workspaceId: string,
+    sessions: Array<{ id: string; title: string | null; titleCustom?: boolean }>,
+  ) {
+    const db = ctxModule.ctx.db
+    db.insertWorkspace({
+      id: workspaceId,
+      path: mkdtempSync(join(tmpdir(), 'ws-backfill-')),
+      name: workspaceId,
+      folders: [],
+      preferredEditor: null,
+      lastOpenedAt: now,
+      createdAt: now,
+    })
+    for (const s of sessions) {
+      db.insertSession({
+        id: s.id,
+        backend: 'claude',
+        backendThreadId: `thread-${s.id}`,
+        workspaceId,
+        title: s.title,
+        model: null,
+        effort: null,
+        permissionMode: null,
+        turnCount: 1,
+        createdAt: now,
+        lastActiveAt: now,
+        pinnedAt: null,
+        titleCustom: s.titleCustom ?? false,
+      })
+    }
+    const mockBackendManager = ctxModule.ctx.backendManager
+    mockBackendManager.getCurrentId.mockReturnValue('claude')
+    mockBackendManager.listSessions.mockResolvedValue(
+      sessions.map((s) => ({
+        backendThreadId: `thread-${s.id}`,
+        title: `扫描派生的标题 ${s.id}`,
+        lastActiveAt: now,
+        model: null,
+      })),
+    )
+    return db
+  }
+
+  test('title 为 null 的已登记会话被补上扫描到的标题', async () => {
+    const db = setupWorkspace('ws-backfill-1', [{ id: 'empty', title: null }])
+
+    const result = await reconcileSessions({ workspaceId: 'ws-backfill-1' })
+
+    expect(result.titleBackfilled).toBe(1)
+    expect(db.findSessionById('empty').title).toBe('扫描派生的标题 empty')
+    // 回填改的是已存在的会话，不产生 added/removed
+    expect(result.added).toEqual([])
+    expect(result.removed).toEqual([])
+  })
+
+  test('已有标题的会话不被覆盖', async () => {
+    const db = setupWorkspace('ws-backfill-2', [{ id: 'has-title', title: '原有标题' }])
+
+    const result = await reconcileSessions({ workspaceId: 'ws-backfill-2' })
+
+    expect(result.titleBackfilled).toBe(0)
+    expect(db.findSessionById('has-title').title).toBe('原有标题')
+  })
+
+  test('用户手动改过名的会话（titleCustom）即使标题为空也不动', async () => {
+    const db = setupWorkspace('ws-backfill-3', [
+      { id: 'renamed-empty', title: null, titleCustom: true },
+    ])
+
+    const result = await reconcileSessions({ workspaceId: 'ws-backfill-3' })
+
+    expect(result.titleBackfilled).toBe(0)
+    expect(db.findSessionById('renamed-empty').title).toBeNull()
   })
 })

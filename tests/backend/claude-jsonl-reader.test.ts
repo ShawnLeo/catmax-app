@@ -347,13 +347,21 @@ describe('listClaudeSessionsFromDisk', () => {
     expect(ids).toEqual(['sess-a1', 'sess-a2', 'sess-b1', 'sess-broken'])
   })
 
-  test('从 jsonl 流式读 aiTitle，没有 ai-title 行时为 null', async () => {
+  test('从 jsonl 流式读 aiTitle，没有 ai-title 行时退回首条用户消息', async () => {
     setupFakeProjectsHome()
     const result = await listClaudeSessionsFromDisk()
     const a1 = result.find((r) => r.backendThreadId === 'sess-a1')
     const a2 = result.find((r) => r.backendThreadId === 'sess-a2')
     expect(a1?.title).toBe('Project A Session 1')
-    expect(a2?.title).toBeNull()
+    // Session Title Fallback: 没有 ai-title 行（SDK 跑出来的会话就是这样）
+    expect(a2?.title).toBe('hi')
+  })
+
+  test('连用户消息都没有时 title 仍为 null', async () => {
+    setupFakeProjectsHome()
+    const result = await listClaudeSessionsFromDisk()
+    const broken = result.find((r) => r.backendThreadId === 'sess-broken')
+    expect(broken?.title).toBeNull()
   })
 
   test('从 jsonl 读 model', async () => {
@@ -456,5 +464,147 @@ describe('listClaudeSessionsFromDisk', () => {
     expect(result.length).toBe(1)
     expect(result[0]?.title).toBe('Late Title')
     expect(result[0]?.model).toBe('claude-sonnet')
+  })
+})
+
+/**
+ * Session Title Fallback: 只有 claude CLI 往 jsonl 写 `ai-title` 行，catmax 经 SDK
+ * 跑出来的会话整个文件都没有那一行——侧边栏因此一片 "(新会话)"。这组测试锁住
+ * "没有 ai-title 就用首条真实用户输入"的派生规则。
+ */
+describe('listClaudeSessionsFromDisk：首条用户消息派生标题', () => {
+  /** 造一个只含指定行的单会话 fake HOME，返回扫描到的那条 */
+  async function scanOne(lines: string[]) {
+    const fakeHome = mkdtempSync(join(tmpdir(), 'derive-title-'))
+    tempDirs.push(fakeHome)
+    process.env.HOME = fakeHome
+    const projDir = join(fakeHome, '.claude', 'projects', '-test-derive')
+    mkdirSync(projDir, { recursive: true })
+    writeFileSync(join(projDir, 'sess-x.jsonl'), lines.join('\n') + '\n', 'utf-8')
+    const result = await listClaudeSessionsFromDisk('/test-derive')
+    return result[0]
+  }
+
+  test('ai-title 优先于派生标题（哪怕它排在用户消息后面）', async () => {
+    const entry = await scanOne([
+      JSON.stringify({ type: 'user', message: { role: 'user', content: '第一句话' } }),
+      JSON.stringify({ type: 'ai-title', aiTitle: '真正的标题' }),
+    ])
+    expect(entry?.title).toBe('真正的标题')
+  })
+
+  test('array 形态的 content 取第一个 text 块', async () => {
+    const entry = await scanOne([
+      JSON.stringify({
+        type: 'user',
+        message: { role: 'user', content: [{ type: 'text', text: '数组里的文本' }] },
+      }),
+    ])
+    expect(entry?.title).toBe('数组里的文本')
+  })
+
+  test('slash command sentinel → 只取命令名', async () => {
+    const entry = await scanOne([
+      JSON.stringify({
+        type: 'user',
+        message: {
+          role: 'user',
+          content: '<command-message>init</command-message>\n<command-name>/init</command-name>',
+        },
+      }),
+    ])
+    expect(entry?.title).toBe('/init')
+  })
+
+  test('isMeta 的消息跳过——那是 claude 替用户展开的 prompt，不是用户输入', async () => {
+    const entry = await scanOne([
+      JSON.stringify({
+        type: 'user',
+        isMeta: true,
+        message: { role: 'user', content: 'Please analyze this codebase and create a CLAUDE.md' },
+      }),
+      JSON.stringify({ type: 'user', message: { role: 'user', content: '用户真正说的话' } }),
+    ])
+    expect(entry?.title).toBe('用户真正说的话')
+  })
+
+  test('tool_result 回填跳过，继续找真正的用户消息', async () => {
+    const entry = await scanOne([
+      JSON.stringify({
+        type: 'user',
+        message: {
+          role: 'user',
+          content: [{ type: 'tool_result', tool_use_id: 't1', content: '一大坨工具输出' }],
+        },
+      }),
+      JSON.stringify({ type: 'user', message: { role: 'user', content: '后面这句才是' } }),
+    ])
+    expect(entry?.title).toBe('后面这句才是')
+  })
+
+  test('claude 自动注入的信封跳过（caveat / stdout / 后台任务通知 / compact 摘要）', async () => {
+    const entry = await scanOne([
+      JSON.stringify({
+        type: 'user',
+        message: { role: 'user', content: '<local-command-caveat>...</local-command-caveat>' },
+      }),
+      JSON.stringify({
+        type: 'user',
+        message: {
+          role: 'user',
+          content: '<local-command-stdout>Compacted</local-command-stdout>',
+        },
+      }),
+      JSON.stringify({
+        type: 'user',
+        message: { role: 'user', content: '<task-notification><task-id>t1</task-id>' },
+      }),
+      JSON.stringify({
+        type: 'user',
+        message: {
+          role: 'user',
+          content: 'This session is being continued from a previous conversation. Summary: ...',
+        },
+      }),
+      JSON.stringify({ type: 'user', message: { role: 'user', content: '这条才算' } }),
+    ])
+    expect(entry?.title).toBe('这条才算')
+  })
+
+  test('剥掉 IDE 注入的 context tag 和 system-reminder，只留用户输入', async () => {
+    const entry = await scanOne([
+      JSON.stringify({
+        type: 'user',
+        message: {
+          role: 'user',
+          content:
+            '<ide_opened_file>The user opened the file /a/b.vue in the IDE. This may or may not be related to the current task.</ide_opened_file>\n' +
+            '<system-reminder>忽略我</system-reminder>\n' +
+            '帮我改一下这个组件',
+        },
+      }),
+    ])
+    expect(entry?.title).toBe('帮我改一下这个组件')
+  })
+
+  test('超长输入截断到 50 字符，换行压成空格', async () => {
+    const entry = await scanOne([
+      JSON.stringify({
+        type: 'user',
+        message: { role: 'user', content: 'a\nb\n' + 'x'.repeat(200) },
+      }),
+    ])
+    expect(entry?.title).toBe(('a b ' + 'x'.repeat(200)).slice(0, 50))
+    expect(entry?.title?.length).toBe(50)
+  })
+
+  test('剥完只剩空白 → 不产出标题', async () => {
+    const entry = await scanOne([
+      JSON.stringify({
+        type: 'user',
+        message: { role: 'user', content: '<system-reminder>只有提醒</system-reminder>\n   ' },
+      }),
+    ])
+    expect(entry?.title).toBeNull()
   })
 })

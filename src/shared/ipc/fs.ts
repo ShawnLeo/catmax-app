@@ -170,6 +170,23 @@ export async function readMentionPreview(_args: {
   throw new Error('implemented in main')
 }
 
+/**
+ * Chat Inline Image: 把回复正文里 `![](路径)` 的本地图片读成 data URL。
+ *
+ * 为什么不直接让 `<img src>` 指向文件：渲染进程的 CSP 是
+ * `img-src 'self' data: https:`，`file://` 一律拦掉；就算放开，相对路径也只会
+ * 相对于 index.html 解析，跟工作区无关。所以本地图片只有走 data URL 这一条路。
+ *
+ * 与 readMentionPreview 共用底层解码，但不是同一件事：那边是 16px 的 pill 缩略图，
+ * 这边要保留原尺寸——二维码缩糊了就扫不出来，正是这条路径存在的理由。
+ */
+export async function readInlineImage(_args: {
+  workspaceId: string
+  reference: string
+}): Promise<{ dataUrl: string } | null> {
+  throw new Error('implemented in main')
+}
+
 /** 聚合类型：所有 fs handler 的 channel → 签名映射 */
 export type FsHandlers = {
   'fs.readDirectory': typeof readDirectory
@@ -179,4 +196,5 @@ export type FsHandlers = {
   'fs.openInEditor': typeof openInEditor
   'fs.pathExists': typeof pathExists
   'fs.readMentionPreview': typeof readMentionPreview
+  'fs.readInlineImage': typeof readInlineImage
 }

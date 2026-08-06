@@ -46,8 +46,9 @@ export const useSessionStore = defineStore('session', () => {
    * backend 决定对账完 reload 列表时按哪个 backend 过滤。
    */
   async function reconcile(workspaceId: string, backend: BackendId): Promise<void> {
-    const { added, removed } = await window.api.session.reconcile({ workspaceId })
-    if (added.length > 0 || removed.length > 0) {
+    const { added, removed, titleBackfilled } = await window.api.session.reconcile({ workspaceId })
+    // titleBackfilled 改的是已在列表里的会话——不 reload 的话补上的标题看不见
+    if (added.length > 0 || removed.length > 0 || titleBackfilled > 0) {
       await load(workspaceId, backend)
     }
   }

@@ -26,6 +26,8 @@ import { createInterface } from 'node:readline'
 
 import { logger } from '@main/service/logger'
 import type { ClaudeStreamMessage } from '@shared/backend/claude-schema'
+import { sharedContextTagExtractors } from '@shared/backend/context-tag-handlers'
+import { extractContextTags } from '@shared/backend/context-tags'
 import type { NormalizedMessage } from '@shared/backend/types'
 
 import { claudeReplayToMessages } from './history-mapping'
@@ -80,8 +82,63 @@ export interface ClaudeSessionOnDisk {
   sizeBytes: number
 }
 
+/** 首条用户消息派生标题的长度上限——与 session.create 的 initialPrompt.slice(0, 50) 对齐 */
+const DERIVED_TITLE_MAX_LENGTH = 50
+
 /**
- * 流式扫 jsonl 文件，同时拿 aiTitle 和 model。
+ * Session Title Fallback: 从一条 user 消息的 content 派生会话标题。
+ *
+ * 只有 claude CLI 自己会往 jsonl 里写 `ai-title` 行；catmax 经 SDK 跑出来的会话
+ * 整个文件都没有那一行，于是 listSessions 的 title 一直是 null，reconcile 原样
+ * 插入 db，侧边栏就只剩 "(新会话)"。这里用首条真实用户输入兜底。
+ *
+ * 返回 null 表示"这条不是用户说的话"，调用方应继续往下找：
+ * - tool_result 回填（数组里混了 tool_result）
+ * - claude 自动注入的信封（local-command-caveat / stdout、后台任务通知、compact 摘要）
+ *
+ * slash command 调用在 jsonl 里是 `<command-message>` + `<command-name>` sentinel，
+ * 直接取命令名（"/init"）——与 history-mapping 展示给用户的形态一致。
+ */
+function deriveTitleFromUserContent(content: unknown): string | null {
+  let raw: string | null = null
+  if (typeof content === 'string') {
+    raw = content
+  } else if (Array.isArray(content)) {
+    for (const block of content as Array<{ type?: string; text?: string }>) {
+      // 工具回填不是用户输入——整条跳过，别把工具输出当成标题
+      if (block?.type === 'tool_result') return null
+      if (block?.type === 'text' && typeof block.text === 'string') {
+        raw = block.text
+        break
+      }
+    }
+  }
+  if (!raw) return null
+
+  // slash command 调用 sentinel → 只取命令名
+  if (raw.includes('<command-message>')) {
+    const name = raw.match(/<command-name>([^<]+)<\/command-name>/)?.[1]
+    return name ? name.trim() : null
+  }
+  // claude 自动注入的信封，不是用户说的话
+  if (raw.includes('<local-command-caveat>')) return null
+  if (raw.includes('<local-command-stdout>')) return null
+  if (raw.includes('<task-notification>')) return null
+  if (raw.startsWith('This session is being continued from a previous conversation')) return null
+
+  // 剥掉 IDE 注入的 context tag（<ide_selection> / <ide_opened_file> / <environment_context>）
+  // 和 <system-reminder>——它们排在用户输入前面时会整段占满 50 字符的标题
+  const { text } = extractContextTags(raw, sharedContextTagExtractors)
+  const cleaned = text
+    .replace(/<system-reminder>[\s\S]*?<\/system-reminder>/g, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+  if (!cleaned) return null
+  return cleaned.slice(0, DERIVED_TITLE_MAX_LENGTH)
+}
+
+/**
+ * 流式扫 jsonl 文件，同时拿 aiTitle、首条用户消息派生的兜底标题和 model。
  *
  * 为什么不用 readFileSync 头部 4KB：
  * - claude 通常先写 queue-operation / user message / 大体积 attachment（嵌入文件全文），
@@ -93,12 +150,17 @@ export interface ClaudeSessionOnDisk {
  * 现在用 createReadStream + readline，遇到第一个 ai-title 和 assistant.model 就记下，
  * 两个都拿到 early break——大文件不全读，且只读一遍同时拿两个字段。
  *
+ * 兜底标题不参与 break 条件：ai-title 优先，而它排在用户消息后面，提前停就永远
+ * 拿不到真标题了。没有 ai-title 的文件本来就会被扫到底（break 要求 title && model），
+ * 所以顺带解析首条用户消息不增加 I/O。
+ *
  * 容错：读半行 / parse 失败 / 文件不可读 都返回 null，不抛。
  */
 async function readTitleAndModel(
   filePath: string,
 ): Promise<{ title: string | null; model: string | null }> {
-  let title: string | null = null
+  let aiTitle: string | null = null
+  let derivedTitle: string | null = null
   let model: string | null = null
   try {
     const stream = createInterface({
@@ -115,16 +177,21 @@ async function readTitleAndModel(
         const obj = JSON.parse(line) as {
           type?: string
           aiTitle?: string
-          message?: { model?: string }
+          isMeta?: boolean
+          message?: { model?: string; content?: unknown }
         }
-        if (!title && obj.type === 'ai-title' && obj.aiTitle) {
-          title = obj.aiTitle
+        if (!aiTitle && obj.type === 'ai-title' && obj.aiTitle) {
+          aiTitle = obj.aiTitle
         }
         if (!model && obj.type === 'assistant' && obj.message?.model) {
           model = obj.message.model
         }
-        // 两个都拿到就停——后面几十万行不读了
-        if (title && model) break
+        // isMeta 是 claude 替用户塞进去的展开内容（如 /init 的完整 prompt），不是用户输入
+        if (!derivedTitle && obj.type === 'user' && !obj.isMeta) {
+          derivedTitle = deriveTitleFromUserContent(obj.message?.content)
+        }
+        // ai-title + model 都拿到就停——后面几十万行不读了
+        if (aiTitle && model) break
       } catch {
         // 半行 / 损坏行——继续扫下一行
       }
@@ -132,7 +199,7 @@ async function readTitleAndModel(
   } catch {
     // 文件不可读——返回 null/null
   }
-  return { title, model }
+  return { title: aiTitle ?? derivedTitle, model }
 }
 
 /**

@@ -7,6 +7,7 @@ import {
   pathExistsHandler,
   readDirectoryHandler,
   readFilePreviewHandler,
+  readInlineImageHandler,
   readMentionPreviewHandler,
   resolveFileReferenceHandler,
   searchFilesHandler,
@@ -29,6 +30,10 @@ export function registerFsHandlers(): void {
   handleRendererRequest<FsHandlers, 'fs.readMentionPreview'>(
     'fs.readMentionPreview',
     readMentionPreviewHandler,
+  )
+  handleRendererRequest<FsHandlers, 'fs.readInlineImage'>(
+    'fs.readInlineImage',
+    readInlineImageHandler,
   )
 }
 

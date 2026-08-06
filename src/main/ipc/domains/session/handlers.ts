@@ -257,9 +257,20 @@ export const reconcileSessions = async (args: { workspaceId: string }) => {
 
   // 找出后端有、App 没有的（需要登记）
   const added: SessionView[] = []
+  let titleBackfilled = 0
   for (const bs of backendSessions) {
     const exists = appSessions.find((s) => s.backendThreadId === bs.backendThreadId)
-    if (exists) continue
+    if (exists) {
+      // Session Title Fallback: 回填空标题。
+      // 早先登记的会话拿到的 title 可能是 null（claude 侧只认 jsonl 的 ai-title 行，
+      // 而 SDK 跑出来的会话没有那一行），侧边栏就一直是 "(新会话)"。现在扫描能派生出
+      // 标题了，这里补上——只补空的，不覆盖已有标题，更不碰用户改过名的（titleCustom）。
+      if (!exists.title && !exists.titleCustom && bs.title) {
+        ctx.db.updateSessionTitle(exists.id, bs.title)
+        titleBackfilled++
+      }
+      continue
+    }
     // tombstone 跳过——用户删过这条，磁盘文件可能还在（物理删除失败/不可达），
     // 但不允许复活。reconcile 是自动同步，必须尊重用户的删除意图。
     if (ctx.db.isSessionDeleted(currentBackend, bs.backendThreadId)) {
@@ -295,8 +306,8 @@ export const reconcileSessions = async (args: { workspaceId: string }) => {
     }
   }
 
-  log.info('reconciled', { added: added.length, removed: removed.length })
-  return { added, removed }
+  log.info('reconciled', { added: added.length, removed: removed.length, titleBackfilled })
+  return { added, removed, titleBackfilled }
 }
 
 /**

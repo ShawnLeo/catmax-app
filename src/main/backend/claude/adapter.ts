@@ -147,6 +147,21 @@ function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise
   })
 }
 
+type TurnCompletedEvent = Extract<TurnEvent, { type: 'turn_completed' }>
+
+/**
+ * Steer Continuation: 从一批事件里摘出可以被 steer 扣住的终态，摘不到返回 null。
+ *
+ * 只认 `completed`：`error` / `interrupted` 说明这一轮已经不正常结束，排队的 steer
+ * 消息未必还会被 SDK 处理，继续扣着终态只会让 turn 悬在 running。
+ * 摘除是就地 splice——同一批里的其他事件（flushPendingToolUse 的补发等）要照常发出去。
+ */
+function takeSuppressibleTerminal(events: TurnEvent[]): TurnCompletedEvent | null {
+  const index = events.findIndex((e) => e.type === 'turn_completed' && e.status === 'completed')
+  if (index < 0) return null
+  return (events.splice(index, 1)[0] as TurnCompletedEvent) ?? null
+}
+
 /**
  * 一条永远不产出消息的 prompt 流。
  *
@@ -915,6 +930,17 @@ export class ClaudeAdapter implements AgentBackend {
     let resolveInputWait: (() => void) | null = null
     let inputClosed = false
     const inputQueue: SDKUserMessage[] = []
+    /**
+     * Steer Continuation: 已 push 进输入流、但还没跑出自己那个 result 的 steer 消息数。
+     *
+     * SDK 不会把运行中收到的新 user message 并进当前回合，而是排队（transcript 里那条
+     * `queue-operation: enqueue`），等当前回合的 result 之后 dequeue，再当成**新的一轮**
+     * 跑完并给出**第二个 result**。catmax 一个 turn 必须一路覆盖到最后一个 result：
+     * 否则第一个 result 就把 turn 收了，被 steer 追加的那一轮所有输出都落在
+     * terminalQueued 之后（协调器同样在 turn_completed 后丢弃一切事件），
+     * 用户看到的就是"补充的消息发出去了，页面上毫无反应"。
+     */
+    let pendingSteers = 0
     const inputController = {
       close: () => {
         inputClosed = true
@@ -928,6 +954,7 @@ export class ClaudeAdapter implements AgentBackend {
           parent_tool_use_id: null,
           origin: { kind: 'human' },
         })
+        pendingSteers += 1
         resolveInputWait?.()
         return true
       },
@@ -991,6 +1018,15 @@ export class ClaudeAdapter implements AgentBackend {
     const streamDone = { value: false, error: null as Error | null }
     void (async () => {
       let terminalQueued = false
+      /**
+       * Steer Continuation: 最近一次被 steer 抑制掉的终态事件。
+       *
+       * SDK 若在处理排队消息前就收流（进程退出、上游断开），下面的 `!terminalQueued`
+       * 分支本来会造一条 "stream ended before a terminal result" 的错误——但那一轮
+       * 其实是**正常完成**过的，只是终态被这里扣着。留一份原件用来收尾，
+       * 免得给用户一个凭空的失败。
+       */
+      let suppressedTerminal: TurnCompletedEvent | null = null
 
       /*
        * Turn Hold Watchdog: result 已到、turn 却被后台任务留着时的兜底。
@@ -1045,10 +1081,28 @@ export class ClaudeAdapter implements AgentBackend {
             },
             sawStreamEvents,
           )
+          // Steer Continuation: 还有排队的 steer 消息没跑，这个 result 只是它前面那一轮的
+          // 边界，不是 turn 的终态——摘掉终态事件让 turn 继续，其余事件（flushPendingToolUse
+          // 的产物等）照常发出去。只摘 completed：result 报错时那一轮已经失败，
+          // 排队的消息未必还会被处理，此时如常收尾比让 turn 悬着更诚实。
+          const steerHeld = pendingSteers > 0 ? takeSuppressibleTerminal(events) : null
+          if (steerHeld) {
+            pendingSteers -= 1
+            suppressedTerminal = steerHeld
+            log.debug('turn kept open for queued steer prompt', {
+              turnId: internalTurnId,
+              pendingSteers,
+            })
+          } else if (events.some((e) => e.type === 'turn_completed')) {
+            // 正常收尾（或 result 报错收尾）——计数归零，避免残留影响后续判断。
+            pendingSteers = 0
+          }
           for (const ev of events) pushEvent(ev)
           const heldOpen =
             isSdkResultMessage(msg) && !events.some((e) => e.type === 'turn_completed')
           // result 被 hold 住 → 起计时；其余任何消息都说明还有进展 → 撤销计时。
+          // steer 抑制掉的 result 同样走这条兜底：SDK 万一没有真的再跑一轮，
+          // TURN_HOLD_TIMEOUT_MS 之后强制收尾，不会挂到协调器的 30 分钟看门狗。
           if (heldOpen) armHold()
           else clearHold()
           if (events.some((event) => event.type === 'turn_completed')) {
@@ -1066,6 +1120,10 @@ export class ClaudeAdapter implements AgentBackend {
               status: 'interrupted',
               usage: backgroundTasks.accumulatedUsage(),
             })
+          } else if (suppressedTerminal) {
+            // Steer Continuation: 排队的消息没等到就收流——用被扣下的那个终态收尾，
+            // 这一轮是真的跑完了，不该报错。
+            pushEvent({ ...suppressedTerminal, usage: backgroundTasks.accumulatedUsage() })
           } else {
             pushEvent({
               type: 'error',

@@ -244,6 +244,7 @@ export const api = {
     readMentionPreview: requestMain<FsHandlers, 'fs.readMentionPreview'>(
       IPC.FS_READ_MENTION_PREVIEW,
     ),
+    readInlineImage: requestMain<FsHandlers, 'fs.readInlineImage'>(IPC.FS_READ_INLINE_IMAGE),
     getPathForFile,
   },
   pty: {

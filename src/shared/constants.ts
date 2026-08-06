@@ -114,6 +114,7 @@ export const IPC = {
   FS_OPEN_IN_EDITOR: 'fs.openInEditor',
   FS_PATH_EXISTS: 'fs.pathExists',
   FS_READ_MENTION_PREVIEW: 'fs.readMentionPreview',
+  FS_READ_INLINE_IMAGE: 'fs.readInlineImage',
   // pty
   PTY_CREATE: 'pty.create',
   PTY_WRITE: 'pty.write',

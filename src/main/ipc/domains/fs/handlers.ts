@@ -114,6 +114,29 @@ export const readMentionPreviewHandler = async (args: {
   return { isDirectory: false, thumbnail: await readImageThumbnail(absolutePath, args.maxSize) }
 }
 
+/**
+ * Chat Inline Image: 回复正文里 `![](路径)` 指向的本地图片 → data URL。
+ *
+ * 边长上限给得比 pill 缩略图大两个数量级——这条路径存在的理由就是二维码这类
+ * "缩糊了就没用了"的图。仍然只缩不放（见 readImageThumbnail），小图原样返回。
+ */
+const INLINE_IMAGE_MAX_SIZE = 1024
+
+export const readInlineImageHandler = async (args: {
+  workspaceId: string
+  reference: string
+}): Promise<{ dataUrl: string } | null> => {
+  const workspace = requireWorkspace(args.workspaceId)
+  const qualified = resolveQualifiedReference(workspace, args.reference)
+  const folder = qualified?.folder ?? workspace.folders.find((item) => item.role === 'primary')
+  if (!folder) return null
+  const resolved = await resolveFileReference(folder.path, qualified?.reference ?? args.reference)
+  if (!resolved || resolved.isDirectory) return null
+  const absolutePath = resolved.absolutePath ?? join(folder.path, resolved.relativePath)
+  const dataUrl = await readImageThumbnail(absolutePath, INLINE_IMAGE_MAX_SIZE)
+  return dataUrl ? { dataUrl } : null
+}
+
 export const openInEditorHandler = async (args: {
   workspaceId: string
   folderId?: string

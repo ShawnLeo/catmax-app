@@ -127,6 +127,13 @@ export type SessionHandlers = {
   'session.reconcile': (args: { workspaceId: string }) => Promise<{
     added: SessionView[]
     removed: string[]
+    /**
+     * Session Title Fallback: 被回填了标题的已登记会话条数。
+     *
+     * 单独返回是因为它改的是**已在列表里**的会话，added/removed 都为空时也需要
+     * 让渲染端 reload——否则补上的标题要等下次切工作区才看得到。
+     */
+    titleBackfilled: number
   }>
   /**
    * 扫描当前后端在磁盘/RPC 上存在、但 catmax db 还未登记的会话（只扫当前 backend）。
