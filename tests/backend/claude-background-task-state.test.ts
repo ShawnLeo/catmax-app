@@ -197,6 +197,40 @@ describe('ClaudeBackgroundTaskState', () => {
     expect(state.classifyResult(result('cancel-result'))).toBe('terminal')
   })
 
+  /*
+   * 回归：progress 与 notification 之间没有顺序保证，任务收尾时常有一条 in-flight 的
+   * progress 在路上。它若把任务复活成 running 并塞回 liveTaskIds，就再也没有第二次
+   * 终态通知能把它清掉，classifyResult 永远返回 'intermediate'，turn 永久卡在 running。
+   */
+  test('迟到的 task_progress 不复活已终结的任务', () => {
+    const state = new ClaudeBackgroundTaskState()
+    state.handle(taskStarted('agent-a', 'tool-a'))
+    expect(state.classifyResult(result('initial-result'))).toBe('intermediate')
+    state.handle(taskNotification('agent-a', 'tool-a'))
+    expect(state.activeTaskIds()).toEqual([])
+
+    const lateProgress = {
+      type: 'system',
+      subtype: 'task_progress',
+      task_id: 'agent-a',
+      tool_use_id: 'tool-a',
+      description: '分析代理',
+      usage: { total_tokens: 10, tool_uses: 2, duration_ms: 500 },
+      summary: '还在读文件',
+      uuid: 'progress-late',
+      session_id: 'session-1',
+    } as unknown as SDKTaskProgressMessage
+
+    expect(state.handle(lateProgress)[0]).toMatchObject({
+      taskId: 'agent-a',
+      status: 'completed',
+    })
+    expect(state.activeTaskIds()).toEqual([])
+    expect(state.classifyResult(result('final-result', { origin: 'task-notification' }))).toBe(
+      'terminal',
+    )
+  })
+
   test('累计所有模型回合的 token 和费用', () => {
     const state = new ClaudeBackgroundTaskState()
     state.handle(taskStarted('agent-a', 'tool-a'))

@@ -337,4 +337,122 @@ describe('ClaudeAdapter background turn lifecycle', () => {
     await adapter.interrupt(turnId)
     await collectPromise
   })
+
+  /*
+   * 回归：turn 被后台任务留着、后续通知却始终不来时必须自行收尾。
+   *
+   * 线上事故形态是模型早已 end_turn 把话说完，classifyResult 仍判 intermediate，
+   * turn 一直 running 到协调器 30 分钟的 idle 看门狗——用户看到的是 UI 永远
+   * "正在思考"，停止按钮也点不动。
+   */
+  test('result 之后再无事件时，turn hold 看门狗强制收尾', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+    try {
+      sdkMocks.state.waitForInterrupt = true
+      sdkMocks.state.messages = [
+        {
+          type: 'system',
+          subtype: 'task_started',
+          task_id: 'agent-a',
+          tool_use_id: 'tool-a',
+          description: '分析代理',
+          uuid: 'started-a',
+          session_id: 'claude-session',
+        },
+        assistantText('assistant-final', '分析完成，这是结论。'),
+        result('held-result', 'human'),
+      ] as unknown as SDKMessage[]
+      const adapter = new ClaudeAdapter()
+      const events: TurnEvent[] = []
+      const collectPromise = (async () => {
+        for await (const event of adapter.startTurn({
+          sessionId: 'catmax-session',
+          prompt: '并行分析',
+        })) {
+          events.push(event)
+        }
+      })()
+
+      while (!events.some((event) => event.type === 'background_task_updated')) {
+        await new Promise((resolve) => setTimeout(resolve, 0))
+      }
+      // result 已被 hold：turn 还没有终态，只能靠看门狗。
+      expect(events.some((event) => event.type === 'turn_completed')).toBe(false)
+
+      await vi.advanceTimersByTimeAsync(60_000)
+      while (!events.some((event) => event.type === 'turn_completed')) {
+        await new Promise((resolve) => setTimeout(resolve, 0))
+      }
+
+      expect(events).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            type: 'background_task_updated',
+            task: expect.objectContaining({
+              taskId: 'agent-a',
+              status: 'stopped',
+              summary: '回合已结束，未收到任务终态通知',
+            }),
+          }),
+          expect.objectContaining({ type: 'turn_completed', status: 'completed' }),
+        ]),
+      )
+
+      sdkMocks.state.releaseIterator?.()
+      await collectPromise
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  /*
+   * 回归：SDK 子进程不响应时 query.interrupt() 永远不 resolve。不限时的话停止按钮
+   * 要等协调器 15 秒的 cancel grace 才有反应，用户体感就是"点了没用"。
+   */
+  test('query.interrupt() 卡住时超时并 abort', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+    try {
+      sdkMocks.state.waitForInterrupt = true
+      sdkMocks.queryObject.interrupt.mockImplementationOnce(() => new Promise<void>(() => {}))
+      sdkMocks.state.messages = [
+        {
+          type: 'system',
+          subtype: 'task_started',
+          task_id: 'agent-a',
+          tool_use_id: 'tool-a',
+          description: '分析代理',
+          uuid: 'started-a',
+          session_id: 'claude-session',
+        },
+      ] as unknown as SDKMessage[]
+      const adapter = new ClaudeAdapter()
+      const events: TurnEvent[] = []
+      const collectPromise = (async () => {
+        for await (const event of adapter.startTurn({
+          sessionId: 'catmax-session',
+          prompt: '并行分析',
+        })) {
+          events.push(event)
+        }
+      })()
+
+      while (!events.some((event) => event.type === 'background_task_updated')) {
+        await new Promise((resolve) => setTimeout(resolve, 0))
+      }
+      const turnId = events.find((event) => event.type === 'turn_started')?.turnId
+      if (!turnId) throw new Error('turn_started event missing')
+
+      const interruptPromise = adapter.interrupt(turnId)
+      await vi.advanceTimersByTimeAsync(3_000)
+      await interruptPromise
+
+      // 超时后走 abort 兜底，SDK 流被强制中断而不是无限期挂着。
+      expect(sdkMocks.state.abortSignal?.aborted).toBe(true)
+
+      sdkMocks.state.releaseIterator?.()
+      await collectPromise
+    } finally {
+      vi.useRealTimers()
+    }
+  })
 })

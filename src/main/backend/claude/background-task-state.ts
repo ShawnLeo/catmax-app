@@ -77,7 +77,6 @@ export class ClaudeBackgroundTaskState {
   private seenNotificationUuids = new Set<string>()
   private sawBackgroundTask = false
   private initialResultSeen = false
-  private pendingNotificationFollowup = false
   private cancelling = false
   private usage: TokenUsage = {}
 
@@ -171,28 +170,48 @@ export class ClaudeBackgroundTaskState {
     const allTerminal =
       this.tasks.size > 0 &&
       [...this.tasks.values()].every(({ snapshot }) => snapshot.status !== 'running')
-    const isNotificationFollowup =
-      message.origin?.kind === 'task-notification' || this.pendingNotificationFollowup
 
-    if (this.liveTaskIds.size === 0 && allTerminal && isNotificationFollowup) {
-      this.pendingNotificationFollowup = false
+    /*
+     * 后台任务全部终结 → turn 就该结束，不再额外要求"这个 result 来自通知汇总回合"。
+     *
+     * 这个条件曾经还要求一个 pendingNotificationFollowup 标志。它是一次性的：**不**满足
+     * 终结条件的 result 也会把它清成 false，而只有 task_notification / membership 移除能把
+     * 它置回 true。于是当最后一个任务的收尾没有再触发一次 notification——例如模型用
+     * TaskOutput(block: true) 主动收割了 agent——标志就再也回不到 true，classifyResult
+     * 永远返回 'intermediate'，adapter 永远不发 turn_completed，turn 永久卡在 running：
+     * 模型早已 end_turn 说完了话，UI 还在转"正在思考"，只能靠用户点停止或 30 分钟看门狗。
+     *
+     * 去掉它不会让 turn 提前收尾：任务刚终结、汇总回合还没跑的那个窗口里那个标志本来就是
+     * true，旧条件同样判 terminal。这里只是补上标志被提前消费掉的那条路径。
+     */
+    if (this.liveTaskIds.size === 0 && allTerminal) {
       return 'terminal'
     }
 
     // 某个任务的通知可能先触发一次汇总，但其他并行任务仍在运行。
-    if (isNotificationFollowup) this.pendingNotificationFollowup = false
     return 'intermediate'
   }
 
   markCancelling(): BackgroundTaskSnapshot[] {
     this.cancelling = true
+    return this.markStalled('用户已停止任务')
+  }
+
+  /**
+   * 强制收尾：把仍在 running 的任务标成 stopped 并清空存活集合。
+   *
+   * 用于 turn 已经该结束、但某些任务的终态通知始终没到的兜底路径（见 adapter 的
+   * turn hold 看门狗）。与 markCancelling 的区别是不置 cancelling——调用方可能想以
+   * 'completed' 而非 'interrupted' 收尾。
+   */
+  markStalled(summary: string): BackgroundTaskSnapshot[] {
     this.liveTaskIds.clear()
     const updates: BackgroundTaskSnapshot[] = []
     for (const task of this.tasks.values()) {
       if (task.snapshot.status !== 'running') continue
       task.snapshot.status = 'stopped'
       task.snapshot.stats.status = 'stopped'
-      task.snapshot.summary = '用户已停止任务'
+      task.snapshot.summary = summary
       updates.push(this.copy(task.snapshot))
     }
     return updates
@@ -227,7 +246,6 @@ export class ClaudeBackgroundTaskState {
       existing.snapshot.summary = '后台任务已结束'
       existing.snapshot.stats.status = 'completed'
       updates.push(this.copy(existing.snapshot))
-      this.pendingNotificationFollowup = true
     }
 
     for (const task of message.tasks) {
@@ -306,7 +324,6 @@ export class ClaudeBackgroundTaskState {
       snapshot.stats.status = status
       if (status !== 'running') {
         this.liveTaskIds.delete(message.task_id)
-        this.pendingNotificationFollowup = true
       }
     }
     return [this.copy(snapshot)]
@@ -314,8 +331,17 @@ export class ClaudeBackgroundTaskState {
 
   private handleProgress(message: SDKTaskProgressMessage): BackgroundTaskSnapshot {
     this.sawBackgroundTask = true
-    this.liveTaskIds.add(message.task_id)
     const existing = this.tasks.get(message.task_id)
+    /*
+     * 已终结的任务不被迟到的 progress 复活。
+     *
+     * progress 与 notification 之间没有顺序保证，任务收尾时往往还有一条 in-flight 的
+     * progress 在路上。让它把 status 改回 running 并重新塞进 liveTaskIds，任务就再也
+     * 出不去了——第二次终态通知不会有，classifyResult 于是永远返回 'intermediate'，
+     * turn 永久卡在 running。快照按终态原样返回，UI 也不会闪回"运行中"。
+     */
+    if (existing && existing.snapshot.status !== 'running') return this.copy(existing.snapshot)
+    this.liveTaskIds.add(message.task_id)
     const summary = normalizeSummary(message.summary)
     const stats: ToolTaskStats = {
       ...(existing?.snapshot.stats ?? {}),
@@ -359,7 +385,6 @@ export class ClaudeBackgroundTaskState {
     this.seenNotificationUuids.add(message.uuid)
     this.sawBackgroundTask = true
     this.liveTaskIds.delete(message.task_id)
-    this.pendingNotificationFollowup = true
 
     const existing = this.tasks.get(message.task_id)
     const status = message.status

@@ -30,7 +30,7 @@
         2xl ≥1536px   → 1440px（终极上限，超宽屏不会再变宽）
       mx-auto 居中。最大宽度与 Composer 保持一致；仅侧轨显示时额外扣除导航宽度。
     -->
-      <div v-else :class="conversationClass">
+      <div v-else ref="conversation" :class="conversationClass">
         <component
           :is="backendConversationRenderer"
           v-if="backendConversationRenderer"
@@ -158,7 +158,7 @@ import { useMessageStore } from '@renderer/stores/message'
 import { useWorkspaceStore } from '@renderer/stores/workspace'
 import type { NormalizedMessage } from '@shared/backend/types'
 import { AlertCircleIcon, ArrowDownIcon, Loader2Icon } from 'lucide-vue-next'
-import { computed, nextTick, onMounted, provide, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, onUnmounted, provide, ref, watch } from 'vue'
 
 import { getBackendConversationRenderer } from '../blocks/plugin-registry'
 import ChangesCard from '../changes/ChangesCard.vue'
@@ -302,12 +302,21 @@ const agentWorking = computed(
 const showScrollToBottom = ref(false)
 const SCROLL_THRESHOLD = 120
 
+/**
+ * 用户此刻是否"跟着底部看"。
+ *
+ * 决定内容长高 / 可视区变矮时要不要自动跟随（见下方 ResizeObserver）。往上翻看历史
+ * 的人不能被拽回底部，所以只有贴着底的时候才跟。初值 true：新会话从底部开始。
+ */
+const stickToBottom = ref(true)
+
 /** 滚动事件——计算是否离底部足够远，决定显示/隐藏箭头 */
 function onScroll(): void {
   if (!container.value) return
   const { scrollTop, scrollHeight, clientHeight } = container.value
   const distanceFromBottom = scrollHeight - scrollTop - clientHeight
   showScrollToBottom.value = distanceFromBottom > SCROLL_THRESHOLD
+  stickToBottom.value = distanceFromBottom <= SCROLL_THRESHOLD
 }
 
 /** 平滑滚到底部（用户点击箭头用） */
@@ -379,5 +388,40 @@ watch(
 onMounted(async () => {
   await nextTick()
   snapToBottom()
+})
+
+/*
+ * 贴底跟随：内容长高、或可视区变矮时，把底部继续留在视野里。
+ *
+ * 上面那个 watch 只看 messages.length，而流式输出是往**同一条**消息里追加 block
+ * （thinking 一行行长出来、工具结果展开），length 一直不变，于是不触发滚动——内容
+ * 越长越高，最新的部分被顶出可视区下沿。底部交互区换成 PermissionPanel 时更明显：
+ * 它比 Composer 高，MessageList 的 clientHeight 被压小，原本贴底的内容一下子被挤到
+ * 审核框后面，看起来就像 thinking「跑到审核框下面去了」。
+ *
+ * 两个都要观察：滚动容器（可视区高度变化）和内容容器（内容高度变化）。
+ * 只在用户本来就贴着底时跟随，往上翻历史不会被拽回来。
+ */
+const conversation = ref<HTMLElement | null>(null)
+let followObserver: ResizeObserver | null = null
+
+onMounted(() => {
+  followObserver = new ResizeObserver(() => {
+    if (!stickToBottom.value || messageStore.loading || !container.value) return
+    container.value.scrollTop = container.value.scrollHeight
+  })
+  if (container.value) followObserver.observe(container.value)
+  if (conversation.value) followObserver.observe(conversation.value)
+})
+
+// 内容容器挂在 v-else 上，loading 切换会换掉这个节点，重新接观察。
+watch(conversation, (el, prev) => {
+  if (prev) followObserver?.unobserve(prev)
+  if (el) followObserver?.observe(el)
+})
+
+onUnmounted(() => {
+  followObserver?.disconnect()
+  followObserver = null
 })
 </script>

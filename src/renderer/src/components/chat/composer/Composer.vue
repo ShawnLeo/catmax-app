@@ -150,7 +150,7 @@
             禁用时保持弱化的 primary 灰阶。
           -->
           <Button
-            v-if="messageStore.isRunning"
+            v-if="showStopButton"
             size="icon"
             class="h-7 w-7 rounded-md"
             title="停止"
@@ -162,9 +162,9 @@
             v-else
             size="icon"
             class="h-7 w-7 rounded-md"
-            :class="canSend ? 'bg-foreground text-background hover:bg-foreground/90' : ''"
-            :disabled="!canSend"
-            title="发送 (Enter)"
+            :class="canSubmit ? 'bg-foreground text-background hover:bg-foreground/90' : ''"
+            :disabled="!canSubmit"
+            :title="messageStore.isRunning ? '补充指令 (Enter)' : '发送 (Enter)'"
             @click="onSend"
           >
             <ArrowUpIcon class="w-4 h-4" />
@@ -374,6 +374,24 @@ const canSend = computed(
     (prompt.value.trim().length > 0 || chatInput.pendingAttachments.length > 0) && !props.disabled,
 )
 
+/*
+ * 上一轮还在跑时能否再次提交。
+ *
+ * 运行中再发消息不是新开并发 turn，而是 steer 进当前 turn（见 ChatView.onSend）。
+ * 后端不支持 steer 时必须挡在这里：ChatView 那边会静默 return，而 onSend 早已把
+ * 输入框清空了——用户看到的是「打完字、按了回车、什么都没发生，文字还没了」。
+ */
+const canSteerNow = computed(() => backendStore.current?.capabilities.supportsSteer ?? false)
+const canSubmit = computed(() => canSend.value && (!messageStore.isRunning || canSteerNow.value))
+
+/*
+ * 停止按钮只在「跑着但没东西可发」时占位。
+ *
+ * 用户在上一轮跑的过程中打字，按钮就让位给发送箭头（这一条会 steer 进当前 turn）；
+ * 把字删空又变回方块，停止能力不会因为输入框有内容就消失。
+ */
+const showStopButton = computed(() => messageStore.isRunning && !canSubmit.value)
+
 const supportedEfforts = computed<EffortLevel[]>(() => {
   return backendStore.current?.capabilities.supportedEfforts ?? ['low', 'medium', 'high']
 })
@@ -421,7 +439,7 @@ function onKeyDown(e: KeyboardEvent): void {
 }
 
 function onSend(): void {
-  if (!canSend.value) return
+  if (!canSubmit.value) return
   const text = prompt.value.trim()
   /*
    * File Mention: 文本里的 `@路径` 原样留在 prompt 里，另外再附一份结构化的

@@ -110,6 +110,44 @@ const MCP_RUNTIME_TIMEOUT_MS = 20_000
 const MCP_RUNTIME_POLL_MS = 1_000
 
 /**
+ * "result 到了但 turn 被后台任务留着"之后，等待后续事件的上限。
+ *
+ * 有后台任务时首个 result 只是模型回合边界，turn 要等任务汇总回合才收尾（见
+ * ClaudeBackgroundTaskState.classifyResult）。但这条路径一旦等不到该来的通知，
+ * turn 就没有任何自愈手段——只剩协调器 30 分钟的 idle 看门狗，用户看到的是模型
+ * 明明已经把话说完，UI 还在转"正在思考"。60 秒足够正常的汇总回合跑完，又不至于
+ * 让人干等；到点强制收尾，仍在 running 的任务一并标成 stopped。
+ */
+const TURN_HOLD_TIMEOUT_MS = 60_000
+
+/**
+ * interrupt 里单个 SDK control request 的上限。
+ *
+ * stopTask()/interrupt() 都要往 SDK 子进程发一次 control request 并等回执。子进程
+ * 卡住时这两个 await 永远不 resolve，abort 兜底又写在 catch 里够不着，UI 只能干等
+ * 协调器 15 秒的 cancel grace。超时就直接 abort，让停止按钮秒级生效。
+ */
+const INTERRUPT_CONTROL_TIMEOUT_MS = 3_000
+
+/** 给 promise 加超时；超时抛错而不是静默 resolve，调用方才能走兜底分支。 */
+function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(`${label} timed out after ${ms}ms`)), ms)
+    timer.unref?.()
+    promise.then(
+      (value) => {
+        clearTimeout(timer)
+        resolve(value)
+      },
+      (error) => {
+        clearTimeout(timer)
+        reject(error)
+      },
+    )
+  })
+}
+
+/**
  * 一条永远不产出消息的 prompt 流。
  *
  * 取斜杠命令表只需要握手——命令表在 initialize 的响应里，发任何消息都是白花 token。
@@ -953,6 +991,45 @@ export class ClaudeAdapter implements AgentBackend {
     const streamDone = { value: false, error: null as Error | null }
     void (async () => {
       let terminalQueued = false
+
+      /*
+       * Turn Hold Watchdog: result 已到、turn 却被后台任务留着时的兜底。
+       *
+       * 正常情况下后续会有汇总回合的 result 把 turn 收掉；等不到时这里强制收尾，
+       * 否则 turn 会一直 running 到协调器 30 分钟的 idle 看门狗（见 TURN_HOLD_TIMEOUT_MS）。
+       * 任何新事件都算"仍有进展"，重新计时。
+       */
+      let holdTimer: ReturnType<typeof setTimeout> | null = null
+      const clearHold = (): void => {
+        if (holdTimer) clearTimeout(holdTimer)
+        holdTimer = null
+      }
+      const armHold = (): void => {
+        clearHold()
+        holdTimer = setTimeout(() => {
+          holdTimer = null
+          if (terminalQueued) return
+          log.warn(
+            'turn held open past',
+            TURN_HOLD_TIMEOUT_MS,
+            'ms after result; forcing completion',
+            { turnId: internalTurnId, activeTaskIds: backgroundTasks.activeTaskIds() },
+          )
+          for (const task of backgroundTasks.markStalled('回合已结束，未收到任务终态通知')) {
+            pushEvent({ type: 'background_task_updated', turnId: internalTurnId, task })
+          }
+          pushEvent({
+            type: 'turn_completed',
+            turnId: internalTurnId,
+            status: 'completed',
+            usage: backgroundTasks.accumulatedUsage(),
+          })
+          terminalQueued = true
+          inputController.close()
+        }, TURN_HOLD_TIMEOUT_MS)
+        holdTimer.unref?.()
+      }
+
       try {
         for await (const msg of sdkQuery) {
           // 终态已经入队后只排空 SDK 的收尾帧，避免重复生成 turn_completed。
@@ -969,6 +1046,11 @@ export class ClaudeAdapter implements AgentBackend {
             sawStreamEvents,
           )
           for (const ev of events) pushEvent(ev)
+          const heldOpen =
+            isSdkResultMessage(msg) && !events.some((e) => e.type === 'turn_completed')
+          // result 被 hold 住 → 起计时；其余任何消息都说明还有进展 → 撤销计时。
+          if (heldOpen) armHold()
+          else clearHold()
           if (events.some((event) => event.type === 'turn_completed')) {
             terminalQueued = true
             // 先正常关闭 streaming input，让 SDK 自然收尾。直接 break async iterator
@@ -1047,6 +1129,7 @@ export class ClaudeAdapter implements AgentBackend {
           }
         }
       } finally {
+        clearHold()
         streamDone.value = true
         waker.resolve?.()
       }
@@ -1321,8 +1404,11 @@ export class ClaudeAdapter implements AgentBackend {
     }
 
     // 先显式停止后台任务，再中断父 query，避免留下脱离 UI 生命周期的子 Agent。
+    // 每个 stopTask 单独限时：SDK 子进程无响应时它不会 reject，只会永远挂着。
     const stopResults = await Promise.allSettled(
-      activeTaskIds.map((taskId) => ctx.query.stopTask(taskId)),
+      activeTaskIds.map((taskId) =>
+        withTimeout(ctx.query.stopTask(taskId), INTERRUPT_CONTROL_TIMEOUT_MS, `stopTask ${taskId}`),
+      ),
     )
     stopResults.forEach((result, index) => {
       if (result.status === 'rejected') {
@@ -1331,10 +1417,12 @@ export class ClaudeAdapter implements AgentBackend {
     })
 
     // SDK 的 interrupt 是协作式的——发中断信号让 query 流尽快结束。
+    // 同样要限时：卡住时直接 abort，abort 会让 for-await 抛出，pump 立刻推终态。
+    // 不限时的话这个 await 永远不返回，UI 只能等协调器 15 秒的 cancel grace。
     try {
-      await ctx.query.interrupt()
+      await withTimeout(ctx.query.interrupt(), INTERRUPT_CONTROL_TIMEOUT_MS, 'query.interrupt()')
     } catch (e) {
-      log.warn('query.interrupt() failed, falling back to abort:', e)
+      log.warn('query.interrupt() failed or timed out, falling back to abort:', e)
       ctx.abortController.abort()
     }
   }
