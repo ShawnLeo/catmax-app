@@ -41,6 +41,9 @@
         <SessionList class="flex-1 overflow-hidden" />
       </div>
 
+      <!-- Update Card: 浮在账号栏正上方，仅在更新已下载待重启时出现 -->
+      <UpdateCard />
+
       <!-- 底部：用户信息 + 设置 -->
       <SidebarFooter />
     </div>
@@ -53,6 +56,7 @@ import { computed } from 'vue'
 
 import SessionList from './SessionList.vue'
 import SidebarFooter from './SidebarFooter.vue'
+import UpdateCard from './UpdateCard.vue'
 import WorkspaceSwitcher from './WorkspaceSwitcher.vue'
 
 interface Props {

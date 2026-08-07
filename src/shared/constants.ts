@@ -31,6 +31,11 @@ export const IPC = {
   AUTH_GET_STATUS: 'auth.getStatus',
   AUTH_LOGIN: 'auth.login',
   AUTH_LOGOUT: 'auth.logout',
+
+  // Hot Update: 检查 / 重启生效。下载与验签全在 main，renderer 只读状态。
+  UPDATE_GET_STATUS: 'update.getStatus',
+  UPDATE_CHECK: 'update.check',
+  UPDATE_APPLY: 'update.apply',
   // system
   SYSTEM_PLATFORM_INFO: 'system.platformInfo',
   SYSTEM_OPEN_DIALOG: 'system.openDialog',
@@ -154,6 +159,8 @@ export const PUSH = {
   SKILLS_CHANGED: 'skills:changed',
   /** Tray: 托盘右键菜单点了"新建会话"/"设置"，renderer 转交给 commandRegistry 执行 */
   TRAY_COMMAND: 'system:trayCommand',
+  /** Hot Update: 检查/下载/装好待重启等状态变化，侧栏底部的更新卡片消费 */
+  UPDATE_STATUS_CHANGED: 'update:statusChanged',
 } as const
 
 /** 存储相关 */

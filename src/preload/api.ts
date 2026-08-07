@@ -9,6 +9,7 @@ import type { SessionHandlers, SessionPushEvents } from '@shared/ipc/session'
 import type { SettingsHandlers } from '@shared/ipc/settings'
 import type { SkillsHandlers, SkillsPushEvents } from '@shared/ipc/skills'
 import type { SystemHandlers, SystemPushEvents } from '@shared/ipc/system'
+import type { UpdateHandlers, UpdatePushEvents } from '@shared/ipc/update'
 import type { WorkspaceHandlers } from '@shared/ipc/workspace'
 import * as electron from 'electron'
 
@@ -58,6 +59,16 @@ export const api = {
     getStatus: requestMain<AuthHandlers, 'auth.getStatus'>(IPC.AUTH_GET_STATUS),
     login: requestMain<AuthHandlers, 'auth.login'>(IPC.AUTH_LOGIN),
     logout: requestMain<AuthHandlers, 'auth.logout'>(IPC.AUTH_LOGOUT),
+  },
+  update: {
+    getStatus: requestMain<UpdateHandlers, 'update.getStatus'>(IPC.UPDATE_GET_STATUS),
+    check: requestMain<UpdateHandlers, 'update.check'>(IPC.UPDATE_CHECK),
+    apply: requestMain<UpdateHandlers, 'update.apply'>(IPC.UPDATE_APPLY),
+    onStatusChanged: (cb: (payload: UpdatePushEvents['update:statusChanged']) => void) =>
+      subscribeToMainEvent<UpdatePushEvents, 'update:statusChanged'>(
+        PUSH.UPDATE_STATUS_CHANGED,
+        cb,
+      ),
   },
   system: {
     platformInfo: requestMain<SystemHandlers, 'system.platformInfo'>(IPC.SYSTEM_PLATFORM_INFO),

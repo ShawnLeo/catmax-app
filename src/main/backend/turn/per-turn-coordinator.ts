@@ -238,6 +238,25 @@ export class PerTurnCoordinator {
   }
 
   /**
+   * 是否还有未结算的 turn。
+   *
+   * 存在的理由是热更新的重启门禁（设计文档 §5.7）：进程一旦重启，
+   * `recoverInterrupted()` 会把所有遗留的 queued/running/cancelling 强制标成
+   * interrupted，而这**不可逆**——本地 CLI/SDK 子进程已随主进程死掉，没有任何
+   * 重连的可能。所以"能不能重启"必须问过这里。
+   *
+   * `queued` 也算活跃：它还没开始跑，但用户已经把消息发出去了，重启同样会让它消失。
+   */
+  countActiveTurns(): number {
+    let count = 0
+    for (const lane of this.lanes.values()) {
+      if (lane.active && !lane.active.settled) count += 1
+      count += lane.queue.filter((entry) => !entry.settled).length
+    }
+    return count
+  }
+
+  /**
    * 中断并结算某个 backend 的所有活跃 turn（dispose 全局的细化版本）。
    *
    * 用于重连某后端进程前清空它的 in-flight turn——否则被杀进程的 turn 会卡在

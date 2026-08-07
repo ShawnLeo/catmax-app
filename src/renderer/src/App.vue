@@ -16,6 +16,7 @@ import { useAuthStore } from '@renderer/stores/auth'
 import { useBackendStore } from '@renderer/stores/backend'
 import { useSettingsStore } from '@renderer/stores/settings'
 import { useUiStore } from '@renderer/stores/ui'
+import { useUpdateStore } from '@renderer/stores/update'
 import { useWorkspaceStore } from '@renderer/stores/workspace'
 import { computed } from 'vue'
 import { onMounted } from 'vue'
@@ -26,6 +27,7 @@ const uiStore = useUiStore()
 const backendStore = useBackendStore()
 const authStore = useAuthStore()
 const workspaceStore = useWorkspaceStore()
+const updateStore = useUpdateStore()
 const router = useRouter()
 
 // 切换后端时清空审查快照——审查内容是旧后端某轮改动的只读快照，跨后端已无意义。
@@ -87,5 +89,9 @@ onMounted(async () => {
       settings.settings.bottomPanelHeight,
     )
   }
+
+  // Hot Update: 订阅状态推送。不 await——它只驱动一张提示卡片，
+  // 拿它挡住首屏没有任何意义。
+  void updateStore.init()
 })
 </script>

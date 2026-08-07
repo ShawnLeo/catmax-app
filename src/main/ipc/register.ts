@@ -10,6 +10,7 @@ import { registerSessionHandlers } from './domains/session'
 import { registerSettingsHandlers } from './domains/settings'
 import { registerSkillsHandlers, syncSkillsOnStartup } from './domains/skills'
 import { registerSystemHandlers } from './domains/system'
+import { registerUpdateHandlers } from './domains/update'
 import { registerWorkspaceHandlers } from './domains/workspace'
 
 const log = logger.domain('ipc-register')
@@ -29,6 +30,7 @@ export async function registerAllHandlers(): Promise<void> {
   registerPtyHandlers()
   registerSkillsHandlers()
   registerMcpHandlers()
+  registerUpdateHandlers()
   log.info('all handlers registered')
   // Unified Skill Center: 补推被关掉的技能。不 await——codex 首次调用会 spawn
   // app-server，拿它挡住启动会让窗口白等好几秒。

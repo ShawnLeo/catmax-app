@@ -5,6 +5,7 @@ import fixPath from 'fix-path'
 import { ctx } from './context'
 import { registerAllHandlers } from './ipc/register'
 import { bridgeManager } from './protocol/manager'
+import { setActiveTurnProbe, startHotUpdateScheduler } from './service/hot-update'
 import { logger } from './service/logger'
 import { cleanupWarmupTranscripts } from './service/warmup-cleanup'
 import { createTray } from './tray'
@@ -85,6 +86,12 @@ void app.whenReady().then(async () => {
   // Tray: 必须在 whenReady 之后创建。图标资源缺失时 createTray 返回 null 并只打 warn，
   // 托盘是增强入口，没有它 App 照常可用，不该让启动失败。
   createTray()
+
+  // Hot Update: 重启门禁的探针（§5.7）。用注入而不是让 service 直接 import
+  // backendManager，是因为更新服务只需要一个布尔结论，反向依赖整个 backend 层
+  // 会把它拖进 backend 的初始化顺序里。
+  setActiveTurnProbe(() => ctx.backendManager.countActiveTurns())
+  startHotUpdateScheduler()
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) {

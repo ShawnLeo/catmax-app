@@ -382,6 +382,14 @@ export class BackendManager {
    * `mcp-projection.ts` 而不是这里：它是纯策略 + 文件操作，没有进程状态，
    * 放 service 层才能不起 Electron 就测。manager 只负责把 adapter 递过去。
    */
+  /**
+   * 未结算的 turn 数量。热更新的重启门禁用它（设计文档 §5.7）——重启会让这些
+   * turn 被 `recoverInterrupted()` 不可逆地标成 interrupted。
+   */
+  countActiveTurns(): number {
+    return this.turnCoordinator.countActiveTurns()
+  }
+
   getAdapters(): Map<BackendId, AgentBackend> {
     return this.adapters
   }

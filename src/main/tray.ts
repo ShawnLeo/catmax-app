@@ -8,9 +8,18 @@ import { join } from 'node:path'
 
 import { PUSH } from '@shared/constants'
 import { type TrayCommandId, type TrayContext } from '@shared/ipc/system'
-import { app, Menu, nativeImage, nativeTheme, Tray, type NativeImage } from 'electron'
+import {
+  app,
+  Menu,
+  nativeImage,
+  nativeTheme,
+  Tray,
+  type MenuItemConstructorOptions,
+  type NativeImage,
+} from 'electron'
 
 import { ctx } from './context'
+import { applyUpdate, getStatus as getUpdateStatus } from './service/hot-update'
 import { logger } from './service/logger'
 import { showMainWindow } from './window'
 
@@ -104,6 +113,32 @@ function dispatchTrayCommand(command: TrayCommandId): void {
 }
 
 /**
+ * Hot Update: 更新相关的托盘项（§5.7）。
+ *
+ * 没有待生效的更新时**整段不出现**，而不是显示一个灰掉的"重启以更新"——
+ * 托盘菜单是常驻可见的，一个永远灰着的项只会让人以为功能坏了。
+ */
+function updateMenuItems(): MenuItemConstructorOptions[] {
+  const status = getUpdateStatus()
+  if (!status.supported || status.state !== 'staged') return []
+
+  const blocked = status.activeTurns > 0
+  return [
+    { type: 'separator' },
+    {
+      label: blocked
+        ? `更新已就绪（还有 ${status.activeTurns} 个会话在运行）`
+        : `重启以更新到 ${status.stagedVersion}`,
+      enabled: !blocked,
+      click: () => {
+        const result = applyUpdate()
+        if (!result.ok && result.reason) log.warn('托盘重启更新被拒绝', result.reason)
+      },
+    },
+  ]
+}
+
+/**
  * Tray Gating: 每次右键弹出时重建菜单，而不是启动时建一次留着。
  *
  * 菜单项的启用状态取决于登录态和当前路由，两者都会在 App 运行期间变。
@@ -139,6 +174,9 @@ function buildMenu(): Menu {
       click: () => dispatchTrayCommand('session.new'),
     },
     { label: '设置', enabled: loggedIn, click: () => dispatchTrayCommand('app.go-settings') },
+    // Hot Update: 托盘是这个常驻应用唯一 always 可达的 UI——窗口关掉后侧栏那张
+    // 卡片就没了，而 macOS 下关窗进程还活着（§5.7）。所以更新入口必须也在这里。
+    ...updateMenuItems(),
     { type: 'separator' },
     {
       label: '退出应用',
