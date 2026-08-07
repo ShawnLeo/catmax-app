@@ -25,11 +25,8 @@ const {
 
 const { writeBackendConfigFile } = await import('@main/service/backend-config-files')
 
-const {
-  INTERNAL_BETA_PROFILE_ID,
-  MAX_CLAUDE_SETTINGS_PROFILES,
-  NO_CLAUDE_SETTINGS_PROFILE,
-} = await import('@shared/backend/claude-settings-profiles')
+const { INTERNAL_BETA_PROFILE_ID, MAX_CLAUDE_SETTINGS_PROFILES, NO_CLAUDE_SETTINGS_PROFILE } =
+  await import('@shared/backend/claude-settings-profiles')
 
 let tempDir: string
 let backendSettingsDir: string
@@ -224,12 +221,10 @@ describe('内测登录档', () => {
 
   test('内测档不允许改名 / 删除——那会让登录态和档对不上', () => {
     ensureInternalBetaProfile()
-    expect(() =>
-      renameClaudeSettingsProfile({ id: INTERNAL_BETA_PROFILE_ID, name: 'x' }),
-    ).toThrow(/内置配置/)
-    expect(() => deleteClaudeSettingsProfile({ id: INTERNAL_BETA_PROFILE_ID })).toThrow(
+    expect(() => renameClaudeSettingsProfile({ id: INTERNAL_BETA_PROFILE_ID, name: 'x' })).toThrow(
       /内置配置/,
     )
+    expect(() => deleteClaudeSettingsProfile({ id: INTERNAL_BETA_PROFILE_ID })).toThrow(/内置配置/)
   })
 })
 

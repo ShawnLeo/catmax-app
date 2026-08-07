@@ -1,11 +1,10 @@
 // @vitest-environment node
-import { describe, expect, test } from 'vitest'
-
 import {
   BRIDGE_UPSTREAM_PRESETS,
   bridgeUpstreamPreset,
   createProviderFromPreset,
 } from '@shared/protocol/bridge-config'
+import { describe, expect, test } from 'vitest'
 
 describe('createProviderFromPreset', () => {
   test('各预设生成的 provider 字段正确填充', () => {

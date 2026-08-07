@@ -1,7 +1,6 @@
 // @vitest-environment node
-import { describe, expect, test } from 'vitest'
-
 import { appSettingsSchema } from '@shared/settings-schema'
+import { describe, expect, test } from 'vitest'
 
 describe('protocolBridge schema', () => {
   test('空对象走 default：enabled=false, currentProviderId="", providers={}', () => {

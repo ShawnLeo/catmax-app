@@ -11,6 +11,7 @@
 import { randomUUID } from 'node:crypto'
 
 import { ctx } from '@main/context'
+import { resolveCodexPath } from '@main/service/codex-resolver'
 import { logger } from '@main/service/logger'
 import type { SlashCommandInfo } from '@shared/backend/slash-commands'
 import {
@@ -193,6 +194,33 @@ export class BackendManager {
     await adapter.dispose()
     await adapter.initialize()
     log.info('reconnected backend', id)
+  }
+
+  /**
+   * 尝试自动发现 codex 路径并写入 settings——仅当用户没有手动配置过路径时才生效
+   * （不覆盖用户显式配置，哪怕那个路径当前失效）。
+   *
+   * 不放进 listStatuses/getStatus：那两个是高频只读查询（每次打开设置页/切窗口都会调），
+   * 而这里为了扫 Homebrew/npm 全局/nvm 版本目录，会 spawn 2 个子进程 + 若干次 fs 访问，
+   * genuinely 没装 codex 的用户每次都要为一个注定失败的扫描买单。改为显式触发：
+   * 应用启动时跑一次（见 src/main/index.ts），以及用户点「刷新检测」时跑一次
+   * （backend.rescanCodexPath IPC）——都是"这时候去查大概率有用"的时机。
+   *
+   * 返回值：是否新发现并写入了一个路径（false 也可能只是因为已经配置过，不代表真没装）。
+   */
+  async autoDiscoverCodexPath(): Promise<boolean> {
+    const settings = ctx.settingsStore.load()
+    if (settings.backendPaths.codex) return false
+
+    const found = await resolveCodexPath(null)
+    if (!found) return false
+
+    log.info('auto-discovered codex at', found)
+    const updated = ctx.settingsStore.update({
+      backendPaths: { ...settings.backendPaths, codex: found },
+    })
+    this.applySettings(updated)
+    return true
   }
 
   /** 列出所有后端的 status */

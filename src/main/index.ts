@@ -66,7 +66,19 @@ void app.whenReady().then(async () => {
   } catch (e) {
     log.warn('protocol bridge failed to start:', e)
   }
-  ctx.backendManager.applySettings(startupSettings)
+  // codex 路径自动发现：只在用户从没配过 backendPaths.codex 时才扫（见
+  // BackendManager.autoDiscoverCodexPath 的注释）。覆盖"用户在 catmax 之前就已经
+  // 装好了 codex，但装在 fix-path 修完的 PATH 之外（Homebrew/npm 全局/nvm 版本目录）"
+  // 的场景——不这么做的话，这类用户点开设置页只会看到"未检测到 codex"。
+  // 必须在 backendManager.applySettings 之前跑完，才能让下面这次 applySettings
+  // 用上刚发现的路径；用 ctx.settingsStore.load() 重新读一次是因为发现成功时
+  // autoDiscoverCodexPath 已经把新路径落盘并刷新了 settingsStore 的内存缓存。
+  try {
+    await ctx.backendManager.autoDiscoverCodexPath()
+  } catch (e) {
+    log.warn('codex auto-discovery failed:', e)
+  }
+  ctx.backendManager.applySettings(ctx.settingsStore.load())
   log.info('database + settings ready')
 
   registerAllHandlers()

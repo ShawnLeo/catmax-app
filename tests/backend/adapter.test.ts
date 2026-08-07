@@ -669,7 +669,7 @@ describe('CodexAdapter', () => {
     const { spawner, stdout, stdin } = createMockSpawner()
     const adapter = new CodexAdapter({ spawner })
 
-    const capturedTurnStart: any[] = []
+    const capturedTurnStart: Array<{ params: { model: string } }> = []
     stdin.on('data', (data) => {
       const lines = data.toString().split('\n').filter(Boolean)
       for (const line of lines) {
@@ -684,7 +684,7 @@ describe('CodexAdapter', () => {
             },
           })
         } else if (msg.method === 'turn/start' && msg.id !== undefined) {
-          capturedTurnStart.push(msg)
+          capturedTurnStart.push(msg as { params: { model: string } })
           pushLine(stdout, { id: msg.id, result: { turn: { id: 'turn_1' } } })
           // 推送 turn/started + turn/completed 让 generator 结束
           pushLine(stdout, {
@@ -700,7 +700,7 @@ describe('CodexAdapter', () => {
     })
 
     // 不传 model，应该走 resolveDefaultModel → 'gpt-5.2-codex'
-    const events: any[] = []
+    const events: TurnEvent[] = []
     for await (const ev of adapter.startTurn({
       sessionId: 'thr_test',
       prompt: 'hi',
@@ -762,7 +762,7 @@ describe('CodexAdapter', () => {
       }
     })
 
-    const events: any[] = []
+    const events: TurnEvent[] = []
     for await (const ev of adapter.startTurn({
       sessionId: 'thr_lost',
       prompt: 'hi',
@@ -815,7 +815,7 @@ describe('CodexAdapter', () => {
       }
     })
 
-    const events: any[] = []
+    const events: TurnEvent[] = []
     for await (const ev of adapter.startTurn({
       sessionId: 'thr_gone',
       prompt: 'hi',

@@ -21,6 +21,7 @@ import {
   refreshModels,
   refreshModelsFor,
   renameClaudeSettingsProfile,
+  rescanCodexPath,
   respondApproval,
   respondQuestion,
   getBridgeStatus,
@@ -95,6 +96,10 @@ export function registerBackendHandlers(): void {
   handleRendererRequest<BackendHandlers, 'backend.cancelInstall'>(
     'backend.cancelInstall',
     cancelBackendInstall,
+  )
+  handleRendererRequest<BackendHandlers, 'backend.rescanCodexPath'>(
+    'backend.rescanCodexPath',
+    rescanCodexPath,
   )
   handleRendererRequest<BackendHandlers, 'backend.listConfigFiles'>(
     'backend.listConfigFiles',

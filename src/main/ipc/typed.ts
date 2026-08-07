@@ -10,6 +10,9 @@ import { ipcMain, ipcRenderer, type BrowserWindow, type IpcMainInvokeEvent } fro
  * - 改 handler 签名 → renderer 编译报错 → 契约不漂移
  */
 
+// 泛型约束用，跟 TS 内置 Parameters<T>/ReturnType<T> 自己的约束（T extends (...args: any) => any）
+// 一致——换成 unknown 会因为参数逆变直接编译不过，装不下任意签名的 handler。
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 type AnyFn = (...args: any[]) => any
 
 /** handler 映射（key = channel name，value = 函数签名） */

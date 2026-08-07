@@ -6,6 +6,7 @@
  *
  * 同时验证 backendPaths 注入到 adapter 的 binaryPath。
  */
+import type { AppSettings } from '@shared/settings-schema'
 import { describe, expect, test, vi } from 'vitest'
 
 // mock context——避免拉起真的 db / settingsStore（applySettings 不依赖 ctx，
@@ -16,10 +17,16 @@ vi.mock('@main/context', () => ({
   },
 }))
 
+// builtin-plugins 的 claude applySettings 会调 app.getVersion() 拼 ANTHROPIC_CUSTOM_HEADERS
+// （见 src/main/backend/builtin-plugins.ts），vitest 里没有 Electron runtime，mock 掉才能
+// 让 applySettings 跑通——不 mock 的话 `app` 是 undefined，调 .getVersion() 直接抛。
+vi.mock('electron', () => ({
+  app: { getVersion: () => '0.0.0-test' },
+}))
+
 // 必须在 mock 之后 import
 const { BackendManager } = await import('@main/backend/manager')
 const { appSettingsSchema } = await import('@shared/settings-schema')
-import type { AppSettings } from '@shared/settings-schema'
 
 function makeSettings(overrides: Partial<AppSettings> = {}): AppSettings {
   return appSettingsSchema.parse({

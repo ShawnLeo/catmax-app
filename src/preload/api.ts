@@ -147,6 +147,9 @@ export const api = {
     cancelInstall: requestMain<BackendHandlers, 'backend.cancelInstall'>(
       IPC.BACKEND_CANCEL_INSTALL,
     ),
+    rescanCodexPath: requestMain<BackendHandlers, 'backend.rescanCodexPath'>(
+      IPC.BACKEND_RESCAN_CODEX_PATH,
+    ),
     // Backend Config Files: 直接编辑 ~/.codex/config.toml 等后端自己的配置文件
     listConfigFiles: requestMain<BackendHandlers, 'backend.listConfigFiles'>(
       IPC.BACKEND_LIST_CONFIG_FILES,

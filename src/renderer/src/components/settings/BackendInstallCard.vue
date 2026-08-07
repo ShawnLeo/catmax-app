@@ -68,8 +68,14 @@
           {{ copiedCommand === cmd.command ? '已复制' : '复制' }}
         </Button>
       </div>
-      <Button variant="outline" size="sm" class="self-start" @click="emit('refresh')">
-        刷新检测
+      <Button
+        variant="outline"
+        size="sm"
+        class="self-start"
+        :disabled="rescanning"
+        @click="onRefresh"
+      >
+        {{ rescanning ? '检测中…' : '刷新检测' }}
       </Button>
     </div>
   </div>
@@ -94,6 +100,7 @@ const emit = defineEmits<{
 const backendStore = useBackendStore()
 const showManual = ref(false)
 const copiedCommand = ref<string | null>(null)
+const rescanning = ref(false)
 
 // 卡片可能在安装进行中被重新挂载（切页面回来），这里补订阅以免进度断流
 onMounted(() => backendStore.ensureInstallSubscription())
@@ -157,6 +164,23 @@ async function onInstall(): Promise<void> {
 
 async function onCancel(): Promise<void> {
   await backendStore.cancelInstall(props.backendId)
+}
+
+/**
+ * 「刷新检测」不只是重新查一遍——先扫一遍 PATH 之外的常见安装位置
+ * （Homebrew / npm 全局 / nvm 版本目录等，见 codex-resolver.ts），扫到就直接写进配置。
+ * 覆盖"用户在终端手动装完，回来点一下就能被识别到"的场景，不用自己去填路径。
+ */
+async function onRefresh(): Promise<void> {
+  rescanning.value = true
+  try {
+    if (props.backendId === 'codex') {
+      await window.api.backend.rescanCodexPath()
+    }
+    emit('refresh')
+  } finally {
+    rescanning.value = false
+  }
 }
 
 async function copy(command: string): Promise<void> {

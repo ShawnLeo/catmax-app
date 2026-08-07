@@ -30,9 +30,8 @@ const {
   writeBackendConfigFile,
 } = await import('@main/service/backend-config-files')
 
-const { createClaudeSettingsProfile, selectClaudeSettingsProfile } = await import(
-  '@main/service/claude-settings-profiles'
-)
+const { createClaudeSettingsProfile, selectClaudeSettingsProfile } =
+  await import('@main/service/claude-settings-profiles')
 const { NO_CLAUDE_SETTINGS_PROFILE } = await import('@shared/backend/claude-settings-profiles')
 
 // CODEX_HOME / CLAUDE_CONFIG_DIR 就是生产代码解析配置目录的方式，

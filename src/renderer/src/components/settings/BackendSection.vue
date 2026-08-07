@@ -40,9 +40,11 @@
       @refresh="backendStore.refresh()"
     />
 
-    <!-- Backend Setup Gate: 未安装当前默认后端时只展示安装入口，避免用户提前配置
-         一个尚不可运行的后端。安装或刷新成功后，下面的配置自动恢复。 -->
-    <template v-if="missingBackendIds.length === 0 && isBackendAvailable(defaultBackend)">
+    <!-- Backend Setup Gate: 只看「当前默认后端」是否可用——只要 defaultBackend 能跑，
+         下面的配置就该显示，即便另一个后端（比如 codex）还没装。之前误把两者耦合在一起，
+         会导致新用户默认用 claude、只是没装 codex，就连 claude 自己的配置都看不到。
+         未安装当前默认后端时只展示上面的安装入口，避免用户提前配置一个尚不可运行的后端。 -->
+    <template v-if="isBackendAvailable(defaultBackend)">
       <div class="h-px bg-sidebar-border my-1" />
 
       <header class="flex items-center gap-1.5">

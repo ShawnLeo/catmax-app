@@ -19,6 +19,9 @@ vi.mock('@main/context', async () => {
   }
 })
 
+// mock 工厂返回的是手写的部分 ctx 形状，故意不匹配真实 Context class，
+// 后面全靠动态属性访问，没法给一个不会跟 mock 走样的结构类型。
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 const ctxModule: any = await import('@main/context')
 const {
   addWorkspace,

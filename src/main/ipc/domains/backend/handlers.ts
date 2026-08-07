@@ -191,6 +191,17 @@ export const cancelBackendInstall = async (args: { id: BackendId }) => {
   cancelInstall(args.id)
 }
 
+export const rescanCodexPath = async (): Promise<{ found: boolean; path: string | null }> => {
+  const found = await ctx.backendManager.autoDiscoverCodexPath()
+  if (!found) return { found: false, path: null }
+
+  const path = ctx.settingsStore.load().backendPaths.codex
+  // 让设置页立刻看到"已可用"，不用等下一次 refresh——与 installBackend 成功后的做法一致
+  const status = await ctx.backendManager.getStatus('codex')
+  ctx.broadcast(PUSH.BACKEND_STATUS_CHANGED, { status })
+  return { found: true, path }
+}
+
 // Backend Config Files: 直接编辑后端自己的本地配置文件。
 // 全部按稳定 id 查表解析路径——renderer 传不进任意路径（见 service/backend-config-files.ts 顶部注释）。
 

@@ -1,4 +1,5 @@
 import { CLAUDE_CAPABILITIES, CODEX_CAPABILITIES } from '@shared/backend/builtin-capabilities'
+import { app } from 'electron'
 
 import { bridgeManager } from '../protocol/manager'
 import { codexMcpInjectArgs } from '../service/mcp-inject'
@@ -97,7 +98,17 @@ export function registerBuiltinBackendPlugins(): void {
         if (!(adapter instanceof ClaudeAdapter)) return
         const binaryPath = settings.backendPaths.claude
         if (binaryPath) adapter.setBinaryPath(binaryPath)
-        adapter.setExtraEnv(proxySettingsToEnv(settings.httpProxy))
+        // Claude Custom Headers: 把来源标识注入 claude binary 发出的 HTTP 请求头。
+        // ANTHROPIC_CUSTOM_HEADERS 是 Anthropic 约定的环境变量(claude binary 读取)，
+        // 格式为 `Name: Value`，换行分隔多个 header。setExtraEnv 是整体覆盖语义，
+        // 必须与 proxy env 一次合并传入，否则会冲掉代理设置。
+        adapter.setExtraEnv({
+          ...proxySettingsToEnv(settings.httpProxy),
+          ANTHROPIC_CUSTOM_HEADERS: [
+            `X-Client-Name: catmax-app`,
+            `X-Client-Version: ${app.getVersion()}`,
+          ].join('\n'),
+        })
       },
     })
   }

@@ -1,5 +1,13 @@
-import { resolveCodexPath } from '@main/service/codex-resolver'
-import { describe, expect, test } from 'vitest'
+// @vitest-environment node
+import { describe, expect, test, vi } from 'vitest'
+
+// codex-resolver 在模块顶层 import electron（app.getPath，用于定位一键安装目录），
+// vitest 里没有 Electron runtime，mock 掉才能 import 到纯函数。
+vi.mock('electron', () => ({
+  app: { getPath: () => '/nonexistent/catmax-test-userdata' },
+}))
+
+const { resolveCodexPath } = await import('@main/service/codex-resolver')
 
 describe('resolveCodexPath', () => {
   test('自定义路径存在时返回', async () => {
@@ -8,14 +16,14 @@ describe('resolveCodexPath', () => {
     expect(result).toBe('/bin/cat')
   })
 
-  test('自定义路径不存在时 fallback', async () => {
-    // 路径不存在，会走 which codex 流程；如果环境没装 codex，返回 null 或 PATH 里的
+  test('自定义路径不存在时 fallback 到自动发现', async () => {
+    // 路径不存在，会走 which/npm/常见目录/nvm 的自动发现链；
+    // 结果取决于运行测试的机器是否装了 codex，这里只验证不抛错。
     const result = await resolveCodexPath('/nonexistent/path/xyz')
-    // 不严格断言（取决于环境），只验证不抛错
     expect(typeof result === 'string' || result === null).toBe(true)
   })
 
-  test('不传自定义路径，从 PATH 找', async () => {
+  test('不传自定义路径，走自动发现', async () => {
     const result = await resolveCodexPath()
     expect(typeof result === 'string' || result === null).toBe(true)
   })

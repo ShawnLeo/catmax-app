@@ -97,6 +97,12 @@ export type BackendHandlers = {
   /** 取消进行中的安装；没有进行中的安装时是 no-op */
   'backend.cancelInstall': (args: { id: BackendId }) => Promise<void>
   /**
+   * 重新扫描本机常见位置（PATH / npm 全局 / Homebrew / nvm 版本目录 / 一键安装目录）找 codex，
+   * 找到就写进 settings.backendPaths.codex 并热应用。仅当用户没有手动配置过路径时生效。
+   * 用户在设置页外手动装完 codex 后点「刷新检测」触发；成功后调用方应再拉一次 backend.list。
+   */
+  'backend.rescanCodexPath': () => Promise<{ found: boolean; path: string | null }>
+  /**
    * Backend Config Files: 直接读写后端自己的本地配置文件（~/.codex/config.toml 等）。
    *
    * `id` 只能是 `BACKEND_CONFIG_FILES` 里的稳定 id——路径由主进程查表算出，

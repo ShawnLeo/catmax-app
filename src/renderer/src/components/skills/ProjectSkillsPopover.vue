@@ -35,75 +35,75 @@
         role="dialog"
         aria-label="当前项目技能"
       >
-      <p
-        v-if="store.lastMessage"
-        class="mb-2 rounded-md border border-border bg-muted p-2 text-[length:var(--ui-text-d3)] text-foreground"
-      >
-        {{ store.lastMessage }}
-      </p>
-      <div
-        class="mb-2 grid grid-cols-2 gap-1 rounded-md bg-muted/60 p-1"
-        role="tablist"
-        aria-label="技能类型"
-      >
-        <button
-          type="button"
-          role="tab"
-          :aria-selected="activeTab === 'user'"
-          :class="tabClass(activeTab === 'user')"
-          @click="activeTab = 'user'"
-        >
-          用户技能 <span class="opacity-70">{{ store.projectSkillCount }}</span>
-        </button>
-        <button
-          type="button"
-          role="tab"
-          :aria-selected="activeTab === 'system'"
-          :class="tabClass(activeTab === 'system')"
-          @click="activeTab = 'system'"
-        >
-          系统技能 <span class="opacity-70">{{ store.systemSkillCount }}</span>
-        </button>
-      </div>
-      <div v-if="activeTab === 'user'" role="tabpanel" aria-label="用户技能">
-        <SkillRow
-          v-for="entry in store.projectSkills"
-          :key="entry.id"
-          :entry="entry"
-          :busy="store.busyId === entry.id"
-          :platform="platform"
-          @toggle="onToggle"
-          @open="store.openInEditor"
-          @reveal="store.reveal"
-          @mirror="store.mirror"
-          @migrate="store.migrate"
-          @remove="onRemove"
-        />
         <p
-          v-if="store.projectSkills.length === 0"
-          class="px-2 py-4 text-center text-[length:var(--ui-text-d3)] text-muted-foreground"
+          v-if="store.lastMessage"
+          class="mb-2 rounded-md border border-border bg-muted p-2 text-[length:var(--ui-text-d3)] text-foreground"
         >
-          当前项目没有用户技能。把技能放进
-          <code class="font-mono">.agents/skills/</code> 就会出现在这里。
+          {{ store.lastMessage }}
         </p>
-      </div>
-      <div v-else role="tabpanel" aria-label="系统技能">
-        <SkillRow
-          v-for="entry in store.systemSkills"
-          :key="entry.id"
-          :entry="entry"
-          :busy="false"
-          :platform="platform"
-          readonly
-          @open="store.openInEditor"
-          @reveal="store.reveal"
-        />
-        <p
-          v-if="store.systemSkills.length === 0"
-          class="px-2 py-4 text-center text-[length:var(--ui-text-d3)] text-muted-foreground"
+        <div
+          class="mb-2 grid grid-cols-2 gap-1 rounded-md bg-muted/60 p-1"
+          role="tablist"
+          aria-label="技能类型"
         >
-          当前没有可读取的系统技能。
-        </p>
+          <button
+            type="button"
+            role="tab"
+            :aria-selected="activeTab === 'user'"
+            :class="tabClass(activeTab === 'user')"
+            @click="activeTab = 'user'"
+          >
+            用户技能 <span class="opacity-70">{{ store.projectSkillCount }}</span>
+          </button>
+          <button
+            type="button"
+            role="tab"
+            :aria-selected="activeTab === 'system'"
+            :class="tabClass(activeTab === 'system')"
+            @click="activeTab = 'system'"
+          >
+            系统技能 <span class="opacity-70">{{ store.systemSkillCount }}</span>
+          </button>
+        </div>
+        <div v-if="activeTab === 'user'" role="tabpanel" aria-label="用户技能">
+          <SkillRow
+            v-for="entry in store.projectSkills"
+            :key="entry.id"
+            :entry="entry"
+            :busy="store.busyId === entry.id"
+            :platform="platform"
+            @toggle="onToggle"
+            @open="store.openInEditor"
+            @reveal="store.reveal"
+            @mirror="store.mirror"
+            @migrate="store.migrate"
+            @remove="onRemove"
+          />
+          <p
+            v-if="store.projectSkills.length === 0"
+            class="px-2 py-4 text-center text-[length:var(--ui-text-d3)] text-muted-foreground"
+          >
+            当前项目没有用户技能。把技能放进
+            <code class="font-mono">.agents/skills/</code> 就会出现在这里。
+          </p>
+        </div>
+        <div v-else role="tabpanel" aria-label="系统技能">
+          <SkillRow
+            v-for="entry in store.systemSkills"
+            :key="entry.id"
+            :entry="entry"
+            :busy="false"
+            :platform="platform"
+            readonly
+            @open="store.openInEditor"
+            @reveal="store.reveal"
+          />
+          <p
+            v-if="store.systemSkills.length === 0"
+            class="px-2 py-4 text-center text-[length:var(--ui-text-d3)] text-muted-foreground"
+          >
+            当前没有可读取的系统技能。
+          </p>
         </div>
       </div>
     </Teleport>
