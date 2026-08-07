@@ -4,24 +4,43 @@ copyright: Copyright © 2026 shawn
 directories:
   output: dist
   buildResources: build
+# Packaging Slimming: files 用白名单而不是黑名单。
+# electron-builder 的默认规则是"整个项目目录全都要"，黑名单永远追不上新增的目录——
+# 之前 .pnpm-store(78M) / .claude(5M) / poc / logs / *.tsbuildinfo / pnpm-lock.yaml
+# 全被打进了 app.asar，而真正需要的只有 out/(14M)。
+#
+# 注意 node_modules 不受这里的白名单影响：app-builder-lib 的 getMainFileMatchers()
+# 恒定追加 `!**/node_modules`，node_modules 由独立的 matcher 按 package.json 的
+# dependencies 树收集，且那个 matcher 只吃 `!` 排除规则（白名单对它无效）。
+# 所以想让 node_modules 变小，只能改 dependencies/devDependencies 的划分。
 files:
-  - '!**/.vscode/*'
-  - '!src/*'
-  - '!docs/*'
-  - '!tests/*'
-  - '!*.md'
-  - '!electron.vite.config.*'
-  - '!{.eslintcache,.eslintrc.cjs,.prettierrc,.editorconfig}'
-  - '!{.DS_Store,.git,.gitignore,.idea,.vscode}'
+  - out/**
+  - resources/**
+  - package.json
+  # node_modules 里的开发期残渣（只有 ! 规则对 node_modules 生效）
+  - '!node_modules/**/{test,tests,__tests__,spec,example,examples,doc,docs,.bin}/**'
+  - '!node_modules/**/*.{md,markdown,map,cts,mts.map}'
+  - '!node_modules/better-sqlite3/{deps,src,bin,build/Release/obj,build/Release/obj.target}/**'
+  - '!node_modules/node-pty/{deps,src,third_party,prebuilds}/**'
+
+# afterPack 里删掉非目标架构的 claude 二进制。
+# electron-builder 只按 package.json 的 `os` 字段过滤平台包，不按 `cpu`——
+# 实测 arm64 的 dmg 里同时装着 claude-agent-sdk-darwin-arm64(245M) 和
+# -darwin-x64(254M)，白背一半体积。而 node_modules 的 matcher 只认 `!` 排除、
+# 无法"先排除全部再按 ${arch} 放回一个"，所以只能在打包后按 arch 删。
+afterPack: ./scripts/after-pack.cjs
+
 asarUnpack:
   - resources/**
   - '**/*.{node,dll}'
-  # Agent SDK 的平台 binary（243MB claude 可执行文件）必须 unpack 到真实磁盘路径，
+  # Agent SDK 的平台 binary（约 245MB 的 claude 可执行文件）必须 unpack 到真实磁盘路径，
   # 否则 child_process.spawn 无法从 ASAR 虚拟 FS 执行二进制。
   # adapter.ts 的 resolveSdkBinaryPath() 会在 packaged 模式下通过
   # pathToClaudeCodeExecutable 指向这个 unpacked 路径。
+  # 通配符必须是 claude*：Windows 的平台包里文件名是 claude.exe，
+  # 写死 claude 会让 win 构建里的二进制留在 asar 内、spawn 直接失败。
   # 详见 docs/Agent SDK Electron 打包 PoC 验证报告.md
-  - '**/node_modules/@anthropic-ai/claude-agent-sdk-*/claude'
+  - '**/node_modules/@anthropic-ai/claude-agent-sdk-*/claude*'
 
 # macOS
 mac:
