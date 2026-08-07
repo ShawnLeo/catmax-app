@@ -21,6 +21,8 @@
     "test:watch": "vitest",
     "rebuild:native": "electron-rebuild -f -w better-sqlite3 -w node-pty",
     "rebuild:node": "pnpm rebuild better-sqlite3 node-pty",
+    "release:hot": "pnpm build && node scripts/release-hot.mjs",
+    "publish:hot": "node scripts/publish-hot.mjs",
     "dit:mac": "pnpm build && cross-env ELECTRON_MIRROR=https://npmmirror.com/mirrors/electron/ ELECTRON_BUILDER_BINARIES_MIRROR=https://npmmirror.com/mirrors/electron-builder-binaries/ electron-builder --mac",
     "dist:win": "pnpm build && cross-env ELECTRON_MIRROR=https://npmmirror.com/mirrors/electron/ ELECTRON_BUILDER_BINARIES_MIRROR=https://npmmirror.com/mirrors/electron-builder-binaries/ electron-builder --win",
     "dist": "pnpm build && cross-env ELECTRON_MIRROR=https://npmmirror.com/mirrors/electron/ ELECTRON_BUILDER_BINARIES_MIRROR=https://npmmirror.com/mirrors/electron-builder-binaries/ electron-builder"
