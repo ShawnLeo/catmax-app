@@ -13,15 +13,22 @@
     不需要额外 spinner。
   -->
   <div class="my-0.5">
-    <!-- header：点击切换展开/收起 -->
+    <!--
+      header：点击切换展开/收起。
+
+      items-baseline：streaming 态下让 LoadingDots（inline-flex，内部圆点无
+      baseline，baseline 落在底边）贴到 "thinking" 文字 baseline，三点与文字
+      底部平齐而非悬空偏高。BrainIcon / ChevronDownIcon 加 self-center 仍按
+      行盒居中，避免图标跟着贴底线。
+    -->
     <button
       type="button"
-      class="inline-flex items-center gap-1.5 px-2 py-1 rounded-md text-[length:var(--chat-text-d1)] transition-colors hover:bg-accent/50 text-muted-foreground cursor-pointer"
+      class="inline-flex items-baseline gap-1.5 px-2 py-1 rounded-md text-[length:var(--chat-text-d1)] transition-colors hover:bg-accent/50 text-muted-foreground cursor-pointer"
       :title="streaming ? '正在思考...' : '点击展开/收起推理'"
       @click="open = !open"
     >
       <BrainIcon
-        class="w-3.5 h-3.5 flex-shrink-0 text-muted-foreground"
+        class="w-3.5 h-3.5 flex-shrink-0 self-center text-muted-foreground"
         :class="streaming ? 'animate-pulse' : ''"
       />
 
@@ -38,7 +45,7 @@
           durationLabel
         }}</span>
         <ChevronDownIcon
-          class="w-3 h-3 flex-shrink-0 transition-transform"
+          class="w-3 h-3 flex-shrink-0 self-center transition-transform"
           :class="open ? 'rotate-180' : ''"
         />
       </template>

@@ -90,10 +90,16 @@
               <span
                 class="absolute w-2 h-2 rounded-full -left-[6px] top-1.5 bg-success animate-pulse"
               />
+              <!--
+                items-baseline：让 LoadingDots（inline-flex，内部圆点无 baseline，
+                故其 baseline 落在底边）贴到“正在思考”文字的 baseline，即中文字
+                视觉底部——三点不再悬空偏高。Loader2Icon 用 self-center 仍按行盒居中，
+                避免它跟着贴底线而看起来下坠。
+              -->
               <div
-                class="flex items-center gap-2 text-[length:var(--chat-text-base)] text-muted-foreground"
+                class="flex items-baseline gap-2 text-[length:var(--chat-text-base)] text-muted-foreground"
               >
-                <Loader2Icon class="w-3.5 h-3.5 flex-shrink-0 animate-spin" />
+                <Loader2Icon class="w-3.5 h-3.5 flex-shrink-0 self-center animate-spin" />
                 <span>正在思考</span>
                 <LoadingDots class="text-muted-foreground" :dot-size="4" :duration="1.6" />
               </div>
