@@ -8,6 +8,20 @@ import { app, BrowserWindow, nativeImage, screen, shell, type Rectangle } from '
 import { ctx } from './context'
 
 /**
+ * Hot Update: 用 ESM 原生的 import.meta.dirname，不依赖 bundler 注入的 __dirname。
+ *
+ * electron-vite 是否注入 `const __dirname = import.meta.dirname` 会随 external/bundle
+ * 配置变化——Phase 0 实测过一次：改了 externalizeDepsPlugin 的 exclude 之后注入消失，
+ * 应用启动即 `ReferenceError: __dirname is not defined`，窗口都建不出来。
+ *
+ * 这个值同时是热更新的地基：侧载执行时它指向 versions/<n>/main，
+ * 于是下面的 preload / renderer 相对路径自动跟到同一个版本目录（设计文档 §5.5）。
+ * 约定：它只用于定位 out/ 内部的产物；访问 app bundle 内的资源一律走
+ * app.getAppPath() / process.resourcesPath，那些东西不参与热更新。
+ */
+const moduleDir = import.meta.dirname
+
+/**
  * 解析 App 图标资源路径。
  *
  * resources/icon.png 是 1024x1024 猫咪图标，按 Apple 图标网格绘制：
@@ -20,7 +34,7 @@ function resolveIconPath(): string | undefined {
   const candidates = [
     join(app.getAppPath(), 'resources/icon.png'), // dev / packaged app root
     join(process.resourcesPath, 'icon.png'), // packaged asarUnpack 兜底
-    join(__dirname, '../resources/icon.png'), // 旧路径兜底
+    join(moduleDir, '../resources/icon.png'), // 旧路径兜底
   ]
   return candidates.find((p) => existsSync(p))
 }
@@ -32,7 +46,7 @@ function resolveIconPath(): string | undefined {
  * 两者都支持，避免 preload 加载失败导致 window.api 为 undefined。
  */
 function resolvePreloadPath(): string {
-  const dir = join(__dirname, '../preload')
+  const dir = join(moduleDir, '../preload')
   for (const filename of ['index.mjs', 'index.js']) {
     const candidate = join(dir, filename)
     if (existsSync(candidate)) return candidate
@@ -189,7 +203,7 @@ export function createMainWindow(): BrowserWindow {
     void win.loadURL(process.env['ELECTRON_RENDERER_URL'])
     win.webContents.openDevTools()
   } else {
-    void win.loadFile(join(__dirname, '../renderer/index.html'))
+    void win.loadFile(join(moduleDir, '../renderer/index.html'))
   }
 
   ctx.registerWindow('main', win)

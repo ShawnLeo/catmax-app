@@ -56,7 +56,8 @@ function resolveTrayAsset(filename: string): string | undefined {
   const candidates = [
     join(app.getAppPath(), 'resources/tray', filename),
     join(process.resourcesPath, 'tray', filename),
-    join(__dirname, '../resources/tray', filename),
+    // Hot Update: 用 import.meta.dirname 而不是 bundler 注入的 __dirname，理由见 window.ts 顶部。
+    join(import.meta.dirname, '../resources/tray', filename),
   ]
   return candidates.find((p) => existsSync(p))
 }

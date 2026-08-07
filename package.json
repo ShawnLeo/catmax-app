@@ -8,7 +8,7 @@
   "main": "./out/main/index.js",
   "scripts": {
     "dev": "pnpm rebuild:native || true && electron-vite dev",
-    "build": "pnpm rebuild:native || true && electron-vite build",
+    "build": "pnpm rebuild:native || true && electron-vite build && node scripts/copy-bootstrap.cjs && node scripts/compute-runtime-id.cjs",
     "preview": "electron-vite preview",
     "start": "electron-vite preview",
     "typecheck:node": "tsc --noEmit -p tsconfig.node.json --composite false",

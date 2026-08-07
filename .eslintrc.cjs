@@ -91,6 +91,9 @@ module.exports = {
     // 构建期脚本（electron-builder 的 afterPack hook 等）同理：CommonJS，
     // 只被 electron-builder 用 require() 加载，不属于 app 的两个 tsconfig project。
     'scripts/',
+    // Hot Update 的 bootstrap 是手写 .mjs，故意不经 vite 构建、也不在两个 tsconfig
+    // project 里（见设计文档 §5.3）。typed-linting 会因 parserServices 缺失而崩。
+    'src/bootstrap/',
     // 根目录的 index.js 是 out/main/index.js 的一份拷贝，误提交进了仓库
     // （package.json 的 main 指向 out/，没有任何东西引用它）。它不在两个 tsconfig
     // project 里，全量 lint 会因 parserServices 缺失直接崩掉。建议 git rm 掉它，

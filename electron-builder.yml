@@ -75,5 +75,13 @@ nsis:
   allowToChangeInstallationDirectory: true
   artifactName: ${productName}-Setup-${version}-${arch}.${ext}
 
+# Hot Update: 入口指向 bootstrap 而不是业务代码本身。
+# bootstrap 决定本次加载 asar 内置的 out/main/index.js 还是 userData 下的热更新版本，
+# 它是唯一不可被热更新替换的代码（将来的验签逻辑和公钥都在里面）。
+# 见 docs/superpowers/specs/2026-08-06-hot-update-design.md §5.3。
+#
+# out/bootstrap/ 由 scripts/copy-bootstrap.cjs 从 src/bootstrap/ 复制而来，
+# 故意不经过 vite——交给 vite 会把它打进 out/main/index.js，也就是热更新要替换的文件。
+# 打包前必须先跑过那个脚本，否则这里指向一个不存在的文件。
 extraMetadata:
-  main: ./out/main/index.js
+  main: ./out/bootstrap/index.mjs
