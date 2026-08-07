@@ -317,6 +317,18 @@ export function claudeReplayToMessages(messages: ClaudeStreamMessage[]): Normali
 
       // 本条 user message 的所有 text block 收集完——拼接 + 命令检测 + 提取 IDE 标签
       if (collectedText.length > 0) {
+        // isMeta 拦截：Claude SDK 会把非用户真实输入的文本作为 isMeta:true 的 user
+        // 消息写进 jsonl，喂给模型但不打算展示给人看。已知来源：
+        //   1. Skill 工具：tool_result("Launching skill: xxx") 后紧跟一条 isMeta 的
+        //      text，内容是该 skill 的 SKILL.md 全文（"Base directory for this skill: ..."）。
+        //      不拦就会被当成 user 气泡，把整份技能说明塞进对话历史。
+        //   2. /init /compact 等 slash command 的展开 prompt（claude 自己注入的长
+        //      instruction 文本）。
+        //   3. <local-command-caveat>（虽然 isSystemSentinel 也会拦，这里一并兜住）。
+        // 放在 flushAssistant() 之前——meta 不触发 flush，避免误伤紧邻的 Skill tool_use
+        // （tool_use + tool_result 本身 isMeta:false，在前面已配对处理完毕）。
+        if (userMsg.isMeta) continue
+
         flushAssistant()
         const rawText = collectedText.join('\n\n')
 

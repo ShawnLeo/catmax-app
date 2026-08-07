@@ -159,6 +159,12 @@ export const userMessageSchema = z.object({
   session_id: z.string().optional(),
   // Task（子 Agent）完成时带这个顶层字段--子 Agent 的耗时 / token / 工具统计
   tool_use_result: toolUseResultSchema.optional(),
+  // Claude SDK 注入的非用户真实输入标记。常见来源：
+  //   - Skill 工具的 SKILL.md 全文（"Base directory for this skill: ..."）
+  //   - /init /compact 等 slash command 的展开 prompt
+  //   - <local-command-caveat> 等 sentinel
+  // 这些消息是喂给模型的，不该在 UI 上当用户气泡渲染。history-mapping 跳过它们。
+  isMeta: z.boolean().optional(),
 })
 
 // ============ result 消息（turn 结束） ============
