@@ -94,11 +94,6 @@ module.exports = {
     // Hot Update 的 bootstrap 是手写 .mjs，故意不经 vite 构建、也不在两个 tsconfig
     // project 里（见设计文档 §5.3）。typed-linting 会因 parserServices 缺失而崩。
     'src/bootstrap/',
-    // 根目录的 index.js 是 out/main/index.js 的一份拷贝，误提交进了仓库
-    // （package.json 的 main 指向 out/，没有任何东西引用它）。它不在两个 tsconfig
-    // project 里，全量 lint 会因 parserServices 缺失直接崩掉。建议 git rm 掉它，
-    // 删除后这条也可以一并去掉。
-    '/index.js',
     'src/renderer/src/auto-imports.d.ts',
     'src/renderer/src/components.d.ts',
   ],
