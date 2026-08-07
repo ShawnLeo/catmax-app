@@ -62,6 +62,21 @@ const runtimeIdFile = join(OUT, 'bootstrap/runtime-id.json')
 if (!existsSync(runtimeIdFile)) die('out/bootstrap/runtime-id.json 不存在，请先跑 pnpm build')
 const { runtimeId } = JSON.parse(readFileSync(runtimeIdFile, 'utf8'))
 
+// 记进 manifest 供 show-hot-changes.mjs 用：下次发布时用它算 `git log <commit>..HEAD`，
+// 免得每次发布都要人工回忆"上次发到哪了"。只记最近一次提交——工作区若有未提交改动，
+// pnpm build 已经把它们打进 out/ 了，但这里记不到，所以下面单独警告一次。
+const commit = execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim()
+const dirty = execFileSync('git', ['status', '--porcelain'], { encoding: 'utf8' }).trim()
+if (dirty) {
+  console.log(
+    `  ⚠️  工作区有未提交改动，它们会被打进这次的包，但不会体现在 commit 记录里：\n` +
+      dirty
+        .split('\n')
+        .map((l) => `       ${l}`)
+        .join('\n'),
+  )
+}
+
 // `manifest.json` 的语义是**已成功发布到 R2 的状态**，`manifest.pending.json` 是
 // 已打包签名但尚未上传成功的状态。分成两个文件是为了让版本号推导幂等：上传失败后
 // 重跑本脚本必须复用同一个 hotVersion，否则每失败一次就烧掉一个版本号，manifest
@@ -226,6 +241,7 @@ const latest = {
   mandatory: false,
   releaseNotes: notes,
   releasedAt: new Date().toISOString(),
+  commit,
 }
 
 // history 由 publish-hot.mjs 在上传成功后维护，这里原样继承已发布的那份。

@@ -538,13 +538,16 @@ out/renderer/**          14 MB
     "signature": "MEUCIQ…",
     "mandatory": false,
     "releaseNotes": "修复会话标题回填",
-    "releasedAt": "2026-08-06T15:04:05Z"
+    "releasedAt": "2026-08-06T15:04:05Z",
+    "commit": "a1b2c3d4e5f60718293a4b5c6d7e8f9012345678"
   },
   "history": [1, 2, 3, 4]
 }
 ```
 
 `history` 是**发布侧的账本，客户端不读**：R2 上还存在哪些包。它存在 manifest 里而不是本地文件，理由见 §6.6 的清理策略。
+
+`commit`（2026-08-07 加，`release-hot.mjs` 打包时用 `git rev-parse HEAD` 写入）**客户端同样不读**，纯粹是发布侧留给下一次发布用的锚点——`show-hot-changes.mjs` 拿它算 `git log <commit>..HEAD`，回答"自上次发布以来改了什么"。之所以放进 manifest 而不是本地文件，是因为本地 `release/manifest.json` 所在的整个 `release/` 目录是 gitignored 的，只在发布过的那台机器上存在；manifest 一旦发到 R2 就是所有机器都能读到的公网状态，谁来接手下一次发布都能算对，不依赖"上次是在哪台机器发的"。
 
 三个字段撑起整个协议的正确性：
 
@@ -868,16 +871,19 @@ pnpm release:hot --notes "..." --publish   # 一次做完
 
 | 步骤 | 谁做 | 为什么 |
 |---|---|---|
+| 找出"自上次发布以来改了什么" | **脚本**（`show-hot-changes.mjs`） | 锚点（上次发布的 commit）存在 R2 公网 manifest 里，不是本地状态；人工回忆"上次发到哪了"既不可靠也不能跨机器 |
 | 打包 `out/` → tar.gz | **脚本** | 需要每次字节级一致 |
 | 断言包内无 bootstrap / `node_modules` / `package.json` | **脚本** | §8.4 的安全边界。漏一次，签名机制即失效 |
 | sha256 + Ed25519 签名 | **脚本** | 私钥操作，必须幂等且可测试 |
 | `hotVersion` 递增 | **脚本** | 单调性是防回滚攻击的前提（§8.2） |
 | 上传 R2、回读校验 | **脚本**（原计划 Agent） | 见下 |
 | 删除旧包 | **脚本** | 删错 = 全体客户端 404 且下架能力消失（§6.6） |
-| 撰写 `releaseNotes` | Agent / 人 | 本来就需要判断 |
+| 撰写 `releaseNotes` | Agent / 人 | 本来就需要判断——commit message 是写给开发者看的，不能直接当用户可读的 release notes 用 |
 | 出错时诊断 | Agent | 正是它擅长的 |
 
 **"上传 + 回读校验"在实现时从 Agent 挪到了脚本**，与本表早先的划分不同。原本的理由是"需要处理网络异常、确认公网可达"听起来像判断题，但真正写下来才发现它全是死规则：先传包后传 manifest、HEAD 校验 200 与 content-length、失败则**不得**更新 manifest。这些没有一条需要判断，而漏掉任何一条的后果都是线上 manifest 指向 404。让 Agent 每次现写这段，等于每次重新赌它不漏——这与断言必须进脚本是同一个理由。
+
+**"找出改动范围"是 2026-08-07 补的一步，动机是同一类问题的另一个变种**：一开始设想让 Agent 每次自己判断"上次发到哪个版本了"，但这个信息如果只存在于对话历史或人的记忆里，换一次会话、换一个人接手发布，锚点就丢了，写出来的 release notes 要么漏掉中间的改动、要么把已经发过的东西重复写进去。`release-hot.mjs` 打包时把 `git rev-parse HEAD` 存进 `latest.commit`（§6.3）随包发布，`show-hot-changes.mjs` 只读取公网 manifest 拿这个锚点、跑 `git log <commit>..HEAD`——找锚点和拉 diff 是死规则，进脚本；**把这些提交归纳成一句用户能看懂的话，仍然是 Agent 的判断，不是脚本的活**，脚本只负责让这个判断有依据可查，不替它下结论。
 
 Agent 剩下的位置是**发布之外**：决定这次该不该发、写 notes、出错时诊断。
 
