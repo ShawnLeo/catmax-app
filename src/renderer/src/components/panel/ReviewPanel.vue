@@ -8,10 +8,11 @@
     - 列表区主体：ReviewDiffList（所有变更文件的可折叠卡片）
   -->
   <div class="flex h-full min-w-0">
-    <!-- 左：变更文件树（可关闭） -->
+    <!-- 左：变更文件树（可关闭）。
+      不加 border-r：紧邻的 ResizeHandle 自身就是 1px 分隔条，再加面板边框会出现双线。 -->
     <div
       v-if="uiStore.reviewTreeVisible"
-      class="shrink-0 border-r border-border"
+      class="shrink-0"
       :style="{ width: uiStore.reviewTreeWidth + 'px' }"
     >
       <ReviewFileTree

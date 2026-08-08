@@ -1,35 +1,5 @@
 <template>
-  <div class="h-full flex flex-col bg-background">
-    <!-- 顶部标题栏：窗口控制按钮 + 可拖拽区域 + 标题 + 返回。
-         sticky 固定在顶部，滚动内容时始终可见。 -->
-    <div
-      class="h-12 shrink-0 flex items-center gap-2 px-3 border-b border-border bg-background titlebar"
-    >
-      <TitleBarControls />
-      <button
-        type="button"
-        class="settings-back-button interactive h-8 w-8 place-items-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-        title="返回"
-        aria-label="返回上一级"
-        @click="goBack"
-      >
-        <ArrowLeftIcon class="h-4 w-4" />
-      </button>
-      <h1 class="text-[length:var(--ui-text-base)] font-medium text-foreground">设置</h1>
-      <div class="flex-1" />
-      <button
-        type="button"
-        class="settings-menu-button interactive grid h-8 w-8 place-items-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-        :title="mobileMenuOpen ? '关闭设置菜单' : '打开设置菜单'"
-        :aria-expanded="mobileMenuOpen"
-        aria-controls="settings-navigation"
-        @click="mobileMenuOpen = !mobileMenuOpen"
-      >
-        <XIcon v-if="mobileMenuOpen" class="h-4 w-4" />
-        <MenuIcon v-else class="h-4 w-4" />
-      </button>
-    </div>
-
+  <div class="h-full flex">
     <button
       v-if="mobileMenuOpen"
       type="button"
@@ -38,34 +8,37 @@
       @click="mobileMenuOpen = false"
     />
 
-    <!-- 主体：左侧导航 + 右侧内容 -->
-    <div class="flex-1 flex min-h-0">
-      <!-- 左侧导航：复用 sidebar token（bg-sidebar / sidebar-accent / sidebar-border），
-           跟主会话侧栏共享配色，保持两种布局下"侧栏"视觉一致。右侧内容区沿用 bg-background。 -->
-      <nav
-        id="settings-navigation"
-        :class="[
-          'settings-sidebar w-52 shrink-0 border-r border-sidebar-border bg-sidebar p-3 flex flex-col gap-1',
-          mobileMenuOpen ? 'settings-sidebar--open' : '',
-        ]"
-      >
-        <!-- 返回按钮：放在外观导航项之上，样式对齐工作区切换按钮
-             （hover:bg-sidebar-accent + rounded-md），与下方导航项同间距。 -->
+    <!-- 左侧导航从窗口顶部贯通到底部，结构与会话列表侧栏一致。 -->
+    <aside
+      :class="[
+        'settings-sidebar w-52 shrink-0 border-r border-panel-divider bg-sidebar flex min-h-0 flex-col',
+        mobileMenuOpen ? 'settings-sidebar--open' : '',
+      ]"
+    >
+      <!-- 顶部：窗口控制按钮 + 返回。与会话侧栏顶部共用 h-12，不加横向分隔线。 -->
+      <div class="settings-sidebar-header h-12 shrink-0 flex items-center gap-2 px-3 titlebar">
+        <TitleBarControls />
         <button
-          class="flex items-center gap-2.5 px-3 py-2 rounded-md text-[length:var(--ui-text-base)] font-medium text-left transition-colors text-muted-foreground hover:bg-sidebar-accent hover:text-foreground interactive cursor-pointer mb-1"
+          type="button"
+          class="interactive flex min-w-0 flex-1 items-center gap-2 rounded-md px-2 py-1.5 text-left text-[length:var(--ui-text-base)] font-medium text-foreground transition-colors hover:bg-sidebar-hover cursor-pointer"
+          title="返回"
+          aria-label="返回上一级"
           @click="goBack"
         >
-          <ArrowLeftIcon class="w-4 h-4 shrink-0" />
+          <ArrowLeftIcon class="h-4 w-4 shrink-0" />
           <span>返回</span>
         </button>
+      </div>
+
+      <nav id="settings-navigation" class="flex min-h-0 flex-1 flex-col gap-1 p-3">
         <button
           v-for="item in navItems"
           :key="item.id"
           :class="[
             'flex items-center gap-2.5 px-3 py-2 rounded-md text-[length:var(--ui-text-base)] text-left transition-colors interactive cursor-pointer',
             activeSection === item.id
-              ? 'bg-sidebar-accent text-foreground font-medium'
-              : 'text-muted-foreground hover:bg-sidebar-accent hover:text-foreground',
+              ? 'bg-sidebar-hover text-foreground font-medium'
+              : 'text-muted-foreground hover:bg-sidebar-hover hover:text-foreground',
           ]"
           @click="selectSection(item.id)"
         >
@@ -73,9 +46,43 @@
           <span>{{ item.label }}</span>
         </button>
       </nav>
+    </aside>
 
-      <!-- 右侧内容（可滚动） -->
-      <div class="flex-1 min-w-0 overflow-y-auto">
+    <!-- 右侧设置区域保持主面板背景；顶部不再与内容之间画边框。 -->
+    <div class="flex min-w-0 flex-1 flex-col bg-background">
+      <div class="h-12 shrink-0 flex items-center gap-2 px-4 titlebar">
+        <TitleBarControls class="settings-main-window-controls" />
+        <button
+          type="button"
+          class="settings-back-button interactive h-8 w-8 place-items-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+          title="返回"
+          aria-label="返回上一级"
+          @click="goBack"
+        >
+          <ArrowLeftIcon class="h-4 w-4" />
+        </button>
+        <h1
+          class="flex items-center gap-1.5 text-[length:var(--ui-text-base)] font-medium text-foreground"
+        >
+          <span>设置</span>
+          <span class="text-muted-foreground">/</span>
+          <span>{{ activeSectionLabel }}</span>
+        </h1>
+        <div class="flex-1" />
+        <button
+          type="button"
+          class="settings-menu-button interactive grid h-8 w-8 place-items-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+          :title="mobileMenuOpen ? '关闭设置菜单' : '打开设置菜单'"
+          :aria-expanded="mobileMenuOpen"
+          aria-controls="settings-navigation"
+          @click="mobileMenuOpen = !mobileMenuOpen"
+        >
+          <XIcon v-if="mobileMenuOpen" class="h-4 w-4" />
+          <MenuIcon v-else class="h-4 w-4" />
+        </button>
+      </div>
+
+      <div class="min-h-0 flex-1 overflow-y-auto">
         <div class="settings-content max-w-2xl mx-auto p-8 flex flex-col gap-8">
           <ThemeSection v-show="activeSection === 'theme'" />
           <BackendSection v-show="activeSection === 'backend'" />
@@ -131,7 +138,7 @@ import {
   XIcon,
 } from 'lucide-vue-next'
 import type { Component } from 'vue'
-import { onMounted, onUnmounted, ref } from 'vue'
+import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 
 type SectionId = 'theme' | 'backend' | 'skills' | 'mcp' | 'workspace' | 'proxy' | 'about'
@@ -153,6 +160,9 @@ const navItems: NavItem[] = [
 ]
 
 const activeSection = ref<SectionId>('theme')
+const activeSectionLabel = computed(
+  () => navItems.find((item) => item.id === activeSection.value)?.label ?? '',
+)
 const mobileMenuOpen = ref(false)
 
 const router = useRouter()
@@ -212,7 +222,8 @@ function goBack(): void {
 
 .settings-menu-button,
 .settings-back-button,
-.settings-menu-backdrop {
+.settings-menu-backdrop,
+.settings-main-window-controls {
   display: none;
 }
 
@@ -241,6 +252,14 @@ function goBack(): void {
 }
 
 @media (max-width: 720px) {
+  .settings-sidebar-header {
+    display: none;
+  }
+
+  .settings-main-window-controls {
+    display: flex;
+  }
+
   .settings-menu-button {
     display: grid;
   }
@@ -269,7 +288,6 @@ function goBack(): void {
     bottom: 0;
     left: 0;
     width: min(260px, 82vw);
-    border-top: 1px solid var(--sidebar-border);
     box-shadow: 18px 0 45px -28px var(--panel-edge-shadow);
     transform: translateX(-100%);
     transition: transform 220ms ease-out;

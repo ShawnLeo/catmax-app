@@ -34,7 +34,13 @@
         </div>
       </div>
 
-      <Button size="lg" @click="showCreateWorkspace = true"> 创建工作区 </Button>
+      <Button
+        size="lg"
+        class="bg-black text-white shadow hover:bg-black/90 dark:bg-primary dark:text-primary-foreground dark:hover:bg-primary/90"
+        @click="showCreateWorkspace = true"
+      >
+        创建工作区
+      </Button>
 
       <div
         v-if="workspaceStore.workspaces.length > 0"
