@@ -9,12 +9,8 @@
     :class="[
       'flex flex-col bg-card overflow-hidden',
       isOverlay
-        ? 'h-full border-l border-border shadow-lg'
-        : [
-            'shrink-0',
-            uiStore.panelDragging ? '' : 'transition-[width,border-color] duration-200 ease-out',
-            uiStore.rightPanelVisible ? 'border-l border-border' : 'border-l border-transparent',
-          ],
+        ? 'h-full shadow-lg'
+        : ['shrink-0', uiStore.panelDragging ? '' : 'transition-[width] duration-200 ease-out'],
     ]"
     :style="{ width: outerWidth + 'px' }"
     :aria-hidden="isOverlay ? undefined : !uiStore.rightPanelVisible"

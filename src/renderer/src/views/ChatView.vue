@@ -61,7 +61,7 @@
     <!-- 主聊天区:用具体 min-width 而非 min-w-0,防止被右面板挤压到低于 250px。
          sidebar 折叠时宽度为 0,不占空间;展开时由 ResizeHandle clamp 在 [SIDEBAR_MIN, 容器一半],
          加上这里的 min-w 保证主聊天区 + sidebar 不会被右面板挤没。 -->
-    <div ref="chatColumnRef" class="relative flex-1 flex flex-col min-w-[250px]">
+    <div ref="chatColumnRef" class="relative flex-1 flex flex-col min-w-[250px] bg-background">
       <!--
         File Mention: 拖拽文件时的投放区，盖住整条主聊天列（含输入框）。
         relative 是它的定位锚——遮罩用 absolute inset-0 铺满这一列，
@@ -82,7 +82,9 @@
         class="new-session flex-1 flex items-center justify-center px-6 text-muted-foreground"
       >
         <div class="relative z-10 flex max-w-2xl flex-col items-center text-center">
-          <CatmaxLogo variant="plain" class="mb-7 h-28 w-28" />
+          <div class="new-session-logo mb-7 h-28 w-28">
+            <CatmaxLogo variant="plain" class="relative z-10 h-28 w-28" />
+          </div>
 
           <p class="text-[length:var(--ui-text-u3)] font-semibold tracking-tight text-foreground">
             开始一段新对话
@@ -1035,16 +1037,28 @@ async function onSend(
 
 .new-session::before {
   position: absolute;
-  width: min(520px, 72%);
-  aspect-ratio: 1;
+  width: var(--new-session-glow-width);
+  aspect-ratio: var(--new-session-glow-aspect);
   border-radius: 9999px;
   background: radial-gradient(
-    circle,
-    color-mix(in oklch, var(--foreground) 5%, transparent) 0,
-    color-mix(in oklch, var(--foreground) 2%, transparent) 42%,
-    transparent 72%
+    ellipse,
+    var(--new-session-glow-core) 0,
+    var(--new-session-glow-mid) 46%,
+    transparent 78%
   );
   content: '';
+  filter: blur(var(--new-session-glow-blur));
   pointer-events: none;
+}
+
+/* 日间模式只保留松散轮廓影；不放局部圆斑或脚下黑影。 */
+.new-session-logo {
+  position: relative;
+  display: grid;
+  place-items: center;
+}
+
+.new-session-logo :deep(.catmax-logo) {
+  filter: drop-shadow(0 14px 24px var(--new-session-logo-shadow));
 }
 </style>

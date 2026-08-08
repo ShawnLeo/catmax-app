@@ -1,5 +1,5 @@
 <template>
-  <div class="h-full flex flex-col">
+  <div class="h-full flex flex-col bg-background">
     <!-- 顶部标题栏：窗口控制按钮 + 可拖拽区域 + 设置入口。
          无侧栏页面，窗口按钮直接放顶条最左侧，跟 ChatView 高度一致（h-12）。 -->
     <div

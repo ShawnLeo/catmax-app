@@ -1,5 +1,5 @@
 <template>
-  <div class="h-full flex flex-col">
+  <div class="h-full flex flex-col bg-background">
     <!-- 顶部标题栏：窗口控制按钮 + 可拖拽区域 + 标题 + 返回。
          sticky 固定在顶部，滚动内容时始终可见。 -->
     <div

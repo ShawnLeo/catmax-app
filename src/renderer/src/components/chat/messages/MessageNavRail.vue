@@ -1,7 +1,7 @@
 <template>
   <nav
     aria-label="会话消息导航"
-    class="pointer-events-none absolute left-[5px] top-1/2 z-30 flex h-auto max-h-[calc(100%-2rem)] w-10 -translate-y-1/2 flex-col justify-center"
+    class="pointer-events-none absolute left-4 top-1/2 z-30 flex h-auto max-h-[calc(100%-2rem)] w-10 -translate-y-1/2 flex-col justify-center"
     @mouseleave="hoveredIndex = null"
   >
     <div

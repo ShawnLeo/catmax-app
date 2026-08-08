@@ -10,7 +10,7 @@
     :class="[
       'flex flex-col overflow-hidden',
       isOverlay
-        ? 'h-full shadow-lg bg-sidebar/80 backdrop-blur-sm'
+        ? 'h-full shadow-lg bg-sidebar backdrop-blur-sm'
         : [
             'shrink-0 bg-sidebar',
             // 拖拽 resize 期间禁用 transition（否则动画追赶鼠标造成卡顿）；
@@ -24,8 +24,10 @@
     <div class="flex flex-col h-full" :style="{ width: uiStore.sidebarWidth + 'px' }">
       <!-- 右侧内阴影只覆盖工作区 + 会话列表，不延伸到底部用户/设置栏。 -->
       <div
-        class="sidebar-content flex min-h-0 flex-1 flex-col border-r border-sidebar-border"
-        :class="{ 'is-floating': isOverlay }"
+        class="sidebar-content flex min-h-0 flex-1 flex-col"
+        :class="{
+          'is-floating border-r border-sidebar-border': isOverlay,
+        }"
       >
         <!--
           顶部：工作区切换。两种 overlay 用法对它的需求不同：

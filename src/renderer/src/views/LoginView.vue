@@ -1,5 +1,5 @@
 <template>
-  <div class="h-full flex flex-col">
+  <div class="h-full flex flex-col bg-background">
     <!-- 顶部标题栏：窗口控制按钮 + 可拖拽区域。
          与 WelcomeView/SettingsView 一致（h-12），保证登录页拖拽行为统一。 -->
     <div

@@ -61,18 +61,24 @@
 
   /* Layer 3: 组件 token */
   /*
-    Sidebar 层次：侧栏更浅（柔和浅灰），主区更深——聊天区"沉"下去聚焦内容。
-    主区 background=gray-100(18%)，侧栏提亮到 26%——比主区亮 8%，柔和浅灰。
-    sidebar-accent（选中/hover/头像）用 30% 比侧栏底再亮一档，凸起反馈清晰。
+    Sidebar 层次：主区 background=gray-100(18%)，侧栏提亮到 30%，
+    再用 80% 不透明度让桌面影调明显透出。选中/hover 用 34%，
+    保留比透明底色更明确的交互反馈。
   */
-  --sidebar-background: oklch(26% 0 0);
+  --sidebar-background: oklch(30% 0 0 / 0.8);
   --sidebar-border: oklch(34% 0 0 / 0.6);
   --sidebar-foreground: var(--color-gray-800);
-  --sidebar-accent: oklch(30% 0 0);
-  --panel-edge-shadow: oklch(0% 0 0 / 0.17);
+  --sidebar-accent: oklch(34% 0 0);
+  --panel-edge-shadow: oklch(0% 0 0 / 0.1);
   --composer-background: var(--color-gray-50);
   --composer-border: var(--border);
   --composer-focus-glow: oklch(82% 0 0 / 0.12);
+  --new-session-glow-core: oklch(100% 0 0 / 0.05);
+  --new-session-glow-mid: oklch(100% 0 0 / 0.02);
+  --new-session-glow-width: min(520px, 72%);
+  --new-session-glow-aspect: 1;
+  --new-session-glow-blur: 0px;
+  --new-session-logo-shadow: transparent;
   --code-block-background: oklch(12% 0.005 250);
   --terminal-background: oklch(10% 0.005 250);
   --tool-call-background: var(--color-gray-200);
@@ -134,18 +140,25 @@
 
   /* Layer 3 */
   /*
-    Sidebar 层次：侧栏更浅（柔和浅灰白），跟主区白色形成柔和过渡。
-    主区 background=gray-50(99%)，侧栏 97%——比主区略灰 2%，浅而不发暗。
+    Sidebar 层次：侧栏底色提到 99.5% 的近白色，不再靠灰色块区分主区。
+    74% 不透明度让桌面影调成为主要层次，单线边界和浅阴影负责收边。
     sidebar-accent 用更深的 gray-300(90%) 给选中态做凹陷反馈（浅底上深色 = 凹陷）。
   */
-  --sidebar-background: oklch(97% 0.002 80);
+  --sidebar-background: oklch(99.5% 0.001 80 / 0.74);
   --sidebar-border: oklch(89% 0.002 80);
   --sidebar-foreground: var(--color-gray-700);
   --sidebar-accent: var(--color-gray-300);
-  --panel-edge-shadow: oklch(20% 0 0 / 0.09);
+  --panel-edge-shadow: oklch(20% 0 0 / 0.045);
   --composer-background: var(--color-gray-0);
   --composer-border: var(--border);
   --composer-focus-glow: oklch(35% 0 0 / 0.09);
+  /* 日间新会话空状态：大范围冷灰蓝环境光，避免局部暖灰光斑像污渍。 */
+  --new-session-glow-core: oklch(82% 0.035 250 / 0.18);
+  --new-session-glow-mid: oklch(92% 0.018 250 / 0.08);
+  --new-session-glow-width: min(760px, 88%);
+  --new-session-glow-aspect: 1.45;
+  --new-session-glow-blur: 24px;
+  --new-session-logo-shadow: oklch(35% 0.025 250 / 0.12);
   --code-block-background: oklch(96% 0.003 80);
   --terminal-background: oklch(95% 0.003 80);
   --tool-call-background: var(--color-gray-100);

@@ -30,7 +30,7 @@
       <div
         v-if="showPicker && dropdownStyle"
         ref="dropdownRef"
-        class="fixed z-[9999] w-56 rounded-lg border border-border bg-accent shadow-xl overflow-hidden"
+        class="fixed z-[9999] w-56 rounded-lg border border-border bg-popover shadow-xl overflow-hidden"
         :style="dropdownStyle"
         @click.stop
       >

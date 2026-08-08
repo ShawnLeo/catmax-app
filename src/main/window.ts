@@ -141,7 +141,13 @@ export function createMainWindow(): BrowserWindow {
     alwaysOnTop: savedState?.alwaysOnTop ?? false,
     title: 'Catmax',
     ...(icon ? { icon } : {}), // Windows 任务栏图标（macOS 见上面的 dock.setIcon）
-    backgroundColor: '#18181b', // 与 dark theme --background 接近，避免白闪
+    // 左侧栏用带 alpha 的主题色透出桌面；其余渲染区自己铺满实色背景。
+    // macOS 的 under-window 材质只作轻微柔化，不改变侧栏的主题色层级。
+    transparent: true,
+    backgroundColor: '#00000000',
+    ...(process.platform === 'darwin'
+      ? { vibrancy: 'under-window' as const, visualEffectState: 'active' as const }
+      : {}),
     webPreferences: {
       preload: resolvePreloadPath(),
       sandbox: false,

@@ -66,7 +66,8 @@ body,
 
 body {
   font-family: var(--font-sans);
-  background-color: var(--background);
+  /* BrowserWindow 本身透明，由各页面和面板自己铺背景；这样只有带 alpha 的侧栏会透出桌面。 */
+  background-color: transparent;
   color: var(--foreground);
   /* 界面正文基准，跟随 settings.theme.fontSize（见 themes.css 的界面字号刻度） */
   font-size: var(--ui-text-base);

@@ -4,7 +4,7 @@
     内测登录态接入后：点击头像弹出菜单（设置 / 退出登录），
     登录方式（密钥登录）作为账号标签展示在头像右侧。
   -->
-  <div ref="rootRef" class="sidebar-footer relative p-2 border-t border-sidebar-border bg-sidebar">
+  <div ref="rootRef" class="sidebar-footer relative p-2 border-t border-sidebar-border">
     <div class="flex items-center gap-1">
       <!-- 用户头像按钮：点击弹出设置/退出菜单 -->
       <button
