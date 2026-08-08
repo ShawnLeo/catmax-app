@@ -16,26 +16,30 @@
     <!--
       header：点击切换展开/收起。
 
-      items-baseline：streaming 态下让 LoadingDots（inline-flex，内部圆点无
-      baseline，baseline 落在底边）贴到 "thinking" 文字 baseline，三点与文字
-      底部平齐而非悬空偏高。BrainIcon / ChevronDownIcon 加 self-center 仍按
-      行盒居中，避免图标跟着贴底线。
+      items-center 整体垂直居中（thinking 文字 baseline 对齐反而偏高）。容器
+      gap-1.5 供 done 态（文案/耗时/箭头）正常排布；streaming 态下三点用
+      -ml-1 抵消多余 gap、紧贴 thinking 文字，再 translate-y-[3px] 下移补偿
+      小字号字形视觉重心偏下，与文字底部看起来齐平。
     -->
     <button
       type="button"
-      class="inline-flex items-baseline gap-1.5 px-2 py-1 rounded-md text-[length:var(--chat-text-d1)] transition-colors hover:bg-accent/50 text-muted-foreground cursor-pointer"
+      class="inline-flex items-center gap-1.5 px-2 py-1 rounded-md text-[length:var(--chat-text-d1)] transition-colors hover:bg-accent/50 text-muted-foreground cursor-pointer"
       :title="streaming ? '正在思考...' : '点击展开/收起推理'"
       @click="open = !open"
     >
       <BrainIcon
-        class="w-3.5 h-3.5 flex-shrink-0 self-center text-muted-foreground"
+        class="w-3.5 h-3.5 flex-shrink-0 text-muted-foreground"
         :class="streaming ? 'animate-pulse' : ''"
       />
 
       <!-- streaming：呼吸的 "thinking" 文字 + 三点渐进式加载动画 -->
       <template v-if="streaming">
         <span class="animate-[thinkbreath_1.6s_ease-in-out_infinite]">thinking</span>
-        <LoadingDots class="ml-0.5 text-muted-foreground" :dot-size="3" :duration="1.6" />
+        <LoadingDots
+          class="-ml-1 translate-y-[3px] text-muted-foreground"
+          :dot-size="3"
+          :duration="1.6"
+        />
       </template>
 
       <!-- done：静态文案 + 耗时（如有）+ 折叠箭头 -->
@@ -45,7 +49,7 @@
           durationLabel
         }}</span>
         <ChevronDownIcon
-          class="w-3 h-3 flex-shrink-0 self-center transition-transform"
+          class="w-3 h-3 flex-shrink-0 transition-transform"
           :class="open ? 'rotate-180' : ''"
         />
       </template>
@@ -76,7 +80,7 @@ const props = defineProps<{
   streaming: boolean
   /** 思考耗时（秒）。null = 拿不到（历史消息反推无时间戳）→ 不显示 */
   durationSec?: number | null
-  /** 完成态标题；Codex 历史使用“已处理”。 */
+  /** 完成态标题；Codex 历史使用"已处理"。 */
   completedLabel?: string | undefined
 }>()
 

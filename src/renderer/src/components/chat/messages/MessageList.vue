@@ -91,17 +91,22 @@
                 class="absolute w-2 h-2 rounded-full -left-[6px] top-1.5 bg-success animate-pulse"
               />
               <!--
-                items-baseline：让 LoadingDots（inline-flex，内部圆点无 baseline，
-                故其 baseline 落在底边）贴到“正在思考”文字的 baseline，即中文字
-                视觉底部——三点不再悬空偏高。Loader2Icon 用 self-center 仍按行盒居中，
-                避免它跟着贴底线而看起来下坠。
+                items-center 整体垂直居中。去掉容器 gap，改用各元素自己的 margin
+                精确控制间距：图标 mr-2（8px）→ 文字；文字 mr-1（4px）→ 三点，让
+                三点紧贴"正在思考"。三点 translate-y-[3px] 下移补偿中文字形视觉
+                重心偏下（行盒底含 descender 空间，下移 3px 后三点底正好贴中文字
+                形视觉底部），使其与文字底部看起来齐平。
               -->
               <div
-                class="flex items-baseline gap-2 text-[length:var(--chat-text-base)] text-muted-foreground"
+                class="flex items-center text-[length:var(--chat-text-base)] text-muted-foreground"
               >
-                <Loader2Icon class="w-3.5 h-3.5 flex-shrink-0 self-center animate-spin" />
-                <span>正在思考</span>
-                <LoadingDots class="text-muted-foreground" :dot-size="4" :duration="1.6" />
+                <Loader2Icon class="w-3.5 h-3.5 flex-shrink-0 mr-2 animate-spin" />
+                <span class="mr-1">正在思考</span>
+                <LoadingDots
+                  class="text-muted-foreground translate-y-[3px]"
+                  :dot-size="4"
+                  :duration="1.6"
+                />
               </div>
             </div>
           </div>
