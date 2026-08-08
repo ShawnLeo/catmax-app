@@ -21,9 +21,14 @@
     inline style 的 animation 引用 keyframe 名——inline style 无法引用被重命名
     后的名字，动画会静默失效（点完全不动）。非 scoped + 唯一前缀 catmax- 防冲突。
 
-    size / duration 通过 props 控制，适配不同使用位置。
+    点大小默认基于父级字号的 em 缩放，再用 clamp 限制边界；
+    size / duration 仍可通过 props 覆盖，适配特殊使用位置。
   -->
-  <span :class="['inline-flex items-center gap-[2px]', $props.class]" aria-hidden="true">
+  <span
+    :class="['inline-flex items-center', $props.class]"
+    :style="{ gap: dotGap }"
+    aria-hidden="true"
+  >
     <span
       v-for="(d, i) in 3"
       :key="i"
@@ -41,20 +46,26 @@
 /**
  * 加载三点动画。
  *
- * @prop dotSize  单个点的宽高（px 数值），默认 3
+ * @prop dotSize  单个点的宽高；number 按 px，string 可传 CSS length。
+ *                默认随父级字号缩放，范围 2.5–4px。
  * @prop duration 一个完整循环的时长（秒），默认 1.6
  * @prop class    透传 class（颜色用 text-* 控制，点用 currentColor）
  */
 import { computed } from 'vue'
 
-const props = withDefaults(defineProps<{ dotSize?: number; duration?: number }>(), {
-  dotSize: 3,
+const RESPONSIVE_DOT_GAP = 'clamp(1.5px, 0.15em, 2.5px)'
+
+const props = withDefaults(defineProps<{ dotSize?: number | string; duration?: number }>(), {
+  dotSize: 'clamp(2.5px, 0.23em, 4px)',
   duration: 1.6,
 })
 
-// 本地常量——withDefaults 的默认值在 template 里不会被类型收窄（仍可能 undefined），
-// 用 computed 取出保证模板里拿到的是确定的 number/string。
-const dotSize = computed(() => `${props.dotSize}px`)
+// withDefaults 的默认值在 template 里不会被类型收窄（仍可能 undefined），
+// 用 computed 取出保证模板里拿到的是确定的 CSS length。
+const dotSize = computed(() =>
+  typeof props.dotSize === 'number' ? `${props.dotSize}px` : props.dotSize,
+)
+const dotGap = RESPONSIVE_DOT_GAP
 const duration = computed(() => props.duration)
 </script>
 

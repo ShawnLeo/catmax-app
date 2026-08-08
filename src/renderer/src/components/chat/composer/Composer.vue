@@ -20,11 +20,11 @@
            会被容器裁切（弹层在按钮上方时超出容器上边界）。内部子元素的圆角
            由各自的 rounded-* 控制，textarea/AttachmentBar 没有溢出元素，
            容器自身圆角不会露出直角。-->
-      <!-- File Preview Tabs: 输入容器背景与左侧会话列表统一(bg-sidebar),
-           跟主体聊天区(--background)形成轻微对比,呼应侧边栏的层次感。 -->
+      <!-- File Preview Tabs: 输入容器使用 Composer 专用背景(bg-composer)，
+           跟主体聊天区(--background)形成轻微对比，不受侧边栏透明度变化影响。 -->
       <!-- relative:联想弹层(SuggestionPopover)以此为定位锚，贴在输入框正上方 -->
       <div
-        class="composer-input-shell relative rounded-2xl border border-border bg-sidebar focus-within:border-primary/50 transition-[border-color,box-shadow] duration-200 @container"
+        class="composer-input-shell relative rounded-2xl border border-border bg-composer transition-[border-color,box-shadow] duration-200 @container"
       >
         <!-- Composer Autocomplete: `@` 文件联想。候选来源由 lib/autocomplete 的
              registry 决定，这里只负责摆位置和转发事件。 -->
@@ -152,11 +152,12 @@
           <Button
             v-if="showStopButton"
             size="icon"
-            class="h-7 w-7 rounded-md"
+            class="composer-stop-button h-7 w-7 rounded-md"
+            aria-label="停止发送"
             title="停止"
             @click="onInterrupt"
           >
-            <SquareIcon class="w-3 h-3 fill-current" />
+            <SquareIcon class="composer-stop-icon w-3 h-3 fill-current" />
           </Button>
           <Button
             v-else
@@ -177,7 +178,68 @@
 
 <style scoped>
 .composer-input-shell:focus-within {
+  border-color: var(--composer-focus-border);
   box-shadow: 0 0 20px 2px var(--composer-focus-glow);
+}
+
+/*
+ * 发送中用停止按钮自身持续反馈：外圈缓慢扩散表示 turn 仍在运行，
+ * 图标只做轻微呼吸，避免与可点击按钮的 hover / active 状态争夺注意力。
+ */
+.composer-stop-button {
+  position: relative;
+  isolation: isolate;
+}
+
+.composer-stop-button::after {
+  position: absolute;
+  z-index: -1;
+  inset: -0.1875rem;
+  content: '';
+  pointer-events: none;
+  border: 1px solid currentColor;
+  border-radius: 0.5rem;
+  animation: composer-stop-signal 1.8s ease-out infinite;
+}
+
+.composer-stop-icon {
+  animation: composer-stop-breathe 1.8s ease-in-out infinite;
+}
+
+@keyframes composer-stop-signal {
+  0% {
+    opacity: 0.42;
+    transform: scale(0.88);
+  }
+  70%,
+  100% {
+    opacity: 0;
+    transform: scale(1.12);
+  }
+}
+
+@keyframes composer-stop-breathe {
+  0%,
+  100% {
+    opacity: 0.72;
+    transform: scale(0.88);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .composer-stop-button::after,
+  .composer-stop-icon {
+    animation: none;
+  }
+
+  .composer-stop-button::after {
+    opacity: 0.28;
+    transform: none;
+  }
 }
 </style>
 

@@ -81,7 +81,7 @@
       终端区：相对定位容器，每个终端一个 absolute 挂载 div（v-show 控制显隐，不卸载）。
       每个终端有独立 xterm 实例——切换 tab 切显示对应实例，后台终端输出持续写入不丢失。
     -->
-    <div class="relative flex-1 overflow-hidden bg-[#0a0a0c]">
+    <div class="relative flex-1 overflow-hidden bg-terminal">
       <div
         v-for="t in terminalStore.terminals"
         :key="t.id"
@@ -109,7 +109,7 @@ import { useWorkspaceStore } from '@renderer/stores/workspace'
 import { DEFAULT_CODE_FONT_SIZE } from '@shared/constants'
 import { FitAddon } from '@xterm/addon-fit'
 import { WebLinksAddon } from '@xterm/addon-web-links'
-import { Terminal } from '@xterm/xterm'
+import { Terminal, type ITheme } from '@xterm/xterm'
 import { ChevronDownIcon, PlusIcon, TerminalIcon, XIcon } from 'lucide-vue-next'
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 
@@ -139,6 +139,32 @@ const instances = new Map<string, TermInstance>()
 const mountEls = new Map<string, HTMLElement>()
 const rootRef = ref<HTMLElement | null>(null)
 
+/**
+ * 从真实挂载节点读取主题已经解析完成的颜色。
+ *
+ * xterm 在 canvas 内绘制，不能像普通 DOM 一样直接使用 Tailwind class；这里让它与
+ * 外层的 bg-terminal 和全局 foreground 共用同一套 CSS token。
+ */
+function readTerminalTheme(el: HTMLElement): ITheme {
+  const containerStyle = getComputedStyle(el.parentElement ?? el)
+  const rootStyle = getComputedStyle(rootRef.value ?? document.documentElement)
+  const foreground = rootStyle.color
+
+  return {
+    background: containerStyle.backgroundColor,
+    foreground,
+    cursor: foreground,
+  }
+}
+
+/** 已打开的 xterm canvas 不会自动响应 CSS token 变化，需要主动刷新 options.theme。 */
+function applyTerminalTheme(): void {
+  for (const [id, inst] of instances) {
+    const el = mountEls.get(id)
+    if (el) inst.term.options.theme = readTerminalTheme(el)
+  }
+}
+
 /** 模板里每个终端 div 的 ref 回调——记录/清理挂载点 DOM。 */
 function setMountEl(id: string, el: HTMLElement | null): void {
   if (el) {
@@ -157,13 +183,11 @@ function setMountEl(id: string, el: HTMLElement | null): void {
 function initTerminal(id: string, el: HTMLElement): void {
   const term = new Terminal({
     cursorBlink: true,
+    cursorStyle: 'bar',
+    cursorWidth: 1,
     fontSize: codeFontSize.value,
     fontFamily: 'var(--font-mono), monospace',
-    theme: {
-      background: '#0a0a0c',
-      foreground: '#e4e4e7',
-      cursor: '#e4e4e7',
-    },
+    theme: readTerminalTheme(el),
   })
   const fit = new FitAddon()
   term.loadAddon(fit)
@@ -210,8 +234,14 @@ function fitActive(): void {
 // —— pty 数据路由：组件级单次订阅，按 id 分发到对应 xterm ——
 let unsubData: (() => void) | null = null
 let unsubExit: (() => void) | null = null
+let themeObserver: MutationObserver | null = null
 
 onMounted(() => {
+  // 初次进入 / 从设置页返回时，setMountEl 会早于组件真正接入文档执行，
+  // 那时 getComputedStyle 可能读到空颜色，xterm 就回退成默认黑底白字。
+  // mounted 后 DOM 与主题 CSS 都已生效，必须用最终颜色覆盖一次初始 fallback。
+  applyTerminalTheme()
+
   unsubData = window.api.pty.onData(({ id, data }) => {
     // 每个终端的输出写入它自己的 xterm（不论是否当前激活），后台输出不丢
     instances.get(id)?.term.write(data)
@@ -220,11 +250,19 @@ onMounted(() => {
     instances.get(id)?.term.write(`\r\n[process exited with code ${exitCode}]\r\n`)
     terminalStore.removeLocal(id)
   })
+
+  themeObserver = new MutationObserver(() => applyTerminalTheme())
+  themeObserver.observe(document.documentElement, {
+    attributes: true,
+    attributeFilter: ['data-theme'],
+  })
 })
 
 onUnmounted(() => {
   unsubData?.()
   unsubExit?.()
+  themeObserver?.disconnect()
+  themeObserver = null
   for (const id of [...instances.keys()]) disposeTerminal(id)
 })
 

@@ -36,7 +36,7 @@
       :placeholder="placeholder"
       :disabled="disabled"
       :rows="rows"
-      class="mirror relative w-full bg-transparent resize-none focus:outline-none placeholder:text-muted-foreground/60 disabled:opacity-50"
+      class="mirror relative w-full bg-transparent resize-none focus:outline-none placeholder:text-muted-foreground/45 disabled:opacity-50"
       @input="onInput"
       @scroll="syncScroll"
       @keydown="emit('keydown', $event)"

@@ -7,7 +7,7 @@
   -->
   <div
     :class="[
-      'shrink-0 overflow-hidden border-t border-border bg-card',
+      'shrink-0 overflow-hidden bg-card',
       // 拖拽 resize 期间禁用 transition（否则动画追赶鼠标造成卡顿）；
       // 仅折叠/展开切换时保留过渡动画。
       uiStore.panelDragging ? '' : 'transition-[height] duration-200 ease-in-out',

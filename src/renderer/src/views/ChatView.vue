@@ -77,6 +77,24 @@
         :nav-rail-visible="navRailVisible"
         :show-thinking="runtimeConfig.effort !== 'none'"
       />
+      <!--
+        切换会话时的过渡态：已选中一个 session（currentSessionId 非空），但历史还在异步加载
+        （loading=true，messages 暂时为空）。若落回下方 new-session 空状态会闪一下带猫 logo 的
+        欢迎页，让用户以为会话丢了——这里单独挂一个安静的 loading，只放小 logo + 旋转指示器，
+        明确告诉用户"正在打开这个会话"而不是"进入新会话"。
+
+        仅在真的 idle（currentSessionId === null，新会话/未选中）时才落到 new-session 分支。
+      -->
+      <div
+        v-else-if="messageStore.currentSessionId && messageStore.loading"
+        class="flex-1 flex flex-col items-center justify-center gap-4 text-muted-foreground"
+      >
+        <CatmaxLogo variant="plain" class="h-12 w-12 opacity-60" />
+        <div class="flex items-center gap-2 text-[length:var(--ui-text-base)]">
+          <Loader2Icon class="h-4 w-4 animate-spin" />
+          <span>正在打开会话…</span>
+        </div>
+      </div>
       <div
         v-else
         class="new-session flex-1 flex items-center justify-center px-6 text-muted-foreground"
@@ -256,7 +274,7 @@ import type {
 } from '@shared/backend/types'
 import { type BackendId, NARROW_WINDOW_BREAKPOINT } from '@shared/constants'
 import type { RuntimeConfigSnapshot } from '@shared/ipc/session'
-import { FilePlusIcon, HouseIcon } from 'lucide-vue-next'
+import { FilePlusIcon, HouseIcon, Loader2Icon } from 'lucide-vue-next'
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 

@@ -1,10 +1,13 @@
 <template>
+  <!--
+    选中态与 hover 共用 sidebar-hover——都是轻量反馈，不需要"已选中"比"划过"更重的色块。
+    侧栏专用色（不复用主区 muted），避免侧栏背景压暗后撞色看不清。
+  -->
   <div
     :class="[
       'group flex items-center gap-2 px-2 py-1.5 rounded-md cursor-pointer',
-      // 选中/hover 用 sidebar-accent（侧栏专用色）——比侧栏底色亮一档形成凸起反馈，
-      // 不复用主区 muted，避免侧栏背景压暗后撞色看不清。
-      active ? 'bg-sidebar-accent' : 'hover:bg-sidebar-accent',
+      // 选中常驻、hover 临时——同色，靠是否常驻而非深浅来区分状态。
+      active ? 'bg-sidebar-hover' : 'hover:bg-sidebar-hover',
     ]"
     @click="onClick"
     @contextmenu.prevent="$emit('contextmenu', $event)"

@@ -16,19 +16,17 @@
     <!--
       header：点击切换展开/收起。
 
-      items-center 整体垂直居中（thinking 文字 baseline 对齐反而偏高）。容器
-      gap-1.5 供 done 态（文案/耗时/箭头）正常排布；streaming 态下三点用
-      -ml-1 抵消多余 gap、紧贴 thinking 文字，再 translate-y-[3px] 下移补偿
-      小字号字形视觉重心偏下，与文字底部看起来齐平。
+      items-center 整体垂直居中（thinking 文字 baseline 对齐反而偏高）。
+      gap、streaming 态的负 margin 和垂直补偿均用 em，跟随聊天字号缩放。
     -->
     <button
       type="button"
-      class="inline-flex items-center gap-1.5 px-2 py-1 rounded-md text-[length:var(--chat-text-d1)] transition-colors hover:bg-accent/50 text-muted-foreground cursor-pointer"
+      class="inline-flex items-center gap-[0.45em] px-2 py-1 rounded-md text-[length:var(--chat-text-d1)] transition-colors hover:bg-accent/50 text-muted-foreground cursor-pointer"
       :title="streaming ? '正在思考...' : '点击展开/收起推理'"
       @click="open = !open"
     >
       <BrainIcon
-        class="w-3.5 h-3.5 flex-shrink-0 text-muted-foreground"
+        class="size-[1.08em] flex-shrink-0 text-muted-foreground"
         :class="streaming ? 'animate-pulse' : ''"
       />
 
@@ -36,8 +34,8 @@
       <template v-if="streaming">
         <span class="animate-[thinkbreath_1.6s_ease-in-out_infinite]">thinking</span>
         <LoadingDots
-          class="-ml-1 translate-y-[3px] text-muted-foreground"
-          :dot-size="3"
+          class="-ml-[0.3em] text-muted-foreground"
+          style="transform: translateY(clamp(2px, 0.2em, 3.5px))"
           :duration="1.6"
         />
       </template>
@@ -49,7 +47,7 @@
           durationLabel
         }}</span>
         <ChevronDownIcon
-          class="w-3 h-3 flex-shrink-0 transition-transform"
+          class="size-[0.92em] flex-shrink-0 transition-transform"
           :class="open ? 'rotate-180' : ''"
         />
       </template>

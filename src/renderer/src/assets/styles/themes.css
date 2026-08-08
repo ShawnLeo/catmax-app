@@ -61,18 +61,24 @@
 
   /* Layer 3: 组件 token */
   /*
-    Sidebar 层次：主区 background=gray-100(18%)，侧栏提亮到 30%，
-    再用 80% 不透明度让桌面影调明显透出。选中/hover 用 34%，
-    保留比透明底色更明确的交互反馈。
+    Sidebar 层次：主区 background=gray-100(18%)，透明侧栏用纯黑底色，
+    避免透过桌面亮色后显得发灰。80% 不透明度继续保留桌面影调，
+    选中/hover 用 34%，保留比透明底色更明确的交互反馈。
   */
-  --sidebar-background: oklch(30% 0 0 / 0.8);
+  --sidebar-background: oklch(0% 0 0 / 0.8);
   --sidebar-border: oklch(34% 0 0 / 0.6);
   --sidebar-foreground: var(--color-gray-800);
   --sidebar-accent: oklch(34% 0 0);
+  /* hover 与 accent 同色——暗色下底色透明叠加，落差本就小，无需再细分层次。 */
+  --sidebar-hover: oklch(34% 0 0);
+  /* 面板接缝用实色深黑，避免半透明线与桌面亮色混合后反而发亮。 */
+  --panel-divider: oklch(12% 0 0);
   --panel-edge-shadow: oklch(0% 0 0 / 0.1);
-  --composer-background: var(--color-gray-50);
+  /* 比 18% 的主聊天背景提亮一档，让输入区在暗色主题下保持轻微层次。 */
+  --composer-background: var(--color-gray-300);
   --composer-border: var(--border);
-  --composer-focus-glow: oklch(82% 0 0 / 0.12);
+  --composer-focus-border: oklch(70% 0 0 / 0.22);
+  --composer-focus-glow: oklch(82% 0 0 / 0.09);
   --new-session-glow-core: oklch(100% 0 0 / 0.05);
   --new-session-glow-mid: oklch(100% 0 0 / 0.02);
   --new-session-glow-width: min(520px, 72%);
@@ -148,10 +154,16 @@
   --sidebar-border: oklch(89% 0.002 80);
   --sidebar-foreground: var(--color-gray-700);
   --sidebar-accent: var(--color-gray-300);
+  /* hover 比 accent（90%）更浅：日间近白底色上，hover 是"轻碰"的微弱提示，
+     选中态才是有分量的"已确认"凹陷反馈，两者必须拉开层次，不能共用一色。 */
+  --sidebar-hover: var(--color-gray-200);
+  --panel-divider: var(--border);
   --panel-edge-shadow: oklch(20% 0 0 / 0.045);
-  --composer-background: var(--color-gray-0);
+  --composer-background: var(--color-gray-100);
   --composer-border: var(--border);
-  --composer-focus-glow: oklch(35% 0 0 / 0.09);
+  --composer-focus-border: color-mix(in oklab, var(--ring) 30%, transparent);
+  /* Composer 聚焦时复用新会话猫 Logo 的冷灰蓝核心光晕。 */
+  --composer-focus-glow: var(--new-session-glow-core);
   /* 日间新会话空状态：大范围冷灰蓝环境光，避免局部暖灰光斑像污渍。 */
   --new-session-glow-core: oklch(82% 0.035 250 / 0.18);
   --new-session-glow-mid: oklch(92% 0.018 250 / 0.08);
@@ -163,8 +175,8 @@
   --terminal-background: oklch(95% 0.003 80);
   --tool-call-background: var(--color-gray-100);
   --tool-call-border: var(--border);
-  /* user 消息气泡——亮色下用米白（跟暗色 #222222 对称的"卡片浮起"色） */
-  --user-bubble-background: oklch(99% 0.002 80);
+  /* user 消息气泡——比 99% 的页面底色深一档，让消息边界清晰但保持轻量。 */
+  --user-bubble-background: var(--color-gray-200);
 }
 
 /* ============ 字体族（三个独立 token） ============ */

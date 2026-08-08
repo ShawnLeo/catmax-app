@@ -32,6 +32,9 @@
   --color-sidebar-border: var(--sidebar-border);
   /* 侧栏内部交互态专用（选中/hover/头像）——比 sidebar 底色亮/深一档形成凹陷凸起反馈 */
   --color-sidebar-accent: var(--sidebar-accent);
+  /* 侧栏 hover 专用：比 accent 更轻一档，区分"轻碰"与"已选中" */
+  --color-sidebar-hover: var(--sidebar-hover);
+  --color-panel-divider: var(--panel-divider);
   --color-code-block: var(--code-block-background);
   --color-tool-call: var(--tool-call-background);
   --color-composer: var(--composer-background);

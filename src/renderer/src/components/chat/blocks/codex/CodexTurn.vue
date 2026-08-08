@@ -11,7 +11,7 @@
       <span>{{ running ? '处理中' : '已处理' }}</span>
       <span v-if="durationLabel" class="tabular-nums">{{ durationLabel }}</span>
       <ChevronDownIcon
-        class="size-3.5 transition-transform"
+        class="size-[1.05em] transition-transform"
         :class="open ? 'rotate-180' : '-rotate-90'"
       />
     </button>
@@ -54,13 +54,17 @@
     <!-- Codex Turn Thinking: 始终跟在当前已输出内容之后，保持为回合最末状态。 -->
     <div
       v-if="running"
-      class="flex items-center gap-2 pt-3 text-[length:var(--chat-text-base)] text-muted-foreground"
+      class="flex items-center gap-[0.6em] pt-3 text-[length:var(--chat-text-base)] text-muted-foreground"
       role="status"
       aria-live="polite"
     >
-      <span class="size-1.5 rounded-full bg-current animate-pulse" aria-hidden="true" />
+      <span
+        class="rounded-full bg-current animate-pulse"
+        style="width: clamp(5px, 0.45em, 7px); height: clamp(5px, 0.45em, 7px)"
+        aria-hidden="true"
+      />
       <span>正在思考</span>
-      <LoadingDots :dot-size="3" :duration="1.6" />
+      <LoadingDots :duration="1.6" />
     </div>
   </section>
 </template>

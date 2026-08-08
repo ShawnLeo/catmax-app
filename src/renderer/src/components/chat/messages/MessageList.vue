@@ -91,20 +91,17 @@
                 class="absolute w-2 h-2 rounded-full -left-[6px] top-1.5 bg-success animate-pulse"
               />
               <!--
-                items-center 整体垂直居中。去掉容器 gap，改用各元素自己的 margin
-                精确控制间距：图标 mr-2（8px）→ 文字；文字 mr-1（4px）→ 三点，让
-                三点紧贴"正在思考"。三点 translate-y-[3px] 下移补偿中文字形视觉
-                重心偏下（行盒底含 descender 空间，下移 3px 后三点底正好贴中文字
-                形视觉底部），使其与文字底部看起来齐平。
+                items-center 整体垂直居中。图标、文字间距、三点和垂直补偿都基于 em，
+                跟随 settings.theme.chatFontSize；三点内部再用 clamp 限制过大/过小。
               -->
               <div
                 class="flex items-center text-[length:var(--chat-text-base)] text-muted-foreground"
               >
-                <Loader2Icon class="w-3.5 h-3.5 flex-shrink-0 mr-2 animate-spin" />
-                <span class="mr-1">正在思考</span>
+                <Loader2Icon class="size-[1.05em] flex-shrink-0 mr-[0.6em] animate-spin" />
+                <span class="mr-[0.3em]">正在思考</span>
                 <LoadingDots
-                  class="text-muted-foreground translate-y-[3px]"
-                  :dot-size="4"
+                  class="text-muted-foreground"
+                  style="transform: translateY(clamp(2px, 0.2em, 3.5px))"
                   :duration="1.6"
                 />
               </div>

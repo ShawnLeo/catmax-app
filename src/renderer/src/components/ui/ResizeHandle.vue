@@ -1,7 +1,7 @@
 <template>
   <div
     :class="[
-      'relative shrink-0 bg-border group',
+      'relative shrink-0 bg-panel-divider group',
       side === 'bottom' ? 'h-px w-full cursor-row-resize' : 'w-px cursor-col-resize',
     ]"
     @pointerdown="onPointerDown"
