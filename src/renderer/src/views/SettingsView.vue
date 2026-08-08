@@ -94,21 +94,7 @@
           <McpSection v-if="activeSection === 'mcp'" />
           <WorkspaceSection v-show="activeSection === 'workspace'" />
           <ProxySection v-show="activeSection === 'proxy'" />
-
-          <section v-show="activeSection === 'about'" class="flex flex-col gap-4">
-            <header>
-              <h2 class="text-[length:var(--ui-text-u3)] font-semibold text-foreground">关于</h2>
-            </header>
-            <div class="flex items-center gap-3">
-              <CatmaxLogo variant="badge" class="w-12 h-12 rounded-[22%]" />
-              <div class="text-[length:var(--ui-text-base)] text-muted-foreground space-y-1">
-                <div class="text-foreground font-medium">Catmax</div>
-                <div>v{{ platformInfo?.appVersion ?? '...' }}</div>
-                <div>Electron v{{ platformInfo?.electronVersion ?? '...' }}</div>
-                <div>{{ platformInfo?.platform ?? '...' }} {{ platformInfo?.arch ?? '' }}</div>
-              </div>
-            </div>
-          </section>
+          <AboutSection v-show="activeSection === 'about'" />
         </div>
       </div>
     </div>
@@ -116,7 +102,7 @@
 </template>
 
 <script setup lang="ts">
-import CatmaxLogo from '@renderer/components/icons/CatmaxLogo.vue'
+import AboutSection from '@renderer/components/settings/AboutSection.vue'
 import BackendSection from '@renderer/components/settings/BackendSection.vue'
 import McpSection from '@renderer/components/settings/McpSection.vue'
 import ProxySection from '@renderer/components/settings/ProxySection.vue'
@@ -124,7 +110,6 @@ import SkillsSection from '@renderer/components/settings/SkillsSection.vue'
 import ThemeSection from '@renderer/components/settings/ThemeSection.vue'
 import WorkspaceSection from '@renderer/components/settings/WorkspaceSection.vue'
 import TitleBarControls from '@renderer/components/TitleBarControls.vue'
-import type { PlatformInfo } from '@shared/ipc/system'
 import {
   PaletteIcon,
   CpuIcon,
@@ -166,10 +151,8 @@ const activeSectionLabel = computed(
 const mobileMenuOpen = ref(false)
 
 const router = useRouter()
-const platformInfo = ref<PlatformInfo | null>(null)
 
-onMounted(async () => {
-  platformInfo.value = await window.api.system.platformInfo()
+onMounted(() => {
   window.addEventListener('keydown', onWindowKeydown)
 })
 
