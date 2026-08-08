@@ -219,7 +219,14 @@ export const writeBackendConfigFile = async (args: {
   expectedMtimeMs: number | null
   force?: boolean
 }) => {
-  return writeConfigFile(args)
+  const result = writeConfigFile(args)
+  // 覆盖配置 / settings.json 都可能改了 env.ANTHROPIC_BASE_URL——upstream 模型探测的
+  // 缓存跟着标脏，下次 listModels() 会用新配置重新探测，而不是继续用旧上游的结果。
+  if (result.ok) {
+    const descriptor = getBackendConfigFileDescriptor(args.id)
+    if (descriptor?.backendId === 'claude') ctx.backendManager.invalidateModelsFor('claude')
+  }
+  return result
 }
 
 export const validateBackendConfigFile = async (args: { id: string; content: string }) => {
@@ -246,7 +253,11 @@ export const deleteClaudeSettingsProfile = async (args: { id: string }) => {
 }
 
 export const selectClaudeSettingsProfile = async (args: { id: string }) => {
-  return selectClaudeProfile(args)
+  const result = selectClaudeProfile(args)
+  // 切档可能切到一份 ANTHROPIC_BASE_URL 完全不同的覆盖配置——upstream 模型探测缓存
+  // 是按"当前有效配置"算的，必须跟着标脏。
+  ctx.backendManager.invalidateModelsFor('claude')
+  return result
 }
 
 export const revealBackendConfigFile = async (args: { id: string }) => {

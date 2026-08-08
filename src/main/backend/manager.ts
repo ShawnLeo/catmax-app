@@ -329,6 +329,15 @@ export class BackendManager {
   }
 
   /**
+   * 只清指定 backend 的模型缓存，不重新拉——不阻塞调用方，下次 listModels() 自然重新探测。
+   * 用于 Claude 覆盖配置档切换 / 覆盖配置文件写入这类"env 可能变了"的场景：
+   * 跟 refreshModelsForBackend 的区别是那个会立即触发一次探测/RPC，这个只标脏。
+   */
+  invalidateModelsFor(id: BackendId): void {
+    this.adapters.get(id)?.invalidateModelsCache?.()
+  }
+
+  /**
    * Unified Skill Center: 把一个技能的开/关推给所有实现了该能力的后端。
    *
    * 只有 codex 实现——claude 的开关不是一次调用，而是构造 query 时把

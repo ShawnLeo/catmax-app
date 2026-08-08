@@ -4,7 +4,10 @@
 
     消息流里的 TaskCard 只在任务对应的那条消息旁边，用户滚走就看不见了；
     而后台任务恰恰是"发完就去干别的"的场景。这里给它一个固定的位置：
-      - 列表：运行中在前，显示描述 + 实时耗时
+      - 分组：进行中 / 已完成两段式（参考 Claude 官方 Desktop 客户端的
+        Background Tasks 面板），停止/失败的任务也归到"已完成"段，
+        用状态图标区分具体结局——否则长会话里运行中的任务会被淹没在
+        一串已完成任务中间，找不到当前真正在跑什么。
       - 展开：子 Agent 看内部过程，shell 看输出 tail
       - 停止：单条任务停止，不影响同一 turn 的其他任务
   -->
@@ -17,121 +20,131 @@
     </div>
 
     <div v-else class="flex-1 overflow-y-auto">
-      <div
-        v-for="task in tasks"
-        :key="task.taskId"
-        :data-task-id="task.taskId"
-        class="border-b border-border/60"
-      >
-        <!-- 任务行 -->
-        <div
-          class="w-full flex items-center gap-2 px-3 py-2 hover:bg-muted/40 cursor-pointer"
-          @click="toggle(task.taskId)"
+      <template v-for="row in taskRows" :key="row.key">
+        <!-- 分组标题：进行中 / 已完成 -->
+        <h3
+          v-if="row.kind === 'header'"
+          class="px-3 pt-2.5 pb-1 text-[length:var(--ui-text-d4)] font-medium text-muted-foreground uppercase tracking-wide"
         >
-          <component
-            :is="statusIcon(task)"
-            class="w-3.5 h-3.5 flex-shrink-0"
-            :class="statusIconClass(task)"
-          />
-          <div class="flex-1 min-w-0">
-            <div
-              class="text-[length:var(--ui-text-d2)] text-foreground truncate"
-              :title="task.description"
-            >
-              {{ task.description || task.taskId }}
-            </div>
-            <div
-              class="text-[length:var(--ui-text-d4)] font-mono text-muted-foreground/80 truncate"
-            >
-              {{ statusLine(task) }}
-            </div>
-          </div>
-          <!-- 停止按钮仅运行中出现 -->
-          <button
-            v-if="task.status === 'running'"
-            type="button"
-            class="flex-shrink-0 p-1 rounded text-muted-foreground hover:text-destructive hover:bg-muted"
-            title="停止该任务"
-            @click.stop="onStop(task.taskId)"
-          >
-            <SquareIcon class="w-3 h-3" />
-          </button>
-          <ChevronDownIcon
-            class="w-3 h-3 flex-shrink-0 text-muted-foreground transition-transform"
-            :class="expanded.has(task.taskId) ? 'rotate-180' : ''"
-          />
-        </div>
+          {{ row.label }} ({{ row.count }})
+        </h3>
 
-        <!-- 展开区：进度详情 -->
-        <div v-if="expanded.has(task.taskId)" class="px-3 pb-2.5 space-y-1.5">
-          <!--
-            summary 对 shell 任务是一句话，对子 Agent 却是整份产出（几千字）。
-            这里只当"一眼扫过"的摘要用，钳到 3 行；完整内容在下面的过程视图里。
-          -->
-          <p
-            v-if="task.summary"
-            class="summary-clamp text-[length:var(--ui-text-d3)] text-muted-foreground break-words"
-            :title="task.summary"
-          >
-            {{ task.summary }}
-          </p>
-          <p v-if="task.error" class="text-[length:var(--ui-text-d3)] text-destructive break-words">
-            {{ task.error }}
-          </p>
+        <div v-else :data-task-id="row.task.taskId" class="border-b border-border/60">
+          <!-- 任务行 -->
           <div
-            v-if="metrics(task)"
-            class="text-[length:var(--ui-text-d4)] font-mono text-muted-foreground/70"
+            class="w-full flex items-center gap-2 px-3 py-2 hover:bg-muted/40 cursor-pointer"
+            @click="toggle(row.task.taskId)"
           >
-            {{ metrics(task) }}
+            <component
+              :is="statusIcon(row.task)"
+              class="w-3.5 h-3.5 flex-shrink-0"
+              :class="statusIconClass(row.task)"
+            />
+            <div class="flex-1 min-w-0">
+              <div
+                class="text-[length:var(--ui-text-d2)] text-foreground truncate"
+                :title="row.task.description"
+              >
+                {{ row.task.description || row.task.taskId }}
+              </div>
+              <div
+                class="text-[length:var(--ui-text-d4)] font-mono text-muted-foreground/80 truncate"
+              >
+                {{ statusLine(row.task) }}
+              </div>
+            </div>
+            <!-- 停止按钮仅运行中出现 -->
+            <button
+              v-if="row.task.status === 'running'"
+              type="button"
+              class="flex-shrink-0 p-1 rounded text-muted-foreground hover:text-destructive hover:bg-muted"
+              title="停止该任务"
+              @click.stop="onStop(row.task.taskId)"
+            >
+              <SquareIcon class="w-3 h-3" />
+            </button>
+            <ChevronDownIcon
+              class="w-3 h-3 flex-shrink-0 text-muted-foreground transition-transform"
+              :class="expanded.has(row.task.taskId) ? 'rotate-180' : ''"
+            />
           </div>
 
-          <!--
-            Subagent Transcript: 子 Agent 的内部过程。
+          <!-- 展开区：进度详情 -->
+          <div v-if="expanded.has(row.task.taskId)" class="px-3 pb-2.5 space-y-1.5">
+            <!--
+              summary 对 shell 任务是一句话，对子 Agent 却是整份产出（几千字）。
+              这里只当"一眼扫过"的摘要用，钳到 3 行；完整内容在下面的过程视图里。
+            -->
+            <p
+              v-if="row.task.summary"
+              class="summary-clamp text-[length:var(--ui-text-d3)] text-muted-foreground break-words"
+              :title="row.task.summary"
+            >
+              {{ row.task.summary }}
+            </p>
+            <p
+              v-if="row.task.error"
+              class="text-[length:var(--ui-text-d3)] text-destructive break-words"
+            >
+              {{ row.task.error }}
+            </p>
+            <div
+              v-if="metrics(row.task)"
+              class="text-[length:var(--ui-text-d4)] font-mono text-muted-foreground/70"
+            >
+              {{ metrics(row.task) }}
+            </div>
 
-            放这里而不是消息流的工具卡片里——卡片会随对话滚走，而看过程时
-            正需要它固定在视野中。运行中来自 SDK 转发的实时消息
-            （forwardSubagentText，按发起它的 tool_use id 索引）；实时消息缺席时
-            （历史会话、或转发早于展开）回落到落盘的子 Agent jsonl。
+            <!--
+              Subagent Transcript: 子 Agent 的内部过程。
 
-            必须排在 outputFile 前面：子 Agent 完成时 task_notification 也会带
-            output_file，按 outputFile 优先会让刚跑完的子 Agent 从过程视图
-            退化成一堆原始 jsonl。
-          -->
-          <SubagentTranscript
-            v-if="transcriptOf(task).length > 0"
-            :key="task.taskId"
-            :messages="transcriptOf(task)"
-          />
+              放这里而不是消息流的工具卡片里——卡片会随对话滚走，而看过程时
+              正需要它固定在视野中。运行中来自 SDK 转发的实时消息
+              （forwardSubagentText，按发起它的 tool_use id 索引）；实时消息缺席时
+              （历史会话、或转发早于展开）回落到落盘的子 Agent jsonl。
 
-          <!--
-            shell 任务的进度就是命令输出本身——SDK 不给 task_progress，
-            outputFile 是运行期唯一能看到"它在干什么"的东西。
+              必须排在 outputFile 前面：子 Agent 完成时 task_notification 也会带
+              output_file，按 outputFile 优先会让刚跑完的子 Agent 从过程视图
+              退化成一堆原始 jsonl。
+            -->
+            <SubagentTranscript
+              v-if="transcriptOf(row.task).length > 0"
+              :key="row.task.taskId"
+              :messages="transcriptOf(row.task)"
+            />
 
-            仅限 shell：子 Agent 的 output_file 是指向它自己 jsonl 的软链接，
-            当纯文本 tail 出来就是几万字符的原始 JSON 刷屏。
-          -->
-          <template v-else-if="isTailable(task)">
-            <pre
-              v-if="outputs[task.taskId]"
-              class="max-h-64 overflow-auto rounded bg-muted/50 p-2 font-mono text-[length:var(--ui-text-d4)] leading-relaxed whitespace-pre-wrap break-words text-muted-foreground"
-              >{{ outputs[task.taskId] }}</pre>
-            <p v-else class="text-[length:var(--ui-text-d4)] text-muted-foreground/60">暂无输出</p>
-          </template>
+            <!--
+              shell 任务的进度就是命令输出本身——SDK 不给 task_progress，
+              outputFile 是运行期唯一能看到"它在干什么"的东西。
 
-          <p
-            v-else-if="loadingTranscripts.has(task.taskId)"
-            class="text-[length:var(--ui-text-d4)] text-muted-foreground/60"
-          >
-            正在读取子 Agent 过程…
-          </p>
-          <p
-            v-else-if="task.status === 'running' && !metrics(task)"
-            class="text-[length:var(--ui-text-d4)] text-muted-foreground/60"
-          >
-            任务运行中，暂无进度信息
-          </p>
+              仅限 shell：子 Agent 的 output_file 是指向它自己 jsonl 的软链接，
+              当纯文本 tail 出来就是几万字符的原始 JSON 刷屏。
+            -->
+            <template v-else-if="isTailable(row.task)">
+              <pre
+                v-if="outputs[row.task.taskId]"
+                class="max-h-64 overflow-auto rounded bg-muted/50 p-2 font-mono text-[length:var(--ui-text-d4)] leading-relaxed whitespace-pre-wrap break-words text-muted-foreground"
+                >{{ outputs[row.task.taskId] }}</pre>
+              <p v-else class="text-[length:var(--ui-text-d4)] text-muted-foreground/60">
+                暂无输出
+              </p>
+            </template>
+
+            <p
+              v-else-if="loadingTranscripts.has(row.task.taskId)"
+              class="text-[length:var(--ui-text-d4)] text-muted-foreground/60"
+            >
+              正在读取子 Agent 过程…
+            </p>
+            <p
+              v-else-if="row.task.status === 'running' && !metrics(row.task)"
+              class="text-[length:var(--ui-text-d4)] text-muted-foreground/60"
+            >
+              任务运行中，暂无进度信息
+            </p>
+          </div>
         </div>
-      </div>
+      </template>
     </div>
   </div>
 </template>
@@ -159,6 +172,32 @@ const uiStore = useUiStore()
 const workspaceStore = useWorkspaceStore()
 const backendStore = useBackendStore()
 const tasks = computed(() => messageStore.backgroundTasks)
+
+type TaskRow =
+  | { kind: 'header'; key: string; label: string; count: number }
+  | { kind: 'task'; key: string; task: BackgroundTaskSnapshot }
+
+/**
+ * 进行中 / 已完成两段式分组（对齐 Claude 官方 Desktop 客户端 Background Tasks
+ * 面板的 Running / Completed 分段）。failed/stopped 都并入"已完成"——它们和
+ * completed 一样不再消耗用户的持续关注，行内的状态图标已经能区分具体结局，
+ * 没必要为每种终态单开一段。用一个打平的行数组而不是嵌套结构，是为了复用
+ * 下面单个 v-for 里原本就很长的任务行/展开区模板，不必写两份。
+ */
+const taskRows = computed<TaskRow[]>(() => {
+  const running = tasks.value.filter((t) => t.status === 'running')
+  const done = tasks.value.filter((t) => t.status !== 'running')
+  const rows: TaskRow[] = []
+  if (running.length > 0) {
+    rows.push({ kind: 'header', key: 'header-running', label: '进行中', count: running.length })
+    for (const task of running) rows.push({ kind: 'task', key: task.taskId, task })
+  }
+  if (done.length > 0) {
+    rows.push({ kind: 'header', key: 'header-done', label: '已完成', count: done.length })
+    for (const task of done) rows.push({ kind: 'task', key: task.taskId, task })
+  }
+  return rows
+})
 
 const listEl = ref<HTMLElement | null>(null)
 const expanded = ref<Set<string>>(new Set())

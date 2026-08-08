@@ -406,11 +406,10 @@ async function onImportDialogClose(): Promise<void> {
 /*
  * 会话列表滚动条：默认完全隐藏，只在容器悬停或滚动中时显示细滚动条。
  * 覆盖全局 ::-webkit-scrollbar 的常驻 8px 样式，让侧栏更干净。
+ * 不能再加标准的 scrollbar-width/scrollbar-color：Chromium 126 一旦看到元素上
+ * 声明了标准滚动条属性，就会整体切到标准滚动条渲染路径，无视这里的
+ * ::-webkit-scrollbar-track 透明覆盖，轨道会露出系统默认的浅色底（白边）。
  */
-.session-scroll {
-  scrollbar-width: thin;
-  transition: scrollbar-color 0.2s ease;
-}
 .session-scroll::-webkit-scrollbar {
   width: 6px;
 }

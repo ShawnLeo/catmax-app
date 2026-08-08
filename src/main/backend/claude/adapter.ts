@@ -52,6 +52,7 @@ import {
 import type { McpRuntimeStatus } from '@shared/mcp/types'
 import { app } from 'electron'
 
+import { fetchUpstreamModels } from '../../protocol/upstream-models'
 import {
   claudeOverrideSettingsPath,
   readClaudeOverrideSettings,
@@ -128,6 +129,36 @@ const TURN_HOLD_TIMEOUT_MS = 60_000
  * 协调器 15 秒的 cancel grace。超时就直接 abort，让停止按钮秒级生效。
  */
 const INTERRUPT_CONTROL_TIMEOUT_MS = 3_000
+
+/**
+ * Upstream 模型探测成功后的复用窗口——同一份上游目录没必要每次 listModels() 都重新打一次。
+ */
+const UPSTREAM_MODELS_CACHE_TTL_MS = 5 * 60 * 1000
+/**
+ * 没配自定义上游 / 探测失败时的重试窗口。比成功缓存短很多：一次性网络抖动不该让用户
+ * 卡在旧结果上太久；但也不能每次 listModels() 调用都重新打一个当下不可达的地址。
+ * "刷新模型"按钮走 invalidateModelsCache()，不受这个窗口限制。
+ */
+const UPSTREAM_MODELS_RETRY_TTL_MS = 60 * 1000
+
+/** 官方端点没必要探测——SDK 静态目录本来就是它的真实目录，还比 /v1/models 多带 effort/thinking 元数据。 */
+function isOfficialAnthropicHost(url: string): boolean {
+  try {
+    return new URL(url).hostname === 'api.anthropic.com'
+  } catch {
+    return false
+  }
+}
+
+/** 覆盖配置档的 env 块类型不受信（JSON.parse 出来是 unknown），这里窄化并只留字符串值。 */
+function asEnvRecord(value: unknown): Record<string, string> {
+  if (typeof value !== 'object' || value === null) return {}
+  const result: Record<string, string> = {}
+  for (const [key, v] of Object.entries(value as Record<string, unknown>)) {
+    if (typeof v === 'string') result[key] = v
+  }
+  return result
+}
 
 /** 给 promise 加超时；超时抛错而不是静默 resolve，调用方才能走兜底分支。 */
 function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
@@ -259,6 +290,15 @@ export class ClaudeAdapter implements AgentBackend {
    */
   private modelsCache: ModelInfo[] | undefined
   /**
+   * Upstream 模型探测结果缓存——跟 modelsCache（SDK 静态目录）是两条独立路径。
+   * undefined = 还没探测过；null = 探测过但没有自定义上游 / 探测失败 / 返回空列表；
+   * 非空数组 = 探测到的真实模型列表，listModels() 会优先用它整个顶替 modelsCache。
+   */
+  private upstreamModelsCache: ModelOption[] | null | undefined
+  private upstreamModelsCachedAt = 0
+  /** 探测请求去重——并发调用 listModels() 只应该触发一次真实的网络请求。 */
+  private upstreamModelsProbePromise: Promise<ModelOption[] | null> | null = null
+  /**
    * Prompt-cache 预热按 cwd/model/effort 去重。这里缓存的是临时 Warmup turn，
    * 与任何 Catmax 用户会话无关；完成后对应的 Claude JSONL 会被删除。
    */
@@ -348,16 +388,16 @@ export class ClaudeAdapter implements AgentBackend {
   }
 
   async listModels(): Promise<ModelOption[]> {
+    // 自定义上游：先探测 /v1/models，探测不到再退到 ANTHROPIC_DEFAULT_*_MODEL 配置——
+    // 两层逻辑都在 probeUpstreamModels() 里，见其注释。
+    const upstream = await this.getUpstreamModels()
+    if (upstream && upstream.length > 0) return upstream
+
+    // 没配自定义上游 / 两层都拿不到：退回 SDK 目录，这条路径本身也用 resolvedModel
+    // 做过修正，见 mapModelInfo 注释。
     // 有动态缓存（首次 query 后从 SDK initializationResult 拿到）→ 返回真实列表
     if (this.modelsCache && this.modelsCache.length > 0) {
-      return this.modelsCache.map((m) => ({
-        id: m.value,
-        displayName: m.displayName,
-        ...(m.description ? { description: m.description } : {}),
-        ...(m.supportedEffortLevels
-          ? { supportedEfforts: this.mapEffortLevels(m.supportedEffortLevels) }
-          : {}),
-      }))
+      return this.modelsCache.map((m) => this.mapModelInfo(m))
     }
     // 无缓存（尚未跑过 query）→ 静态 fallback，保证 UI 初始有选项
     return [
@@ -369,6 +409,154 @@ export class ClaudeAdapter implements AgentBackend {
 
   invalidateModelsCache(): void {
     this.modelsCache = undefined
+    this.upstreamModelsCache = undefined
+    this.upstreamModelsCachedAt = 0
+    // 顺带丢弃可能还在飞的探测 promise——不这么做的话，紧跟着 invalidate 之后的
+    // listModels() 会直接复用那个用旧 target 发起的 in-flight 请求，等于白 invalidate。
+    this.upstreamModelsProbePromise = null
+  }
+
+  /**
+   * Upstream 模型探测的查询套件：TTL 缓存 + 并发去重。
+   *
+   * 返回 null 统一表示"这次不该用探测结果"——不管背后原因是没配自定义上游、探测失败
+   * 还是返回了空列表，调用方（listModels）都只需要退回 SDK 静态目录，不用关心细节。
+   */
+  private async getUpstreamModels(): Promise<ModelOption[] | null> {
+    if (this.upstreamModelsCache !== undefined) {
+      const ttl =
+        this.upstreamModelsCache && this.upstreamModelsCache.length > 0
+          ? UPSTREAM_MODELS_CACHE_TTL_MS
+          : UPSTREAM_MODELS_RETRY_TTL_MS
+      if (Date.now() - this.upstreamModelsCachedAt < ttl) {
+        return this.upstreamModelsCache
+      }
+    }
+
+    if (!this.upstreamModelsProbePromise) {
+      this.upstreamModelsProbePromise = this.probeUpstreamModels()
+        .then((result) => {
+          this.upstreamModelsCache = result
+          this.upstreamModelsCachedAt = Date.now()
+          return result
+        })
+        .finally(() => {
+          this.upstreamModelsProbePromise = null
+        })
+    }
+    return this.upstreamModelsProbePromise
+  }
+
+  /**
+   * 自定义上游的真实模型列表——三层兜底，前一层拿不到才落到下一层：
+   *
+   * 1. 主动探测 `/v1/models`（复用协议桥已有的 fetchUpstreamModels）。中转确实实现了
+   *    这个接口时最准——能看到 alias 机制之外的完整目录，不局限于 opus/sonnet/haiku。
+   * 2. 探测失败/为空时，直接读覆盖配置里的 `ANTHROPIC_DEFAULT_OPUS_MODEL` /
+   *    `_SONNET_MODEL` / `_HAIKU_MODEL`——这是 Claude Code 官方给第三方中转设计的别名
+   *    重映射机制（本仓库自己的 CLAUDE_INTERNAL_DEFAULT_OVERRIDE 模板就是这么配的），
+   *    纯读配置文件，不发任何网络请求。**中转没有 /models 接口是常态，不是异常**——
+   *    很多厂商 / 用户自建中转根本没实现它，这里静默接力，不算故障。
+   * 3. 两者都没有 → 返回 null，调用方（listModels）退回 mapModelInfo() 处理过的
+   *    modelsCache（SDK 自己握手后给出的目录，其中 resolvedModel 字段也是同一套
+   *    ANTHROPIC_DEFAULT_*_MODEL 解析结果，只是要等 warmup/turn 跑过一次才有值），
+   *    再不行才是硬编码的 sonnet/opus/haiku 静态兜底。
+   *
+   * 每一层返回项的 id 都是真实模型 id，直接经 `options.model = args.model` 发给
+   * SDK——不经过任何别名或展示层转换，跟实际发起请求时用的字符串完全一致。
+   *
+   * 没配自定义上游（`resolveUpstreamProbeTarget` 返回 null）时整个方法直接返回 null。
+   */
+  private async probeUpstreamModels(): Promise<ModelOption[] | null> {
+    const target = this.resolveUpstreamProbeTarget()
+    if (!target) return null
+
+    try {
+      const models = await fetchUpstreamModels({
+        modelsUrl: '',
+        baseUrl: target.baseUrl,
+        apiKey: target.apiKey,
+      })
+      if (models.length > 0) {
+        log.info('probed upstream models via /models', {
+          baseUrl: target.baseUrl,
+          count: models.length,
+        })
+        return models.map((m) => ({ id: m.id, displayName: m.displayName }))
+      }
+    } catch (error) {
+      log.debug('probe /models failed, falling back to ANTHROPIC_DEFAULT_*_MODEL env', error)
+    }
+
+    const derived = this.deriveModelsFromAliasEnv()
+    if (derived) {
+      log.info('derived models from ANTHROPIC_DEFAULT_*_MODEL env', {
+        baseUrl: target.baseUrl,
+        count: derived.length,
+      })
+    }
+    return derived
+  }
+
+  /**
+   * 从 `ANTHROPIC_DEFAULT_OPUS_MODEL` / `_SONNET_MODEL` / `_HAIKU_MODEL` 直接拼出模型列表。
+   *
+   * 这三个 key 跟 mapModelInfo() 里读的 `ModelInfo.resolvedModel` 是同一份底层数据的
+   * 两种取法：resolvedModel 要等 SDK 握手过一次才有（modelsCache 得等 warmup/turn 跑过
+   * 一次），这里是不等握手、直接读配置文件——所以能放在探测失败之后立刻用，用户第一次
+   * 打开 Composer / 设置页、还没发过一条消息时也能看到真实模型，不用先等一次预热。
+   *
+   * displayName 直接用真实模型 id 本身，不再套 "Opus/Sonnet (glm-5.2)" 这种别名前缀——
+   * 用户配的是中转自己的模型，下拉框里就该直接看到那个模型叫什么，不用先在脑子里翻译
+   * 一遍"这个 Opus 到底对应哪个模型"。
+   *
+   * 同一个 id 出现在多个别名下时只保留一条（本仓库自己的内测中转就是 OPUS 和 SONNET
+   * 都指向 glm-5.2），避免下拉框里出现两条 id 完全相同的选项。
+   *
+   * 三个 key 都没配就返回 null，交给调用方继续往下一层兜底。
+   */
+  private deriveModelsFromAliasEnv(): ModelOption[] | null {
+    const env = this.effectiveEnv()
+    const envKeys = [
+      'ANTHROPIC_DEFAULT_OPUS_MODEL',
+      'ANTHROPIC_DEFAULT_SONNET_MODEL',
+      'ANTHROPIC_DEFAULT_HAIKU_MODEL',
+    ]
+
+    const seen = new Set<string>()
+    const models: ModelOption[] = []
+    for (const envKey of envKeys) {
+      const id = (env[envKey] ?? '').trim()
+      if (!id || seen.has(id)) continue
+      seen.add(id)
+      models.push({ id, displayName: id })
+    }
+    return models.length > 0 ? models : null
+  }
+
+  /**
+   * 当前生效的 env——探测目标解析和别名兜底解析共享同一份优先级规则。
+   *
+   * 读取优先级（同一个 key 后面覆盖前面）：process.env → extraEnv（代理设置注入）→
+   * 覆盖配置档的 env 块。覆盖档是 SDK 的 "flag settings" 层，本来就该盖过前两者——
+   * 跟 applyOverrideSettings() 把它交给 SDK 时的优先级保持一致，不能反过来。
+   */
+  private effectiveEnv(): Record<string, string | undefined> {
+    const overridePath = claudeOverrideSettingsPath()
+    const overrideEnv = overridePath
+      ? asEnvRecord(readClaudeOverrideSettings(overridePath).env)
+      : {}
+    return { ...process.env, ...this.extraEnv, ...overrideEnv }
+  }
+
+  /** 探测目标——只在配置了非官方 ANTHROPIC_BASE_URL 时才有意义。 */
+  private resolveUpstreamProbeTarget(): { baseUrl: string; apiKey: string } | null {
+    const env = this.effectiveEnv()
+    const baseUrl = (env.ANTHROPIC_BASE_URL ?? '').trim()
+    if (!baseUrl || isOfficialAnthropicHost(baseUrl)) return null
+
+    const apiKey = (env.ANTHROPIC_AUTH_TOKEN ?? env.ANTHROPIC_API_KEY ?? '').trim()
+    return { baseUrl, apiKey }
   }
 
   /**
@@ -496,6 +684,35 @@ export class ClaudeAdapter implements AgentBackend {
   /** SDK 的 effort 等级 → catmax 的 EffortLevel（补 'none'） */
   private mapEffortLevels(levels: ('low' | 'medium' | 'high' | 'xhigh' | 'max')[]): EffortLevel[] {
     return ['none', ...levels]
+  }
+
+  /**
+   * SDK 的 ModelInfo → catmax 的 ModelOption。
+   *
+   * 关键在 `resolvedModel`：官方场景下它就等于 `value`（'sonnet' → 'sonnet'），但配了
+   * `ANTHROPIC_DEFAULT_SONNET_MODEL`/`_OPUS_MODEL`/`_HAIKU_MODEL`（或 SDK 的
+   * `ANTHROPIC_CUSTOM_MODEL_OPTION` 自定义模型机制）这类第三方中转覆盖时，SDK 自己已经
+   * 把别名解析成了真实 wire model id 并通过这个字段暴露出来（实测：设置
+   * ANTHROPIC_DEFAULT_SONNET_MODEL=glm-5.2 后，'sonnet' 条目的 resolvedModel 就是
+   * 'glm-5.2'）。
+   *
+   * 用它做 id 而不是 `value`：这样用户在下拉框里选中的字符串，就是之后
+   * startTurnRequest/runWarmup 里 `options.model = args.model` 真正发给 SDK 的那个
+   * 字符串——不用假手 'sonnet' 这层看不见的别名转换（也实测过直接传 resolvedModel
+   * 握手正常，SDK 把它当显式 model id 处理，不会再走一遍别名解析）。displayName 也
+   * 直接换成真实 id 本身，不拼 "Sonnet (glm-5.2)" 这种别名前缀——配的是中转自己的
+   * 模型，下拉框里就该直接显示那个模型叫什么。
+   */
+  private mapModelInfo(m: ModelInfo): ModelOption {
+    const resolved = m.resolvedModel && m.resolvedModel !== m.value ? m.resolvedModel : null
+    return {
+      id: resolved ?? m.value,
+      displayName: resolved ?? m.displayName,
+      ...(m.description ? { description: m.description } : {}),
+      ...(m.supportedEffortLevels
+        ? { supportedEfforts: this.mapEffortLevels(m.supportedEffortLevels) }
+        : {}),
+    }
   }
 
   async startSession(
