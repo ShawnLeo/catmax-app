@@ -245,6 +245,7 @@
       :y="contextMenu.y"
       :items="contextMenuItems"
       @select="onContextMenuSelect"
+      @open-parent="onContextMenuOpenParent"
       @close="contextMenu = null"
     />
   </div>
@@ -252,6 +253,7 @@
 
 <script setup lang="ts">
 import { ContextMenu, type ContextMenuItem } from '@renderer/components/ui/context-menu'
+import { useOpenWith } from '@renderer/composables/useOpenWith'
 import { useChatInputStore } from '@renderer/stores/chat-input'
 import { useFilesStore } from '@renderer/stores/files'
 import { useWorkspaceStore } from '@renderer/stores/workspace'
@@ -261,6 +263,7 @@ import {
   ChevronDownIcon,
   CircleAlertIcon,
   FolderOpenIcon,
+  FolderSearchIcon,
   ListTreeIcon,
   LoaderCircleIcon,
   MessageSquarePlusIcon,
@@ -269,6 +272,9 @@ import {
   SearchIcon,
   SearchXIcon,
   XIcon,
+  ExternalLinkIcon,
+  ClipboardIcon,
+  ClipboardPasteIcon,
 } from 'lucide-vue-next'
 import { computed, onMounted, onUnmounted, provide, ref, watch } from 'vue'
 
@@ -297,25 +303,159 @@ const selectedFolder = computed(
 )
 
 // File Mention: 右键菜单——树里任意节点和搜索结果共用这一个实例。
+// contextMenuItems 是 ref（非 computed）：「打开方式」的子菜单要在 hover 时懒加载，
+// 必须能就地替换 children。
+// Open With 的平台判断、应用查询、打开逻辑统一走 useOpenWith 单例（与聊天顶部选择器、
+// 引用 pill 图标点击共享同一份状态）。
 const contextMenu = ref<{ x: number; y: number; entry: DirEntry } | null>(null)
+const contextMenuItems = ref<ContextMenuItem[]>([])
+// 缓存本次菜单会话解析出的绝对路径——复制/打开/Finder 都要用，避免每个动作各解析一次。
+const contextMenuAbsPath = ref<string | null>(null)
+const { platform: openWithPlatform, initOpenWith, listInstalledApps, openWith } = useOpenWith()
 
-const contextMenuItems = computed<ContextMenuItem[]>(() => [
-  { key: 'mention', label: '添加到对话', icon: MessageSquarePlusIcon },
-])
+/**「在 Finder / 资源管理器中显示」文案随平台变——与 SessionList 的约定一致 */
+const revealLabel = computed(() =>
+  openWithPlatform.value === 'darwin' ? '在 Finder 中显示' : '在文件资源管理器中显示',
+)
 
+/**
+ * 打开右键菜单：先解析绝对路径，再构建条目。
+ * 路径解析走 fs.resolveFileReference（工作区边界校验在那里），失败时各打开类动作自检兜底。
+ */
 function openContextMenu(entry: DirEntry, event: MouseEvent): void {
   contextMenu.value = { x: event.clientX, y: event.clientY, entry }
+  contextMenuAbsPath.value = null
+  void resolveMenuAbsPath(entry)
+  contextMenuItems.value = buildMenuItems(entry)
 }
 provide(FILE_TREE_MENU_KEY, openContextMenu)
+
+async function resolveMenuAbsPath(entry: DirEntry): Promise<void> {
+  const workspace = workspaceStore.currentWorkspace
+  if (!workspace) return
+  const reference = entry.folderAlias
+    ? `${entry.folderAlias}/${entry.relativePath}`
+    : entry.relativePath
+  try {
+    const resolved = await window.api.fs.resolveFileReference({
+      workspaceId: workspace.id,
+      ...(entry.folderId !== undefined && { folderId: entry.folderId }),
+      reference,
+      allowDirectory: entry.isDirectory,
+    })
+    // 工作区内文件 resolveFileReference 只回 relativePath（absolutePath 仅工作区外文件有）。
+    // 拿绝对路径必须由 folder.path + relativePath 拼回——与 readFilePreview/openInEditor 的约定一致。
+    if (!resolved) {
+      contextMenuAbsPath.value = null
+    } else if (resolved.absolutePath) {
+      contextMenuAbsPath.value = resolved.absolutePath
+    } else {
+      const folder =
+        workspace.folders.find((item) => item.id === resolved.folderId) ?? selectedFolder.value
+      contextMenuAbsPath.value = folder ? `${folder.path}/${resolved.relativePath}` : null
+    }
+  } catch {
+    contextMenuAbsPath.value = null
+  }
+}
+
+function buildMenuItems(_entry: DirEntry): ContextMenuItem[] {
+  const items: ContextMenuItem[] = [{ key: 'open', label: '打开', icon: ExternalLinkIcon }]
+  // 「打开方式」仅 macOS——列表与顶部选择器一致（Finder + 白名单 IDE），文件和目录都显示
+  // （Finder 定位目录、IDE 打开为项目，对目录都有意义）。
+  if (openWithPlatform.value === 'darwin') {
+    items.push({
+      key: 'open-with',
+      label: '打开方式',
+      icon: ExternalLinkIcon,
+      // 子菜单先放占位，hover 时由 onContextMenuOpenParent 懒加载填充真实应用
+      children: [{ key: 'loading', label: '正在读取…', disabled: true }],
+    })
+  }
+  items.push({ key: 'reveal', label: revealLabel.value, icon: FolderSearchIcon })
+  items.push({ key: 'copy-abs', label: '复制绝对路径', icon: ClipboardPasteIcon })
+  items.push({ key: 'copy-rel', label: '复制相对路径', icon: ClipboardIcon })
+  items.push({ separator: true, key: 'sep', label: '' })
+  items.push({ key: 'mention', label: '添加到对话', icon: MessageSquarePlusIcon })
+  return items
+}
+
+/**
+ * ContextMenu 在带 children 的父条目被 hover 时回传 openParent——
+ * 在此刻填充子菜单。已加载过则跳过。
+ *
+ * 应用列表与顶部「打开方式」选择器完全一致（走 useOpenWith.listInstalledApps：
+ * Finder + 白名单 IDE，带图标），不再按具体文件查 Launch Services——这样两处入口
+ * 看到的应用集合统一，用户在顶部选好的应用这里也在。
+ */
+async function onContextMenuOpenParent(key: string): Promise<void> {
+  if (key !== 'open-with') return
+  const items = contextMenuItems.value
+  const parent = items.find((item) => item.key === 'open-with')
+  if (!parent?.children) return
+  // 已加载过真实列表（不再是单一占位条目）就不再重复查询
+  if (parent.children.length !== 1 || parent.children[0]?.key !== 'loading') return
+  const apps = await listInstalledApps()
+  parent.children =
+    apps.length > 0
+      ? apps.map((app) => ({
+          key: app.path,
+          label: app.name,
+          ...(app.icon && { iconUrl: app.icon }),
+        }))
+      : [{ key: 'empty', label: '无可用应用', disabled: true }]
+  // 触发 contextMenuItems 的响应式更新（数组内部已变，赋同一引用让 deep watch 生效）
+  contextMenuItems.value = [...items]
+}
 
 function onContextMenuSelect(key: string): void {
   const entry = contextMenu.value?.entry
   if (!entry) return
-  if (key === 'mention') {
-    chatInput.addFileMention(
-      entry.folderAlias ? `${entry.folderAlias}/${entry.relativePath}` : entry.relativePath,
-    )
+  // 「打开方式」子项：key 形如 `open-with/<appPath>`
+  if (key.startsWith('open-with/')) {
+    void openWith(contextMenuAbsPath.value ?? '', {
+      name: '',
+      path: key.slice('open-with/'.length),
+    })
+    return
   }
+  switch (key) {
+    case 'open':
+      void openWith(contextMenuAbsPath.value ?? '')
+      break
+    case 'reveal':
+      void handleReveal()
+      break
+    case 'copy-abs':
+      void handleCopyAbs()
+      break
+    case 'copy-rel':
+      handleCopyRel(entry)
+      break
+    case 'mention':
+      chatInput.addFileMention(
+        entry.folderAlias ? `${entry.folderAlias}/${entry.relativePath}` : entry.relativePath,
+      )
+      break
+  }
+}
+
+async function handleReveal(): Promise<void> {
+  const absPath = contextMenuAbsPath.value
+  if (!absPath) return
+  await window.api.system.showItemInFolder({ path: absPath })
+}
+
+async function handleCopyAbs(): Promise<void> {
+  const absPath = contextMenuAbsPath.value
+  if (absPath) await navigator.clipboard.writeText(absPath)
+}
+
+function handleCopyRel(entry: DirEntry): void {
+  const reference = entry.folderAlias
+    ? `${entry.folderAlias}/${entry.relativePath}`
+    : entry.relativePath
+  void navigator.clipboard.writeText(reference)
 }
 const refreshing = ref(false)
 let searchTimer: ReturnType<typeof setTimeout> | null = null
@@ -332,10 +472,13 @@ const rootError = computed(() => filesStore.directoryErrors.get(''))
 // 旧实现用 { immediate: true }，会在挂载瞬间无条件 reset，与并发进行的 previewFile
 // IPC 产生竞态：readFilePreview 的 await 期间 Vue 挂载 FileTree → immediate watch 触发
 // reset() → previewTabs 被清空 → 预览面板永远无法显示（直到面板被关闭再重开）。
-onMounted(() => {
+onMounted(async () => {
   document.addEventListener('click', closeFolderMenuOnOutsideClick, true)
   selectPrimaryFolder()
   if (workspaceStore.currentWorkspace?.id) void loadRoot()
+  // 右键菜单的「在 Finder 中显示 / 打开方式」文案与可见性按平台变，
+  // 走 useOpenWith 单例（与聊天顶部选择器、引用 pill 共享平台/选中应用状态）。
+  void initOpenWith()
 })
 
 watch(

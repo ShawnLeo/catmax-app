@@ -53,6 +53,20 @@ export const IPC = {
   SYSTEM_TAKE_TRAY_COMMAND: 'system.takeTrayCommand',
   /** Tray: 渲染层上报托盘菜单的门控条件（当前页面能否新建会话） */
   SYSTEM_SET_TRAY_CONTEXT: 'system.setTrayContext',
+  /** File Context Menu: 用系统默认应用打开文件/目录 */
+  SYSTEM_OPEN_PATH: 'system.openPath',
+  /** File Context Menu: 在 Finder/资源管理器中定位文件 */
+  SYSTEM_SHOW_ITEM_IN_FOLDER: 'system.showItemInFolder',
+  /** File Context Menu: 查询能打开文件的应用（macOS「打开方式」） */
+  SYSTEM_OPEN_WITH_APPS: 'system.openWithApps',
+  /** File Context Menu: 用指定应用打开文件 */
+  SYSTEM_OPEN_WITH_APP: 'system.openWithApp',
+  /** Open With: 读回用户选择的全局打开方式应用 */
+  SYSTEM_GET_OPEN_WITH_APP: 'system.getOpenWithApp',
+  /** Open With: 持久化用户选择的全局打开方式应用 */
+  SYSTEM_SET_OPEN_WITH_APP: 'system.setOpenWithApp',
+  /** Open With: 列出系统已安装的应用（扫 /Applications） */
+  SYSTEM_LIST_APPLICATIONS: 'system.listApplications',
   // backend
   BACKEND_LIST: 'backend.list',
   BACKEND_CURRENT: 'backend.current',
@@ -173,6 +187,11 @@ export const STORAGE_KEYS = {
    * 作为新建会话的默认配置。值是 RuntimeConfigSnapshot 的 JSON 字符串。
    */
   LAST_RUNTIME_CONFIG: 'last_runtime_config',
+  /**
+   * Open With: 用户在聊天顶部「打开方式」选择器里选中的应用（{name,path} JSON）。
+   * 全局单选——选中后点任意 @引用 pill 的图标都用它打开。空 = 系统默认。
+   */
+  OPEN_WITH_APP: 'open_with_app',
 } as const
 
 /** 文件预览限制 */

@@ -7,6 +7,7 @@
     >
       <TitleBarControls />
       <div class="flex-1" />
+      <AlwaysOnTopButton />
       <Button variant="ghost" size="sm" class="interactive" @click="router.push('/settings')">
         设置
       </Button>
@@ -75,6 +76,7 @@
 </template>
 
 <script setup lang="ts">
+import AlwaysOnTopButton from '@renderer/components/AlwaysOnTopButton.vue'
 import CatmaxLogo from '@renderer/components/icons/CatmaxLogo.vue'
 import TitleBarControls from '@renderer/components/TitleBarControls.vue'
 import { Button } from '@renderer/components/ui/button'

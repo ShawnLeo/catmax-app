@@ -4,11 +4,18 @@ import { handleRendererRequest } from '../../typed'
 
 import {
   detectProxy,
+  getOpenWithApp,
   getPlatformInfo,
+  listApplications,
   openDialog,
   openExternal,
+  openPath,
+  openWithApp,
+  openWithApps,
   saveImage,
   setTrayContext,
+  setOpenWithApp,
+  showItemInFolder,
   takeTrayCommand,
   windowClose,
   windowIsAlwaysOnTop,
@@ -55,6 +62,25 @@ export function registerSystemHandlers(): void {
   handleRendererRequest<SystemHandlers, 'system.setTrayContext'>(
     'system.setTrayContext',
     setTrayContext,
+  )
+  handleRendererRequest<SystemHandlers, 'system.openPath'>('system.openPath', openPath)
+  handleRendererRequest<SystemHandlers, 'system.showItemInFolder'>(
+    'system.showItemInFolder',
+    showItemInFolder,
+  )
+  handleRendererRequest<SystemHandlers, 'system.openWithApps'>('system.openWithApps', openWithApps)
+  handleRendererRequest<SystemHandlers, 'system.openWithApp'>('system.openWithApp', openWithApp)
+  handleRendererRequest<SystemHandlers, 'system.getOpenWithApp'>(
+    'system.getOpenWithApp',
+    getOpenWithApp,
+  )
+  handleRendererRequest<SystemHandlers, 'system.setOpenWithApp'>(
+    'system.setOpenWithApp',
+    setOpenWithApp,
+  )
+  handleRendererRequest<SystemHandlers, 'system.listApplications'>(
+    'system.listApplications',
+    listApplications,
   )
 }
 

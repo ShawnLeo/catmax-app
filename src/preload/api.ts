@@ -100,6 +100,28 @@ export const api = {
     setTrayContext: requestMain<SystemHandlers, 'system.setTrayContext'>(
       IPC.SYSTEM_SET_TRAY_CONTEXT,
     ),
+    /** File Context Menu: 用系统默认应用打开文件/目录 */
+    openPath: requestMain<SystemHandlers, 'system.openPath'>(IPC.SYSTEM_OPEN_PATH),
+    /** File Context Menu: 在 Finder/资源管理器中定位文件 */
+    showItemInFolder: requestMain<SystemHandlers, 'system.showItemInFolder'>(
+      IPC.SYSTEM_SHOW_ITEM_IN_FOLDER,
+    ),
+    /** File Context Menu: 查询能打开文件的应用（macOS「打开方式」） */
+    openWithApps: requestMain<SystemHandlers, 'system.openWithApps'>(IPC.SYSTEM_OPEN_WITH_APPS),
+    /** File Context Menu: 用指定应用打开文件 */
+    openWithApp: requestMain<SystemHandlers, 'system.openWithApp'>(IPC.SYSTEM_OPEN_WITH_APP),
+    /** Open With: 读回用户选择的全局打开方式应用（null=系统默认） */
+    getOpenWithApp: requestMain<SystemHandlers, 'system.getOpenWithApp'>(
+      IPC.SYSTEM_GET_OPEN_WITH_APP,
+    ),
+    /** Open With: 持久化用户选择的全局打开方式应用 */
+    setOpenWithApp: requestMain<SystemHandlers, 'system.setOpenWithApp'>(
+      IPC.SYSTEM_SET_OPEN_WITH_APP,
+    ),
+    /** Open With: 列出系统已安装的应用（扫 /Applications） */
+    listApplications: requestMain<SystemHandlers, 'system.listApplications'>(
+      IPC.SYSTEM_LIST_APPLICATIONS,
+    ),
     /** Tray: 窗口本来就活着时，托盘菜单的命令走这条 push。 */
     onTrayCommand: (cb: (payload: SystemPushEvents['system:trayCommand']) => void) =>
       subscribeToMainEvent<SystemPushEvents, 'system:trayCommand'>(PUSH.TRAY_COMMAND, cb),

@@ -69,6 +69,7 @@
           <span>{{ activeSectionLabel }}</span>
         </h1>
         <div class="flex-1" />
+        <AlwaysOnTopButton />
         <button
           type="button"
           class="settings-menu-button interactive grid h-8 w-8 place-items-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
@@ -102,6 +103,7 @@
 </template>
 
 <script setup lang="ts">
+import AlwaysOnTopButton from '@renderer/components/AlwaysOnTopButton.vue'
 import AboutSection from '@renderer/components/settings/AboutSection.vue'
 import BackendSection from '@renderer/components/settings/BackendSection.vue'
 import McpSection from '@renderer/components/settings/McpSection.vue'
