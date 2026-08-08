@@ -109,6 +109,10 @@ export const assistantMessageSchema = z.object({
   message: claudeMessageSchema,
   parent_tool_use_id: z.string().nullable().optional(),
   session_id: z.string().optional(),
+  // 写入 jsonl 时 claude 给每一行都带的 ISO 时间戳（"2026-08-05T13:39:04.916Z"）。
+  // 历史回放靠它还原 createdAt——没有它 UI 只能显示 0（1970 年）。
+  // 实时 stream-json 路径不带这个字段，故 optional。
+  timestamp: z.string().optional(),
 })
 
 // ============ user 消息（assistant 之后的 tool_result） ============
@@ -165,6 +169,8 @@ export const userMessageSchema = z.object({
   //   - <local-command-caveat> 等 sentinel
   // 这些消息是喂给模型的，不该在 UI 上当用户气泡渲染。history-mapping 跳过它们。
   isMeta: z.boolean().optional(),
+  // 见 assistantMessageSchema.timestamp。
+  timestamp: z.string().optional(),
 })
 
 // ============ result 消息（turn 结束） ============

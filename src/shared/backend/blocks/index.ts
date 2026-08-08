@@ -5,6 +5,7 @@ import type {
   TextContentBlock,
   ToolCallContentBlock,
 } from './base'
+import type { ClaudeToolGroupContentBlock } from './claude'
 import type {
   CodexActivityContentBlock,
   CodexGeneratedImageContentBlock,
@@ -27,6 +28,7 @@ export interface ContentBlockMap {
   codex_user_input: CodexUserInputContentBlock
   codex_generated_image: CodexGeneratedImageContentBlock
   codex_activity: CodexActivityContentBlock
+  claude_tool_group: ClaudeToolGroupContentBlock
 }
 
 export type BlockType = keyof ContentBlockMap

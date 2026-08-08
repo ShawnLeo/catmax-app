@@ -77,23 +77,27 @@ export function* sdkAssistantToEvents(
   msg: SDKAssistantMessage,
   turnId: string,
 ): Iterable<TurnEvent> {
+  // Message Grouping: 整条 API 消息共享一个 messageId，renderer 据此把 thinking /
+  // 正文 / 多个 tool_use 聚到一条 NormalizedMessage 上——与历史回放按 message.id
+  // 归组的口径一致。
+  const messageId = msg.message.id
   for (const block of msg.message.content) {
     const itemId = sdkBlockId(block)
     switch (block.type) {
       case 'text': {
         const text = (block as { text: string }).text
-        yield { type: 'text_delta', turnId, itemId, text }
+        yield { type: 'text_delta', turnId, itemId, text, messageId }
         break
       }
       case 'thinking': {
         const text = (block as { thinking: string }).thinking
-        yield { type: 'reasoning_delta', turnId, itemId, text }
+        yield { type: 'reasoning_delta', turnId, itemId, text, messageId }
         break
       }
       case 'tool_use': {
         const toolUse = block as unknown as SdkToolUseBlock
         const tool: ToolCallInfo = toolUseToInfo(sdkToToolUse(toolUse))
-        yield { type: 'tool_call_started', turnId, itemId, tool }
+        yield { type: 'tool_call_started', turnId, itemId, tool, messageId }
         break
       }
       default:
@@ -233,6 +237,12 @@ interface PartialBlockState {
   itemId?: string // tool_use 的 id
   toolName?: string // tool_use 的 name（content_block_start 就有）
   toolInputBuffer?: string // input_json_delta 的累积片段
+  /**
+   * 这个 block 所属 API 消息的 id（message_start 带来）。
+   * 存在 block 上而不是只存一个「当前」值——flushPendingToolUse 是 turn 末尾的兜底，
+   * 那时 currentMessageId 已经指向最后一条消息，用它会把早先消息的工具归错组。
+   */
+  messageId?: string
 }
 
 /**
@@ -254,6 +264,8 @@ export class SdkPartialAggregator {
   private firedToolStarts = new Set<string>()
   /** 单调递增序列：给没有 API id 的 block（text/thinking）生成全局唯一 itemId */
   private blockSeq = 0
+  /** 当前 API 消息的 id（message_start 写入），见 PartialBlockState.messageId。 */
+  private currentMessageId: string | undefined
 
   constructor(private readonly turnId: string) {}
 
@@ -281,6 +293,7 @@ export class SdkPartialAggregator {
     const evt = event as {
       type: string
       index?: number
+      message?: { id?: string }
       content_block?: { type: string; id?: string; name?: string }
       delta?: { type: string; text?: string; thinking?: string; partial_json?: string }
     }
@@ -290,6 +303,8 @@ export class SdkPartialAggregator {
         // 新的 assistant message 开始：content_block index 会从 0 重新计数，
         // 清空 blocks 防止旧 entry 被同 index 的新块误命中 / Map 无限增长。
         this.blocks.clear()
+        // Message Grouping: 这里是 API 消息边界，也是 renderer 的消息归组边界。
+        this.currentMessageId = evt.message?.id
         break
       }
       case 'content_block_start': {
@@ -297,6 +312,7 @@ export class SdkPartialAggregator {
         const block = evt.content_block
         if (idx === undefined || !block) break
         const entry: PartialBlockState = { type: block.type }
+        if (this.currentMessageId !== undefined) entry.messageId = this.currentMessageId
         if (block.type === 'tool_use') {
           // tool_use 有 API 提供的全局唯一 id，直接用
           if (block.id) entry.itemId = block.id
@@ -323,6 +339,7 @@ export class SdkPartialAggregator {
               turnId: this.turnId,
               itemId: entry.itemId,
               text: delta.text,
+              ...(entry.messageId !== undefined ? { messageId: entry.messageId } : {}),
             })
           }
         } else if (delta.type === 'thinking_delta' && typeof delta.thinking === 'string') {
@@ -332,6 +349,7 @@ export class SdkPartialAggregator {
               turnId: this.turnId,
               itemId: entry.itemId,
               text: delta.thinking,
+              ...(entry.messageId !== undefined ? { messageId: entry.messageId } : {}),
             })
           }
         } else if (delta.type === 'input_json_delta' && typeof delta.partial_json === 'string') {
@@ -378,7 +396,13 @@ export class SdkPartialAggregator {
       input,
     })
 
-    return { type: 'tool_call_started', turnId: this.turnId, itemId: entry.itemId, tool }
+    return {
+      type: 'tool_call_started',
+      turnId: this.turnId,
+      itemId: entry.itemId,
+      tool,
+      ...(entry.messageId !== undefined ? { messageId: entry.messageId } : {}),
+    }
   }
 }
 

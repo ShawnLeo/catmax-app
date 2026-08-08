@@ -700,3 +700,102 @@ describe('message store reconcileTurnRun', () => {
     expect(reasoning?.endedAt).not.toBeUndefined()
   })
 })
+
+/**
+ * Message Grouping: 带 messageId 的后端（claude）按 API 消息归组，不带的（codex）
+ * 保持按 item 建消息。这两条一起决定了「实时跑完的样子」能不能等于「从历史打开的样子」。
+ */
+describe('message store 消息归组', () => {
+  beforeEach(() => {
+    setActivePinia(createPinia())
+  })
+
+  test('同一条 API 消息的思考 / 正文 / 多个工具聚成一条消息', () => {
+    const store = useMessageStore()
+    store.setCurrentSession('s1')
+
+    store.applyEvent('s1', {
+      type: 'reasoning_delta',
+      turnId: 't1',
+      itemId: 'thinking-0',
+      text: '想一下',
+      messageId: 'msg_1',
+    })
+    store.applyEvent('s1', {
+      type: 'text_delta',
+      turnId: 't1',
+      itemId: 'text-1',
+      text: '我来读文件',
+      messageId: 'msg_1',
+    })
+    store.applyEvent('s1', {
+      type: 'tool_call_started',
+      turnId: 't1',
+      itemId: 'tu1',
+      tool: { kind: 'file_read', title: 'Read: a.txt' },
+      messageId: 'msg_1',
+    })
+
+    expect(store.messages).toHaveLength(1)
+    expect(store.messages[0]!.id).toBe('msg_1')
+    expect(store.messages[0]!.blocks?.map((b) => b.type)).toEqual([
+      'reasoning',
+      'text',
+      'tool_call',
+    ])
+  })
+
+  test('不同 API 消息各自成条', () => {
+    const store = useMessageStore()
+    store.setCurrentSession('s1')
+
+    store.applyEvent('s1', {
+      type: 'text_delta',
+      turnId: 't1',
+      itemId: 'text-0',
+      text: 'A',
+      messageId: 'msg_1',
+    })
+    store.applyEvent('s1', {
+      type: 'text_delta',
+      turnId: 't1',
+      itemId: 'text-1',
+      text: 'B',
+      messageId: 'msg_2',
+    })
+
+    expect(store.messages.map((m) => m.id)).toEqual(['msg_1', 'msg_2'])
+  })
+
+  test('工具完成事件只带 tool_use id，仍能落回归组后的消息', () => {
+    const store = useMessageStore()
+    store.setCurrentSession('s1')
+
+    store.applyEvent('s1', {
+      type: 'tool_call_started',
+      turnId: 't1',
+      itemId: 'tu1',
+      tool: { kind: 'shell_command', title: 'Bash: ls' },
+      messageId: 'msg_1',
+    })
+    store.applyEvent('s1', {
+      type: 'tool_call_completed',
+      turnId: 't1',
+      itemId: 'tu1',
+      output: { ok: true, summary: 'a.txt' },
+    })
+
+    const block = store.messages[0]!.blocks?.find((b) => b.type === 'tool_call')
+    expect(block?.type === 'tool_call' && block.status).toBe('completed')
+  })
+
+  test('不带 messageId 的后端（codex）仍按 item 建消息', () => {
+    const store = useMessageStore()
+    store.setCurrentSession('s1')
+
+    store.applyEvent('s1', { type: 'text_delta', turnId: 't1', itemId: 'i1', text: 'A' })
+    store.applyEvent('s1', { type: 'text_delta', turnId: 't1', itemId: 'i2', text: 'B' })
+
+    expect(store.messages.map((m) => m.id)).toEqual(['i1', 'i2'])
+  })
+})

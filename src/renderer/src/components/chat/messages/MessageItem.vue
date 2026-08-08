@@ -262,13 +262,18 @@ function isReasoningStreaming(block: TextBlock): boolean {
 }
 
 /**
- * 思考耗时（秒）。取 startedAt → endedAt 的差值。
- * 任一字段缺失（历史消息反推时可能没有）→ 返回 null，UI 不显示时长。
+ * 思考耗时（秒）——只认后端给的权威 durationMs，拿不到就不显示。
+ *
+ * 曾经在缺 durationMs 时用 startedAt → endedAt 现算兜底，但那两个时间戳只有实时流
+ * 才有（渲染进程 Date.now() 打的），磁盘上的历史一个都没有。结果就是同一段思考，
+ * 刚跑完显示"已思考 5s"，重开会话变成光秃秃的"已思考"。
+ *
+ * codex 由 app-server 提供 turn.durationMs，历史与实时都有，不受影响；claude 两边
+ * 都没有，于是两边都不显示——与其给历史编一个对不上的秒数，不如两边都不给。
  */
 function reasoningDurationSec(block: TextBlock): number | null {
   if (block.durationMs !== undefined) return Math.max(0, block.durationMs / 1000)
-  if (block.startedAt === undefined || block.endedAt === undefined) return null
-  return Math.max(0, (block.endedAt - block.startedAt) / 1000)
+  return null
 }
 
 /** user 消息是否至少有一个可见内容。 */
@@ -319,9 +324,13 @@ function onCopy(): void {
  *   - 否则全 completed + ok → 'completed'（绿色稳态）
  */
 const assistantStatus = computed<'text' | 'running' | 'completed' | 'failed'>(() => {
-  const tools = blocks.value.filter(
-    (block): block is ToolCallContentBlock => block.type === 'tool_call',
-  )
+  // 折叠组里的工具要一起算——否则 claude 折叠后这条消息看不到任何 tool_call，
+  // 一整段跑过工具的消息会被判成"纯文本回复"、色点退回灰色。
+  const tools = blocks.value.flatMap((block): ToolCallContentBlock[] => {
+    if (block.type === 'tool_call') return [block]
+    if (block.type === 'claude_tool_group') return block.tools
+    return []
+  })
   if (tools.length === 0) return 'text'
   if (tools.some((t) => t.status === 'running')) return 'running'
   if (

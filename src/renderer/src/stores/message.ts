@@ -292,7 +292,7 @@ export const useMessageStore = defineStore('message', () => {
       }
       case 'text_delta': {
         if (s.completedTextItemIds.has(turnItemKey(event.turnId, event.itemId))) break
-        const msg = findOrCreateAssistantMessage(s, event.turnId, event.itemId)
+        const msg = findOrCreateAssistantMessage(s, event.turnId, event.itemId, event.messageId)
         if (!msg.blocks) msg.blocks = []
         const contentBlock = msg.blocks.find(
           (block) => block.type === 'text' && block.id === `${event.itemId}-text`,
@@ -320,7 +320,7 @@ export const useMessageStore = defineStore('message', () => {
         break
       }
       case 'reasoning_delta': {
-        const msg = findOrCreateAssistantMessage(s, event.turnId, event.itemId)
+        const msg = findOrCreateAssistantMessage(s, event.turnId, event.itemId, event.messageId)
         if (!msg.blocks) msg.blocks = []
         const now = Date.now()
         const contentBlock = msg.blocks.find(
@@ -387,7 +387,7 @@ export const useMessageStore = defineStore('message', () => {
         break
       }
       case 'tool_call_started': {
-        const msg = findOrCreateAssistantMessage(s, event.turnId, event.itemId)
+        const msg = findOrCreateAssistantMessage(s, event.turnId, event.itemId, event.messageId)
         if (!msg.blocks) msg.blocks = []
         msg.blocks.push({
           id: event.itemId,
@@ -412,7 +412,7 @@ export const useMessageStore = defineStore('message', () => {
         break
       }
       case 'tool_call_completed': {
-        const msg = findMessageByItemId(s, event.turnId, event.itemId)
+        const msg = findMessageByBlockId(s, event.turnId, event.itemId)
         const contentBlock = msg?.blocks?.find(
           (block) => block.type === 'tool_call' && block.id === event.itemId,
         )
@@ -442,7 +442,7 @@ export const useMessageStore = defineStore('message', () => {
 
         const itemId = event.task.toolUseId
         if (!itemId) break
-        const msg = findMessageByItemId(s, event.turnId, itemId)
+        const msg = findMessageByBlockId(s, event.turnId, itemId)
         const isCompleted = event.task.status === 'completed'
         const toolStatus =
           event.task.status === 'running' ? 'running' : isCompleted ? 'completed' : 'failed'
@@ -646,18 +646,28 @@ export const useMessageStore = defineStore('message', () => {
     return false
   }
 
+  /**
+   * Message Grouping: 找到（或新建）这个 block 应该落到的 assistant 消息。
+   *
+   * `messageId` 是后端给的「一条模型消息」的 id（claude = API message.id）。给了就用它
+   * 当消息 id，于是同一条模型消息里的 thinking / 正文 / 多个工具调用聚成一条消息——
+   * 与历史回放按 message.id 归组的口径一致（见 claude/history-mapping.ts 的 Same-Id Merge）。
+   *
+   * 没给的后端（codex）退回按 itemId 建消息，即每个 item 一条消息，行为不变。
+   */
   function findOrCreateAssistantMessage(
     s: SessionState,
     turnId: string,
     itemId: string,
+    messageId?: string,
   ): NormalizedMessage {
-    // 先找已有的同 itemId 的 message
-    let msg = findMessageByItemId(s, turnId, itemId)
+    const id = messageId ?? itemId
+    let msg = findMessageByItemId(s, turnId, id)
     if (msg) return msg
 
     // 否则创建新的 assistant message
     msg = {
-      id: itemId,
+      id,
       role: 'assistant',
       turnId,
       blocks: [],
@@ -673,6 +683,26 @@ export const useMessageStore = defineStore('message', () => {
     itemId: string,
   ): NormalizedMessage | undefined {
     return s.messages.find((m) => m.turnId === turnId && m.id === itemId)
+  }
+
+  /**
+   * 按 block id 反查它所在的消息。
+   *
+   * 工具的完成事件（tool_call_completed / background_task_updated）只带 tool_use id，
+   * 拿不到它所属的 messageId——归组后消息 id 不再等于 block id，不能再用 id 直接命中。
+   * 未归组的后端（codex）消息 id 恰好等于 block id，扫描同样能找到，行为不变。
+   */
+  function findMessageByBlockId(
+    s: SessionState,
+    turnId: string,
+    blockId: string,
+  ): NormalizedMessage | undefined {
+    return s.messages.find(
+      (m) =>
+        m.turnId === turnId &&
+        ((m.blocks?.some((b) => b.id === blockId) ?? false) ||
+          (m.toolBlocks?.some((b) => b.id === blockId) ?? false)),
+    )
   }
 
   function upsertCodexActivityBlock(

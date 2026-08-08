@@ -426,16 +426,27 @@ export interface TokenUsage {
 /**
  * TurnEvent —— Adapter 输出的归一化事件流。
  * BackendManager 把这些事件经 IPC 推到 renderer。
+ *
+ * Message Grouping: 部分事件带可选的 `messageId`——后端侧「一条模型消息」的稳定 id
+ * （claude 用 API 的 message.id）。renderer 拿它当 NormalizedMessage 的 id，把同一条
+ * 模型消息里的 thinking / 正文 / 多个工具调用聚到一条消息上。
+ *
+ * 不带 `messageId` 的后端（codex）退回按 itemId 建消息，行为不变。
+ *
+ * 这个字段是「实时态 = 历史态」的地基：历史回放天然按 message.id 归组
+ * （见 claude/history-mapping.ts 的 Same-Id Merge），实时侧过去按 block 粒度建消息，
+ * 同一个会话实时看是几十条消息、重开后变成十几条，时间轴与改动卡片的粒度全都对不上。
  */
 export type TurnEvent =
   | { type: 'turn_started'; turnId: string; sessionId: string }
-  | { type: 'text_delta'; turnId: string; itemId: string; text: string }
+  | { type: 'text_delta'; turnId: string; itemId: string; text: string; messageId?: string }
   | {
       type: 'reasoning_delta'
       turnId: string
       itemId: string
       text: string
       completedLabel?: string
+      messageId?: string
     }
   | {
       type: 'content_block_upsert'
@@ -468,6 +479,7 @@ export type TurnEvent =
       turnId: string
       itemId: string
       tool: ToolCallInfo
+      messageId?: string
     }
   | {
       type: 'tool_call_completed'

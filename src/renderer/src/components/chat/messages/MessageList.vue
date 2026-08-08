@@ -46,7 +46,7 @@
           codex 由它自己的 CodexTurn 渲染同一个组件；这里覆盖的是没有专属会话渲染器的
           后端（claude 及后续新增的），改动数据由 lib/review.ts 从工具调用现推。
         -->
-          <template v-for="(message, index) in messageStore.messages" :key="message.id">
+          <template v-for="(message, index) in renderMessages" :key="message.id">
             <MessageItem
               :message="message"
               :show-thinking="showThinking"
@@ -171,6 +171,7 @@ import type { NormalizedMessage } from '@shared/backend/types'
 import { AlertCircleIcon, ArrowDownIcon, Loader2Icon } from 'lucide-vue-next'
 import { computed, nextTick, onMounted, onUnmounted, provide, ref, watch } from 'vue'
 
+import { foldClaudeToolGroups } from '../blocks/claude/fold-tool-groups'
 import { getBackendConversationRenderer } from '../blocks/plugin-registry'
 import ChangesCard from '../changes/ChangesCard.vue'
 
@@ -224,6 +225,21 @@ const conversationClass = computed(() =>
 )
 
 /**
+ * Claude Tool Folding: 实际渲染用的消息数组。
+ *
+ * claude 把相邻的工具调用折叠成一行可展开的摘要（见 blocks/claude/fold-tool-groups.ts），
+ * 折叠会合并块、并丢弃「工具已全部并进前一组」的空消息，所以这个数组和
+ * messageStore.messages 长度不同——**凡是按 index 定位的逻辑都必须用它**。
+ *
+ * 其余后端原样透传，行为不变。
+ */
+const renderMessages = computed(() =>
+  backendStore.currentId === 'claude'
+    ? foldClaudeToolGroups(messageStore.messages)
+    : messageStore.messages,
+)
+
+/**
  * Assistant 时间轴首尾：**每一轮**的首 / 末 assistant 消息 index——
  * 用于 MessageItem 决定竖线画到哪里:
  *   - 本轮第一条 assistant:色点上方不画竖线(上方接的是本轮的 user 提问)
@@ -233,15 +249,15 @@ const conversationClass = computed(() =>
  * 边界判据是「相邻 + 同 turnId」,不是全局首尾:
  *   - 相邻——中间夹了 user 气泡 / compact / 中断条目就断开(这些条目全宽渲染,
  *     竖线本来也接不上)
- *   - 同 turnId——兜住"连续两轮之间没有可见分隔"的情况;历史回放的消息 turnId
- *     恒为 'history'(claude/history-mapping.ts),这条判据自动失效、退化成纯相邻性,
- *     正是历史回放需要的效果。
+ *   - 同 turnId——兜住"连续两轮之间没有可见分隔"的情况。历史回放过去恒为
+ *     'history'、这条判据退化成纯相邻性；现在历史也按真实轮次切成 `history-N`
+ *     (claude/history-mapping.ts)，与实时流一样逐轮断开时间轴。
  */
 function inSameTimeline(a: NormalizedMessage, b: NormalizedMessage): boolean {
   return a.role === 'assistant' && b.role === 'assistant' && a.turnId === b.turnId
 }
 const assistantTimelineEdges = computed(() => {
-  const msgs = messageStore.messages
+  const msgs = renderMessages.value
   const first = new Set<number>()
   const last = new Set<number>()
   for (let i = 0; i < msgs.length; i++) {
@@ -267,14 +283,19 @@ const turnChanges = computed(() => {
   const byLastIndex = new Map<number, { files: ReviewFile[]; stats: DiffStats }>()
   if (backendConversationRenderer.value) return byLastIndex
 
-  const lastIndexByTurn = new Map<string, number>()
+  // 改动内容从**原始**消息推：折叠会把工具收进 claude_tool_group、并丢弃因此
+  // 变空的消息，拿折叠后的数组去扫会漏掉那些工具改的文件。
   const messagesByTurn = new Map<string, NormalizedMessage[]>()
-  messageStore.messages.forEach((message, index) => {
-    if (!message.turnId) return
-    lastIndexByTurn.set(message.turnId, index)
+  for (const message of messageStore.messages) {
+    if (!message.turnId) continue
     const list = messagesByTurn.get(message.turnId)
     if (list) list.push(message)
     else messagesByTurn.set(message.turnId, [message])
+  }
+  // 卡片**位置**则按渲染数组定位——插入点是 v-for 的 index。
+  const lastIndexByTurn = new Map<string, number>()
+  renderMessages.value.forEach((message, index) => {
+    if (message.turnId) lastIndexByTurn.set(message.turnId, index)
   })
 
   for (const [turnId, messages] of messagesByTurn) {

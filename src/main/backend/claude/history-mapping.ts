@@ -17,6 +17,7 @@
  */
 import { randomUUID } from 'node:crypto'
 
+import type { ToolCallContentBlock } from '@shared/backend/blocks'
 import type {
   AssistantMessage,
   ClaudeStreamMessage,
@@ -180,22 +181,31 @@ function appendAssistantBlocks(
     if (block.type === 'text') {
       const text = (block as TextContent).text
       if (text) {
-        target.textBlocks!.push({ id: randomUUID(), text, kind: 'text' })
+        const id = randomUUID()
+        target.textBlocks!.push({ id, text, kind: 'text' })
+        target.blocks!.push({ id, type: 'text', text })
       }
     } else if (block.type === 'thinking') {
       const text = (block as ThinkingContent).thinking
       if (text) {
-        target.textBlocks!.push({ id: randomUUID(), text, kind: 'reasoning' })
+        const id = randomUUID()
+        target.textBlocks!.push({ id, text, kind: 'reasoning' })
+        target.blocks!.push({ id, type: 'reasoning', text })
       }
     } else if (block.type === 'tool_use') {
       const tu = block as ToolUseContent
       const info = toolUseToInfo(tu)
-      target.toolBlocks!.push({
+      // blocks 与 toolBlocks 共享同一个对象：后面 tool_result 回填 status/output 时
+      // 只改一处，两个视图同时生效（拷贝会让 blocks 永远停在 running）。
+      const toolBlock: ToolCallContentBlock = {
         id: tu.id,
+        type: 'tool_call',
         info,
         status: 'running', // 等 tool_result 改成 completed/failed
         // 历史回放没有精确 startedAt，但 UI 可以从 taskStats.totalDurationMs 反推（非必须）
-      })
+      }
+      target.blocks!.push(toolBlock)
+      target.toolBlocks!.push(toolBlock)
       // 即使 target 还没 flush，也按 id 索引——后面在 result 里查找
       pendingToolUseIds.set(tu.id, { info, messageId: target.id })
     }
@@ -203,10 +213,29 @@ function appendAssistantBlocks(
   }
 }
 
+/**
+ * jsonl 每行的 ISO timestamp → Unix ms。
+ *
+ * 缺失 / 非法时回落到 0——那是 stream-json 实时路径（不带这个字段）和损坏行的形态，
+ * 与加上时间戳之前的行为一致，UI 侧 formatMessageTime 已经能处理。
+ */
+function parseTimestamp(value: string | undefined): number {
+  if (!value) return 0
+  const ms = Date.parse(value)
+  return Number.isNaN(ms) ? 0 : ms
+}
+
 /** 把重放的 claude 消息流转成 NormalizedMessage[] */
 export function claudeReplayToMessages(messages: ClaudeStreamMessage[]): NormalizedMessage[] {
   const result: NormalizedMessage[] = []
   let currentAssistant: NormalizedMessage | null = null
+  // 历史轮次序号。实时侧每轮有真实 turnId，历史侧过去恒为 'history'——整个会话被
+  // 当成一轮，MessageList 的时间轴首尾判定（assistantTimelineEdges）和每轮改动卡片
+  // （turnChanges）随之退化：改动卡从"每轮一张"变成"整会话一张"。
+  // 轮次边界 = 用户的一次真实输入（sentinel / meta / tool_result 都不算），
+  // 与实时侧 startTurn 的口径一致。
+  let turnSeq = 0
+  const currentTurnId = (): string => `history-${turnSeq}`
   // tool_use_id → 它所在的 assistant message（已 push 到 result）
   const pendingToolUseIds = new Map<string, { info: ToolCallInfo; messageId: string }>()
   // 上一条 user 是命令调用（<command-message>）时置为 true——
@@ -265,10 +294,15 @@ export function claudeReplayToMessages(messages: ClaudeStreamMessage[]): Normali
       const assistant: NormalizedMessage = {
         id: assistantMsg.message.id,
         role: 'assistant',
-        turnId: 'history',
+        turnId: currentTurnId(),
+        // blocks 直接按 content 原顺序装配，不再靠 upgradeMessageBlocks 兜底——
+        // 那条兜底路径是「context → tool → text」的固定次序，会把工具全部排到正文
+        // 前面，与实时流的到达顺序（thinking → 正文 → 工具）不同，同一段对话历史
+        // 读起来和刚跑完时不是一个样子。
+        blocks: [],
         textBlocks: [],
         toolBlocks: [],
-        createdAt: 0,
+        createdAt: parseTimestamp(assistantMsg.timestamp),
       }
       appendAssistantBlocks(assistant, assistantMsg, pendingToolUseIds)
       currentAssistant = assistant
@@ -379,12 +413,13 @@ export function claudeReplayToMessages(messages: ClaudeStreamMessage[]): Normali
         // （复刻 /compact 的拦截渲染模式。）命中后清掉命令展开标志并跳过后续分支。
         if (matchInterruptMarker(rawText)) {
           lastWasCommandInvocation = false
+          // 中断标记终结当前轮，不开启新轮——它是上一轮的结局，不是用户的新输入。
           result.push({
             id: randomUUID(),
             role: 'user',
-            turnId: 'history',
+            turnId: currentTurnId(),
             textBlocks: [{ id: randomUUID(), text: rawText.trim(), kind: 'text' }],
-            createdAt: 0,
+            createdAt: parseTimestamp(userMsg.timestamp),
           })
           continue
         }
@@ -412,12 +447,14 @@ export function claudeReplayToMessages(messages: ClaudeStreamMessage[]): Normali
             })
           }
           pendingCompactSummary = null
+          // slash command 是用户主动发起的一轮，与真实输入同等对待。
+          turnSeq++
           result.push({
             id: randomUUID(),
             role: 'user',
-            turnId: 'history',
+            turnId: currentTurnId(),
             textBlocks,
-            createdAt: 0,
+            createdAt: parseTimestamp(userMsg.timestamp),
           })
           lastWasCommandInvocation = true
         } else if (lastWasCommandInvocation) {
@@ -430,13 +467,14 @@ export function claudeReplayToMessages(messages: ClaudeStreamMessage[]): Normali
           // text 为空（只有 IDE 标签没实际 prompt）且无 contextBlocks 时不 push——
           // 避免历史里出现空气泡
           if (text.trim() || blocks.length > 0) {
+            turnSeq++
             result.push({
               id: randomUUID(),
               role: 'user',
-              turnId: 'history',
+              turnId: currentTurnId(),
               textBlocks: text.trim() ? [{ id: randomUUID(), text, kind: 'text' }] : [],
               ...(blocks.length > 0 ? { contextBlocks: blocks } : {}),
-              createdAt: 0,
+              createdAt: parseTimestamp(userMsg.timestamp),
             })
           }
         }
