@@ -25,6 +25,8 @@ export function foldClaudeToolGroups(messages: NormalizedMessage[]): NormalizedM
   const result: NormalizedMessage[] = []
   // 当前敞开的组：后续相邻工具直接并进来。null 表示连续性已被打断。
   let openGroup: ClaudeToolGroupContentBlock | null = null
+  // 每个组连同它所在的位置——收尾时只回改这些坑位，见函数末尾的说明。
+  const slots: { blocks: ContentBlock[]; index: number; group: ClaudeToolGroupContentBlock }[] = []
 
   for (const message of messages) {
     if (message.role !== 'assistant') {
@@ -55,6 +57,7 @@ export function foldClaudeToolGroups(messages: NormalizedMessage[]): NormalizedM
         tools: [tool],
         status: 'running',
       }
+      slots.push({ blocks: folded, index: folded.length, group: openGroup })
       folded.push(openGroup)
     }
 
@@ -67,16 +70,19 @@ export function foldClaudeToolGroups(messages: NormalizedMessage[]): NormalizedM
 
   // 组是跨消息生长的，只有装配完成后才知道它最终多大——状态结算和"够不够格成组"
   // 都必须等到这里，边生长边判会拿到中间态。
-  for (const message of result) {
-    if (!message.blocks) continue
-    message.blocks = message.blocks.map((block) => {
-      if (block.type !== 'claude_tool_group') return block
-      // 只有一个工具就不套这层壳：摘要行显示的本来就是这个工具的标题，套上去
-      // 只是让用户多点一次（先展开组、再展开卡片）才能看到输出。
-      if (block.tools.length === 1) return block.tools[0]!
-      block.status = groupStatus(block.tools)
-      return block
-    })
+  //
+  // ⚠️ 收尾只准动上面新建的 folded 数组和组对象，**绝不能回写 messages 里的原消息**。
+  // 这个函数跑在 MessageList 的 computed 里，而 messages 是 store 里的 reactive 对象：
+  // 写一下就是"reactive effect 改自己的依赖"，Vue 会一轮轮重渲染下去。dev 下撞到
+  // Maximum recursive updates exceeded 还能刹住（报错 + 界面卡住），打包后没有这道
+  // 检查，渲染进程直接空转——窗口是自绘的（frame: false），连关闭按钮都点不动。
+  // 之前遍历整个 result 做 `message.blocks = ...`，非 assistant 那支 push 进来的是原
+  // 对象本体，正好踩中这条。
+  for (const { blocks, index, group } of slots) {
+    // 只有一个工具就不套这层壳：摘要行显示的本来就是这个工具的标题，套上去
+    // 只是让用户多点一次（先展开组、再展开卡片）才能看到输出。
+    if (group.tools.length === 1) blocks[index] = group.tools[0]!
+    else group.status = groupStatus(group.tools)
   }
 
   return result

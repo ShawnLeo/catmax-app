@@ -8,7 +8,7 @@
  * 每条都对照过代码：
  * - 拖放 / 右键添加：useChatFileDrop、FileTree 的右键菜单
  * - `@路径`：file-mention.ts（拖放和右键写进去的就是它，手打会触发联想，见 lib/autocomplete）
- * - 粘贴代码成片段：Composer.onPaste 的多行 + 代码符号启发式
+ * - 「粘贴代码成片段」已随 Composer.onPaste 一并停用（见 Composer.vue），提示条目暂注释掉，避免宣传已不存在的能力
  * - `/compact`：ChatView.onSend 里对 `/compact` 的特判
  * - Shift+Enter：仅在 sendOnEnter 打开时成立，所以由调用方按设置过滤（见 ENTER_HINT）
  */
@@ -25,7 +25,8 @@ export const COMPOSER_HINTS = [
   '拖一个文件夹进来，让我看看整个目录',
   '在文件树上右键，可以直接添加到对话',
   '输入 @ 就能搜工作区里的文件，↑↓ 选，回车确认',
-  '粘贴一段多行代码，会自动收成一个片段附件',
+  // 「粘贴代码自动收成片段附件」提示已停用——对应功能 Composer.onPaste 当前被注释掉，不再宣传该能力
+  // '粘贴一段多行代码，会自动收成一个片段附件',
   '输入 /compact 可以压缩当前上下文',
   '描述你想做什么，不用先想好怎么做',
 ] as const

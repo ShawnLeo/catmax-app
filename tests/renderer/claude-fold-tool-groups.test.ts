@@ -171,4 +171,29 @@ describe('foldClaudeToolGroups', () => {
     expect(folded).toHaveLength(2)
     expect(groups(folded)).toHaveLength(0)
   })
+
+  test('不写回入参消息——它跑在 computed 里，改 store 就是改自己的依赖', () => {
+    // 这个函数是 MessageList 里 renderMessages computed 的全部内容，而 messages 是
+    // message store 里的 reactive 对象。往回写一笔就构成「reactive effect 改自己的
+    // 依赖」，Vue 会一轮轮重渲染：dev 下撞 Maximum recursive updates exceeded，打包后
+    // 没有这道刹车，渲染进程直接转死（窗口自绘，连关闭按钮都点不动）。
+    const input = [
+      user('u1', 't1', 'hi'),
+      assistant('m1', 't1', [tool('a')]),
+      assistant('m2', 't1', [tool('b')]),
+    ]
+    const snapshot = input.map((message) => ({ message, blocks: message.blocks }))
+
+    foldClaudeToolGroups(input)
+
+    for (const { message, blocks } of snapshot) {
+      // 数组本体必须是同一个引用——重新赋一个内容相同的新数组同样会触发 reactivity
+      expect(message.blocks).toBe(blocks)
+    }
+    expect(input.map((m) => m.blocks!.map((b) => b.type))).toEqual([
+      ['text'],
+      ['tool_call'],
+      ['tool_call'],
+    ])
+  })
 })
